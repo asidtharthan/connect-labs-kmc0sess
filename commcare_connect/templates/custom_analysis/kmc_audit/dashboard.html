@@ -26,27 +26,23 @@
   </div>
   {% else %}
 
-  {# ─────────── KPI strip ─────────── #}
-  <div class="flex flex-wrap items-stretch divide-x divide-gray-200 border border-gray-200 rounded-md bg-white mb-4 text-sm">
-    <div class="px-4 py-2.5 flex-1 min-w-[140px]">
-      <div class="text-[10px] font-medium text-gray-500 uppercase tracking-wide">FLWs</div>
-      <div class="font-semibold text-gray-900 tabular-nums">
-        {{ summary.total_flws }}<span class="text-gray-400 font-normal"> · <span x-text="filteredRows.length"></span> shown</span>
-      </div>
+  {# ─────────── KPI cards (matches Connect Interviews layout) ─────────── #}
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+    <div class="bg-white border border-gray-200 rounded-md p-3">
+      <div class="text-[11px] font-medium text-gray-500 uppercase tracking-wider">FLWs</div>
+      <div class="text-xl font-bold text-gray-800 mt-1 tabular-nums">{{ summary.total_flws }}</div>
     </div>
-    <div class="px-4 py-2.5 flex-1 min-w-[140px]">
-      <div class="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Priority flagged</div>
-      <div class="font-semibold text-red-700 tabular-nums">{{ summary.flws_with_priority_flag }}</div>
+    <div class="bg-white border border-gray-200 rounded-md p-3">
+      <div class="text-[11px] font-medium text-gray-500 uppercase tracking-wider">Priority flagged</div>
+      <div class="text-xl font-bold text-red-600 mt-1 tabular-nums">{{ summary.flws_with_priority_flag }}</div>
     </div>
-    <div class="px-4 py-2.5 flex-1 min-w-[140px]">
-      <div class="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Excluded</div>
-      <div class="font-semibold text-gray-700 tabular-nums">
-        {{ summary.flws_excluded }}<span class="text-gray-400 font-normal"> · &lt;20 cases</span>
-      </div>
+    <div class="bg-white border border-gray-200 rounded-md p-3">
+      <div class="text-[11px] font-medium text-gray-500 uppercase tracking-wider">Excluded</div>
+      <div class="text-xl font-bold text-gray-500 mt-1 tabular-nums">{{ summary.flws_excluded }}</div>
     </div>
-    <div class="px-4 py-2.5 flex-1 min-w-[140px]">
-      <div class="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Selected</div>
-      <div class="font-semibold text-gray-900 tabular-nums" x-text="selected.length"></div>
+    <div class="bg-white border border-gray-200 rounded-md p-3">
+      <div class="text-[11px] font-medium text-gray-500 uppercase tracking-wider">Selected</div>
+      <div class="text-xl font-bold text-blue-600 mt-1 tabular-nums" x-text="selected.length"></div>
     </div>
   </div>
 
