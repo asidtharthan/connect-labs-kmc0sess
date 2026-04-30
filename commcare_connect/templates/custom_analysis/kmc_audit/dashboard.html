@@ -12,7 +12,7 @@
   <div class="mb-5">
     <h1 class="text-xl font-semibold text-gray-900">KMC Audit Dashboard</h1>
     <p class="text-sm text-gray-500 mt-0.5">
-      Quality flags across {{ summary.opportunities_loaded|length|default:0 }} of {{ all_kmc_opportunities|length }} KMC opportunities
+      Quality flags across all KMC opportunities
       {% if summary.opportunities_failed %}
         <span class="text-red-600">— {{ summary.opportunities_failed|length }} failed to load</span>
       {% endif %}
@@ -27,28 +27,26 @@
   {% else %}
 
   {# ─────────── KPI strip ─────────── #}
-  <div class="grid grid-cols-2 sm:grid-cols-4 gap-px bg-gray-200 border border-gray-200 rounded-md overflow-hidden mb-4">
-    <div class="bg-white px-4 py-3">
-      <div class="text-[10px] font-medium text-gray-500 uppercase tracking-wider">FLWs analyzed</div>
-      <div class="text-xl font-semibold text-gray-900 mt-0.5 tabular-nums">{{ summary.total_flws }}</div>
-      <div class="text-[11px] text-gray-400"><span x-text="filteredRows.length"></span> matching</div>
-    </div>
-    <div class="bg-white px-4 py-3">
-      <div class="text-[10px] font-medium text-gray-500 uppercase tracking-wider">≥1 priority flag</div>
-      <div class="text-xl font-semibold text-red-700 mt-0.5 tabular-nums">{{ summary.flws_with_priority_flag }}</div>
-      <div class="text-[11px] text-gray-400">need review</div>
-    </div>
-    <div class="bg-white px-4 py-3">
-      <div class="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Excluded</div>
-      <div class="text-xl font-semibold text-gray-700 mt-0.5 tabular-nums">{{ summary.flws_excluded }}</div>
-      <div class="text-[11px] text-gray-400">&lt;20 cases</div>
-    </div>
-    <div class="bg-white px-4 py-3">
-      <div class="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Selected</div>
-      <div class="text-xl font-semibold text-gray-900 mt-0.5 tabular-nums" x-text="selected.length"></div>
-      <div class="text-[11px] text-gray-400">
-        <span x-text="selectedOppIds().length"></span> opportunit<span x-text="selectedOppIds().length === 1 ? 'y' : 'ies'"></span>
+  <div class="flex flex-wrap items-stretch divide-x divide-gray-200 border border-gray-200 rounded-md bg-white mb-4 text-sm">
+    <div class="px-4 py-2.5 flex-1 min-w-[140px]">
+      <div class="text-[10px] font-medium text-gray-500 uppercase tracking-wide">FLWs</div>
+      <div class="font-semibold text-gray-900 tabular-nums">
+        {{ summary.total_flws }}<span class="text-gray-400 font-normal"> · <span x-text="filteredRows.length"></span> shown</span>
       </div>
+    </div>
+    <div class="px-4 py-2.5 flex-1 min-w-[140px]">
+      <div class="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Priority flagged</div>
+      <div class="font-semibold text-red-700 tabular-nums">{{ summary.flws_with_priority_flag }}</div>
+    </div>
+    <div class="px-4 py-2.5 flex-1 min-w-[140px]">
+      <div class="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Excluded</div>
+      <div class="font-semibold text-gray-700 tabular-nums">
+        {{ summary.flws_excluded }}<span class="text-gray-400 font-normal"> · &lt;20 cases</span>
+      </div>
+    </div>
+    <div class="px-4 py-2.5 flex-1 min-w-[140px]">
+      <div class="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Selected</div>
+      <div class="font-semibold text-gray-900 tabular-nums" x-text="selected.length"></div>
     </div>
   </div>
 
@@ -94,7 +92,7 @@
     <div class="overflow-x-auto">
       <table class="min-w-full text-sm">
         <thead>
-          <tr class="text-[10px] font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
+          <tr class="text-[11px] font-medium text-gray-500 border-b border-gray-200">
             <th class="px-3 py-2 w-8">
               <input type="checkbox" @change="toggleAll($event.target.checked)"
                      class="rounded border-gray-300 text-red-600 focus:ring-red-500 w-3.5 h-3.5">
@@ -166,15 +164,14 @@
 
   {# ─────────── Secondary Tier Table (collapsed by default) ─────────── #}
   <details class="bg-white border border-gray-200 rounded-md overflow-hidden mb-4">
-    <summary class="px-4 py-2.5 cursor-pointer hover:bg-gray-50 border-b border-gray-200 flex items-center gap-2">
+    <summary class="px-4 py-2.5 cursor-pointer hover:bg-gray-50 border-b border-gray-200 flex items-center gap-2 list-none">
       <i class="fa-solid fa-chevron-right text-gray-400 text-xs transition-transform"></i>
       <h2 class="text-sm font-semibold text-gray-800">Secondary flags</h2>
-      <span class="text-[11px] text-gray-400 ml-1">— granular mortality, weight, copy-paste, GPS, referral</span>
     </summary>
     <div class="overflow-x-auto">
       <table class="min-w-full text-sm">
         <thead>
-          <tr class="text-[10px] font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
+          <tr class="text-[11px] font-medium text-gray-500 border-b border-gray-200">
             <th class="px-3 py-2 text-left font-medium">FLW</th>
             <th class="px-3 py-2 text-left font-medium">LLO</th>
             {% for col in secondary_columns %}
