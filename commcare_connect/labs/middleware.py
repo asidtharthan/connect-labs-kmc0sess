@@ -137,8 +137,16 @@ class LabsURLWhitelistMiddleware:
         # Whitelisted path - require authentication (except login/oauth/logout and admin)
         public_paths = ["/labs/login/", "/labs/initiate/", "/labs/callback/", "/labs/logout/", "/labs/test-auth/"]
 
+        # Static / media assets must be accessible without auth — otherwise the
+        # login page itself can't load CSS/JS and renders unstyled.
+        public_prefixes = ("/static/", "/media/")
+
         # Admin URLs don't require OAuth authentication (they use Django's standard auth)
-        if not path.startswith("/admin/") and path not in public_paths:
+        if (
+            not path.startswith("/admin/")
+            and not path.startswith(public_prefixes)
+            and path not in public_paths
+        ):
             if not request.user.is_authenticated:
                 # Redirect to labs login with next parameter
                 login_url = f"/labs/login/?next={path}"
