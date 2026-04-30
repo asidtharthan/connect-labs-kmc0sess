@@ -1,0 +1,366 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}KMC Audit Dashboard{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-6 py-8 max-w-screen-2xl"
+     x-data="kmcAuditDashboard()"
+     x-init="init()">
+
+  {# ─────────── Header ─────────── #}
+  <div class="flex flex-wrap items-start justify-between gap-4 mb-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-3">
+        <span class="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-rose-100">
+          <i class="fa-solid fa-baby text-rose-600 text-base"></i>
+        </span>
+        KMC Audit Dashboard
+      </h1>
+      <p class="text-sm text-gray-500 mt-1">
+        Quality flags across {{ summary.opportunities_loaded|length|default:0 }} KMC opportunities
+        {% if summary.opportunities_failed %}
+          <span class="text-red-500 ml-2">
+            ({{ summary.opportunities_failed|length }} failed to load)
+          </span>
+        {% endif %}
+      </p>
+    </div>
+
+    {% if summary %}
+    <div class="flex flex-wrap items-center gap-2 text-sm">
+      <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gray-100 text-gray-700 font-medium">
+        <i class="fa-solid fa-user-nurse text-gray-500 text-xs"></i>
+        <span x-text="filteredRows.length"></span> / {{ summary.total_flws }} FLWs
+      </span>
+      <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 text-rose-700 font-medium">
+        <i class="fa-solid fa-flag text-rose-400 text-xs"></i>
+        {{ summary.flws_with_priority_flag }} with priority flag
+      </span>
+      <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-yellow-50 text-yellow-700 font-medium">
+        <i class="fa-solid fa-eye-slash text-yellow-500 text-xs"></i>
+        {{ summary.flws_excluded }} excluded (&lt;20 cases)
+      </span>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if load_error %}
+  <div class="rounded-lg bg-red-50 border border-red-200 p-4 mb-6 flex items-start gap-3">
+    <i class="fa-solid fa-circle-exclamation text-red-400 mt-0.5 flex-shrink-0"></i>
+    <div>
+      <p class="text-sm font-medium text-red-800">Failed to load dashboard</p>
+      <p class="text-sm text-red-600 mt-0.5">{{ load_error }}</p>
+    </div>
+  </div>
+  {% else %}
+
+  {# ─────────── Filter bar ─────────── #}
+  <div class="flex flex-wrap items-end gap-3 mb-4 p-4 bg-white rounded-lg ring-1 ring-gray-200">
+    <div class="flex flex-col gap-1">
+      <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">LLO</label>
+      <select x-model="filters.llo"
+              class="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white text-gray-700">
+        <option value="">All LLOs</option>
+        {% for llo in llo_choices %}
+        <option value="{{ llo }}">{{ llo }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="flex flex-col gap-1">
+      <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">Opportunity</label>
+      <select x-model="filters.opp"
+              class="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white text-gray-700">
+        <option value="">All Opportunities</option>
+        {% for opp in all_kmc_opportunities %}
+        <option value="{{ opp.id }}">{{ opp.name }} ({{ opp.llo }})</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="flex flex-col gap-1">
+      <label class="text-xs font-medium text-gray-500 uppercase tracking-wide">Search FLW</label>
+      <input type="text" x-model="filters.search"
+             placeholder="username..."
+             class="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white text-gray-700 w-48">
+    </div>
+
+    <label class="flex items-center gap-2 text-sm text-gray-700 self-end pb-1.5">
+      <input type="checkbox" x-model="filters.flaggedOnly"
+             class="rounded border-gray-300 text-rose-600 focus:ring-rose-500">
+      Only flagged
+    </label>
+
+    <button @click="resetFilters()"
+            class="text-xs text-rose-600 hover:text-rose-800 hover:underline self-end pb-2">
+      Clear
+    </button>
+
+    <span class="ml-auto text-sm text-gray-500 self-end pb-1.5">
+      <span x-text="selectedCount()"></span> selected
+    </span>
+  </div>
+
+  {# ─────────── Priority Tier Table ─────────── #}
+  <div class="bg-white shadow-sm ring-1 ring-gray-200 rounded-lg overflow-hidden mb-4">
+    <div class="px-4 py-3 border-b border-gray-200 bg-rose-50/40 flex items-center gap-2">
+      <i class="fa-solid fa-star text-rose-500"></i>
+      <h2 class="text-sm font-semibold text-rose-900">Priority Flags</h2>
+      <span class="text-xs text-gray-500">— Neal's six core indicators</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200 text-sm">
+        <thead class="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+          <tr>
+            <th class="px-3 py-3 w-8">
+              <input type="checkbox" @change="toggleAll($event.target.checked)"
+                     class="rounded border-gray-300 text-rose-600 focus:ring-rose-500">
+            </th>
+            <th class="px-3 py-3 text-left">FLW</th>
+            <th class="px-3 py-3 text-left">LLO</th>
+            <th class="px-3 py-3 text-left">Opportunity</th>
+            <th class="px-3 py-3 text-right">Cases</th>
+            {% for col in priority_columns %}
+            <th class="px-3 py-3 text-center" title="{{ col.key }}">{{ col.label }}</th>
+            {% endfor %}
+            <th class="px-3 py-3 text-right">#Flags</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100 bg-white">
+          <template x-for="row in filteredRows" :key="row.opportunity_id + ':' + row.username">
+            <tr class="hover:bg-rose-50/30"
+                :class="{ 'opacity-50': row.excluded }">
+              <td class="px-3 py-2">
+                <input type="checkbox"
+                       :value="row.username"
+                       :data-opp-id="row.opportunity_id"
+                       x-model="selected"
+                       :disabled="row.excluded"
+                       class="rounded border-gray-300 text-rose-600 focus:ring-rose-500">
+              </td>
+              <td class="px-3 py-2 font-medium text-gray-900">
+                <button @click="openDrilldown(row)"
+                        class="hover:text-rose-700 hover:underline text-left">
+                  <span x-text="row.username"></span>
+                </button>
+              </td>
+              <td class="px-3 py-2">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                      :class="lloBadgeClass(row.llo)"
+                      x-text="row.llo || '—'"></span>
+              </td>
+              <td class="px-3 py-2 text-xs text-gray-600" x-text="row.opportunity_name"></td>
+              <td class="px-3 py-2 text-right tabular-nums" x-text="row.total_cases"></td>
+              {% for col in priority_columns %}
+              <td class="px-3 py-2 text-center">
+                <template x-if="row.flags['{{ col.key }}'] === true">
+                  <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-rose-100 text-rose-700">
+                    <i class="fa-solid fa-flag text-xs"></i>
+                  </span>
+                </template>
+                <template x-if="row.flags['{{ col.key }}'] === false">
+                  <span class="text-gray-300">·</span>
+                </template>
+                <template x-if="row.flags['{{ col.key }}'] === null || row.flags['{{ col.key }}'] === undefined">
+                  <span class="text-gray-200">—</span>
+                </template>
+              </td>
+              {% endfor %}
+              <td class="px-3 py-2 text-right font-semibold"
+                  :class="row.priority_flag_count >= 2 ? 'text-rose-700' : 'text-gray-700'"
+                  x-text="row.priority_flag_count"></td>
+            </tr>
+          </template>
+          <template x-if="filteredRows.length === 0">
+            <tr>
+              <td colspan="11" class="px-4 py-12 text-center text-sm text-gray-400">
+                No FLWs match the current filters.
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {# ─────────── Secondary Tier Table (collapsed by default) ─────────── #}
+  <details class="bg-white shadow-sm ring-1 ring-gray-200 rounded-lg overflow-hidden mb-4">
+    <summary class="px-4 py-3 border-b border-gray-200 bg-gray-50 cursor-pointer flex items-center gap-2 hover:bg-gray-100">
+      <i class="fa-solid fa-chevron-right transition-transform" id="secondary-chevron"></i>
+      <h2 class="text-sm font-semibold text-gray-700">Secondary Flags</h2>
+      <span class="text-xs text-gray-500">— granular mortality, weight, copy-paste, GPS, referral</span>
+    </summary>
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200 text-sm">
+        <thead class="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+          <tr>
+            <th class="px-3 py-3 text-left">FLW</th>
+            <th class="px-3 py-3 text-left">LLO</th>
+            {% for col in secondary_columns %}
+            <th class="px-3 py-3 text-center" title="{{ col.key }}">{{ col.label }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100 bg-white">
+          <template x-for="row in filteredRows" :key="'sec:' + row.opportunity_id + ':' + row.username">
+            <tr :class="{ 'opacity-50': row.excluded }">
+              <td class="px-3 py-2 font-medium text-gray-900" x-text="row.username"></td>
+              <td class="px-3 py-2">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                      :class="lloBadgeClass(row.llo)"
+                      x-text="row.llo || '—'"></span>
+              </td>
+              {% for col in secondary_columns %}
+              <td class="px-3 py-2 text-center">
+                <template x-if="row.flags['{{ col.key }}'] === true">
+                  <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-700">
+                    <i class="fa-solid fa-triangle-exclamation text-xs"></i>
+                  </span>
+                </template>
+                <template x-if="row.flags['{{ col.key }}'] === false">
+                  <span class="text-gray-300">·</span>
+                </template>
+                <template x-if="row.flags['{{ col.key }}'] === null || row.flags['{{ col.key }}'] === undefined">
+                  <span class="text-gray-200"></span>
+                </template>
+              </td>
+              {% endfor %}
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </details>
+
+  {# ─────────── Drilldown panel target ─────────── #}
+  <div id="drilldown" class="mb-32"></div>
+
+  {# ─────────── Sticky action bar ─────────── #}
+  <div class="fixed bottom-0 left-16 right-0 bg-white border-t border-gray-200 shadow-lg p-3 z-30"
+       x-show="selected.length > 0"
+       x-cloak>
+    <div class="container mx-auto max-w-screen-2xl flex items-center justify-between">
+      <span class="text-sm text-gray-700">
+        <span class="font-semibold" x-text="selected.length"></span> FLW(s) selected
+      </span>
+      <div class="flex items-center gap-2">
+        <button @click="selected = []"
+                class="text-xs text-gray-500 hover:text-gray-800 hover:underline">
+          Clear selection
+        </button>
+        <button @click="openAuditModal()"
+                :disabled="!canCreateAudit()"
+                :class="canCreateAudit() ? 'bg-rose-600 hover:bg-rose-700' : 'bg-gray-300 cursor-not-allowed'"
+                class="text-white text-sm font-medium px-4 py-2 rounded-md">
+          <i class="fa-solid fa-clipboard-check mr-1.5"></i> Create Audit
+        </button>
+      </div>
+    </div>
+    <p x-show="!canCreateAudit() && selected.length > 0"
+       class="text-xs text-amber-700 mt-1 max-w-screen-2xl mx-auto">
+      All selected FLWs must belong to the same opportunity (audit creation is per-opp).
+    </p>
+  </div>
+
+  {# ─────────── Modal root ─────────── #}
+  <div id="modal-root"></div>
+
+  {% endif %}
+</div>
+
+{# ─────────── Inline data + Alpine component ─────────── #}
+{{ rows|json_script:"kmc-audit-rows" }}
+
+<script>
+  function kmcAuditDashboard() {
+    return {
+      rows: JSON.parse(document.getElementById("kmc-audit-rows").textContent),
+      filters: { llo: "", opp: "", search: "", flaggedOnly: false },
+      selected: [],
+
+      init() {
+        // Sync chevron with details state
+        const details = document.querySelector("details");
+        const chev = document.getElementById("secondary-chevron");
+        if (details && chev) {
+          details.addEventListener("toggle", () => {
+            chev.style.transform = details.open ? "rotate(90deg)" : "rotate(0)";
+          });
+        }
+      },
+
+      get filteredRows() {
+        const f = this.filters;
+        const search = (f.search || "").toLowerCase();
+        return this.rows.filter(r => {
+          if (f.llo && r.llo !== f.llo) return false;
+          if (f.opp && String(r.opportunity_id) !== String(f.opp)) return false;
+          if (search && !(r.username || "").toLowerCase().includes(search)) return false;
+          if (f.flaggedOnly && r.priority_flag_count === 0 && r.flag_count === 0) return false;
+          return true;
+        });
+      },
+
+      lloBadgeClass(llo) {
+        if (llo === "NAMA") return "bg-blue-100 text-blue-700";
+        if (llo === "PIPN") return "bg-emerald-100 text-emerald-700";
+        if (llo === "GHI")  return "bg-purple-100 text-purple-700";
+        return "bg-gray-100 text-gray-500";
+      },
+
+      selectedCount() { return this.selected.length; },
+
+      toggleAll(checked) {
+        if (checked) {
+          this.selected = this.filteredRows
+            .filter(r => !r.excluded)
+            .map(r => r.username);
+        } else {
+          this.selected = [];
+        }
+      },
+
+      resetFilters() {
+        this.filters = { llo: "", opp: "", search: "", flaggedOnly: false };
+        this.selected = [];
+      },
+
+      // Audit creation only makes sense within ONE opportunity at a time
+      // (the audit creation API takes a single opportunity_id).
+      selectedOppIds() {
+        const oppIds = new Set();
+        for (const r of this.rows) {
+          if (this.selected.includes(r.username)) oppIds.add(r.opportunity_id);
+        }
+        return Array.from(oppIds);
+      },
+
+      canCreateAudit() {
+        return this.selected.length > 0 && this.selectedOppIds().length === 1;
+      },
+
+      openDrilldown(row) {
+        const url = "{% url 'kmc_audit:flw_drilldown' opportunity_id=0 username='__USERNAME__' %}"
+          .replace("/0/", "/" + row.opportunity_id + "/")
+          .replace("__USERNAME__", encodeURIComponent(row.username));
+        htmx.ajax("GET", url, { target: "#drilldown", swap: "innerHTML" });
+        // Scroll into view after swap
+        setTimeout(() => {
+          document.getElementById("drilldown").scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 300);
+      },
+
+      openAuditModal() {
+        const oppIds = this.selectedOppIds();
+        if (oppIds.length !== 1) return;
+        const params = new URLSearchParams();
+        params.set("opp_id", oppIds[0]);
+        for (const u of this.selected) params.append("usernames", u);
+        const url = "{% url 'kmc_audit:audit_modal' %}?" + params.toString();
+        htmx.ajax("GET", url, { target: "#modal-root", swap: "innerHTML" });
+      },
+    };
+  }
+</script>
+{% endblock %}
