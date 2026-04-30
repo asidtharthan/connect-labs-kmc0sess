@@ -43,6 +43,21 @@ if sys.platform == "win32":
 
             if GDAL_LIBRARY_PATH:
                 break
+
+    # Fallback: pip-installed `osgeo` (GDAL) wheel bundles `gdal.dll` directly.
+    if not GDAL_LIBRARY_PATH:
+        try:
+            import osgeo
+            osgeo_dir = Path(osgeo.__path__[0])
+            bundled_gdal = osgeo_dir / "gdal.dll"
+            if bundled_gdal.exists():
+                GDAL_LIBRARY_PATH = str(bundled_gdal)
+                os.environ["PATH"] = str(osgeo_dir) + os.pathsep + os.environ.get("PATH", "")
+                bundled_geos = osgeo_dir / "geos_c.dll"
+                if bundled_geos.exists():
+                    GEOS_LIBRARY_PATH = str(bundled_geos)
+        except ImportError:
+            pass
 # commcare_connect/
 APPS_DIR = BASE_DIR / "commcare_connect"
 
