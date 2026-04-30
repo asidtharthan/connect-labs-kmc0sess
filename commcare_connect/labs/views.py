@@ -247,6 +247,13 @@ class LabsOverviewView(LoginRequiredMixin, TemplateView):
                     "description": "Cross-opportunity admin report of all workflow runs and audit sessions",
                     "color": "purple",
                 },
+                {
+                    "name": "KMC Audit Dashboard",
+                    "url": "/custom_analysis/kmc_audit/",
+                    "icon": "fa-clipboard-check",
+                    "description": "FLW quality flags across all 5 KMC opportunities with one-click audit creation",
+                    "color": "rose",
+                },
             ]
         else:
             context["custom_analysis_projects"] = []
