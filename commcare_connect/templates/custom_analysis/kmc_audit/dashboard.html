@@ -376,12 +376,13 @@
           .replace("/0/", "/" + row.opportunity_id + "/")
           .replace("__USERNAME__", encodeURIComponent(row.username));
         // Wait a tick for the row to be rendered, then HTMX-load into it.
+        // Always refetch (no client-side caching) so dashboard edits are
+        // picked up immediately on next click.
         this.$nextTick(() => {
           const target = document.getElementById(targetId);
-          if (target && (target.innerHTML === "" || target.dataset.loadedFor !== row.username)) {
-            target.dataset.loadedFor = row.username;
+          if (target) {
             target.innerHTML = '<div class="text-xs text-gray-400 px-3 py-2"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div>';
-            htmx.ajax("GET", url, { target: "#" + targetId, swap: "innerHTML" });
+            htmx.ajax("GET", url + "?_=" + Date.now(), { target: "#" + targetId, swap: "innerHTML" });
           }
         });
       },
