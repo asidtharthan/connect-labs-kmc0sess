@@ -103,11 +103,12 @@
             <th class="px-3 py-2 text-right font-medium">#Flags</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-100">
-          <template x-for="row in filteredRows" :key="row.opportunity_id + ':' + row.username">
-            <tr class="hover:bg-gray-50/70 transition-colors"
-                :class="{ 'opacity-60': row.excluded }">
-              <td class="px-3 py-2">
+        <template x-for="row in filteredRows" :key="row.opportunity_id + ':' + row.username">
+          <tbody class="divide-y divide-gray-100">
+            <tr class="hover:bg-gray-50/70 transition-colors cursor-pointer"
+                :class="{ 'opacity-60': row.excluded, 'bg-gray-50': isExpanded(row) }"
+                @click="toggleExpand(row, $event)">
+              <td class="px-3 py-2" @click.stop>
                 <input type="checkbox"
                        :value="row.username"
                        :data-opp-id="row.opportunity_id"
@@ -116,10 +117,11 @@
                        class="rounded border-gray-300 text-red-600 focus:ring-red-500 w-3.5 h-3.5">
               </td>
               <td class="px-3 py-2 whitespace-nowrap">
-                <button @click="openDrilldown(row)"
-                        class="text-[13px] font-mono text-gray-800 hover:text-red-700 hover:underline">
-                  <span x-text="row.username"></span>
-                </button>
+                <span class="text-[13px] text-gray-800 hover:text-red-700 hover:underline"
+                      :title="row.username"
+                      x-text="row.flw_name || row.username"></span>
+                <i class="fa-solid fa-chevron-right text-[10px] text-gray-400 ml-1.5 transition-transform"
+                   :class="{ 'rotate-90 text-gray-700': isExpanded(row) }"></i>
               </td>
               <td class="px-3 py-2 whitespace-nowrap">
                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium"
@@ -145,15 +147,22 @@
                   :class="row.priority_flag_count >= 2 ? 'text-red-700' : (row.priority_flag_count >= 1 ? 'text-red-600' : 'text-gray-400')"
                   x-text="row.priority_flag_count"></td>
             </tr>
-          </template>
-          <template x-if="filteredRows.length === 0">
+            <tr x-show="isExpanded(row)" x-cloak>
+              <td colspan="11" class="bg-gray-50/40 border-t border-gray-100 p-0">
+                <div :id="'dd-' + row.opportunity_id + '-' + row.username" class="p-1"></div>
+              </td>
+            </tr>
+          </tbody>
+        </template>
+        <template x-if="filteredRows.length === 0">
+          <tbody>
             <tr>
               <td colspan="11" class="px-4 py-12 text-center text-sm text-gray-400">
                 No FLWs match the current filters.
               </td>
             </tr>
-          </template>
-        </tbody>
+          </tbody>
+        </template>
       </table>
     </div>
   </div>
@@ -178,7 +187,7 @@
         <tbody class="divide-y divide-gray-100">
           <template x-for="row in filteredRows" :key="'sec:' + row.opportunity_id + ':' + row.username">
             <tr class="hover:bg-gray-50/70 transition-colors" :class="{ 'opacity-60': row.excluded }">
-              <td class="px-3 py-2 whitespace-nowrap text-[13px] font-mono text-gray-800" x-text="row.username"></td>
+              <td class="px-3 py-2 whitespace-nowrap text-[13px] text-gray-800" :title="row.username" x-text="row.flw_name || row.username"></td>
               <td class="px-3 py-2 whitespace-nowrap">
                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium"
                       :class="lloBadgeClass(row.llo)"
@@ -231,8 +240,7 @@
     </div>
   </details>
 
-  {# ─────────── Drilldown panel target ─────────── #}
-  <div id="drilldown" class="mb-32"></div>
+  <div class="mb-32"></div>
 
   {# ─────────── Sticky action bar ─────────── #}
   <div class="fixed bottom-0 left-16 right-0 bg-white border-t border-gray-200 shadow-sm px-6 py-3 z-30"
@@ -280,6 +288,7 @@
       rows: JSON.parse(document.getElementById("kmc-audit-rows").textContent),
       filters: { llo: "", opp: "", search: "", flaggedOnly: false },
       selected: [],
+      expandedKey: null,
 
       init() {
         document.querySelectorAll("details").forEach(d => {
@@ -338,14 +347,43 @@
         return this.selected.length > 0 && this.selectedOppIds().length === 1;
       },
 
-      openDrilldown(row) {
+      keyOf(row) {
+        return row.opportunity_id + ":" + row.username;
+      },
+
+      isExpanded(row) {
+        return this.expandedKey === this.keyOf(row);
+      },
+
+      toggleExpand(row, $event) {
+        // Ignore clicks on form inputs/buttons inside the row.
+        if ($event && $event.target && (
+          $event.target.tagName === "INPUT" ||
+          $event.target.tagName === "BUTTON" ||
+          $event.target.tagName === "LABEL" ||
+          $event.target.closest("button")
+        )) {
+          return;
+        }
+        const k = this.keyOf(row);
+        if (this.expandedKey === k) {
+          this.expandedKey = null;
+          return;
+        }
+        this.expandedKey = k;
+        const targetId = "dd-" + row.opportunity_id + "-" + row.username;
         const url = "{% url 'kmc_audit:flw_drilldown' opportunity_id=0 username='__USERNAME__' %}"
           .replace("/0/", "/" + row.opportunity_id + "/")
           .replace("__USERNAME__", encodeURIComponent(row.username));
-        htmx.ajax("GET", url, { target: "#drilldown", swap: "innerHTML" });
-        setTimeout(() => {
-          document.getElementById("drilldown").scrollIntoView({ behavior: "smooth", block: "start" });
-        }, 300);
+        // Wait a tick for the row to be rendered, then HTMX-load into it.
+        this.$nextTick(() => {
+          const target = document.getElementById(targetId);
+          if (target && (target.innerHTML === "" || target.dataset.loadedFor !== row.username)) {
+            target.dataset.loadedFor = row.username;
+            target.innerHTML = '<div class="text-xs text-gray-400 px-3 py-2"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div>';
+            htmx.ajax("GET", url, { target: "#" + targetId, swap: "innerHTML" });
+          }
+        });
       },
 
       openAuditModal() {

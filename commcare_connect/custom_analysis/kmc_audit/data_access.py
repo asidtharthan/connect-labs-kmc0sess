@@ -196,9 +196,18 @@ class KMCAuditDataAccess:
                 opportunities_failed.append((opp.opportunity_id, opp.error))
                 continue
             opportunities_loaded.append(opp.opportunity_id)
+            # Build a username -> flw_name map from the aggregated pipeline rows
+            # so we can show human-readable FLW names in the table.
+            flw_name_by_user: dict[str, str] = {}
+            if opp.flw_aggregated:
+                for r in opp.flw_aggregated.rows:
+                    if r.username and r.flw_name:
+                        flw_name_by_user[r.username] = r.flw_name
+
             for flw in opp.flw_results:
                 row = {
                     "username": flw.username,
+                    "flw_name": flw_name_by_user.get(flw.username, "") or flw.username,
                     "opportunity_id": opp.opportunity_id,
                     "opportunity_name": opp.opportunity_name,
                     "llo": opp.llo or "",
