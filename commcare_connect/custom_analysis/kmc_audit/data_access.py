@@ -250,9 +250,23 @@ class KMCAuditDataAccess:
             key=lambda r: (-(r["priority_flag_count"] or 0), -(r["flag_count"] or 0), r["username"])
         )
 
-        total_flws = len(rows)
-        flws_with_priority_flag = sum(1 for r in rows if r["priority_flag_count"] >= 1)
-        flws_excluded = sum(1 for r in rows if r["excluded"])
+        # Unique-FLW counts (an FLW working in multiple opportunities still
+        # counts ONCE here, even though they show up as multiple rows in the
+        # table). The table is per-(FLW, opp) because audit creation is
+        # per-opp, but the headline numbers should reflect distinct people.
+        unique_usernames: set[str] = {r["username"] for r in rows}
+        total_flws = len(unique_usernames)
+        flws_with_priority_flag = len({
+            r["username"] for r in rows if r["priority_flag_count"] >= 1
+        })
+        # An FLW is "excluded" only if EVERY opp they appear in is excluded
+        # (i.e. they have <20 cases everywhere). If they have ≥20 cases in
+        # any single opp, they're not excluded for that opp.
+        excluded_only_users = {
+            u for u in unique_usernames
+            if all(r["excluded"] for r in rows if r["username"] == u)
+        }
+        flws_excluded = len(excluded_only_users)
 
         return DashboardSummary(
             rows=rows,

@@ -374,10 +374,23 @@ def compute_enrollment_metrics(visit_rows: list[Any]) -> dict[str, Any]:
     }
 
 
-def compute_case_metrics(visit_rows: list[Any]) -> dict[str, int]:
-    """Closed-case and non-mortality-closed counts based on latest kmc_status per case.
+def compute_case_metrics(visit_rows: list[Any]) -> dict[str, Any]:
+    """Per-case metadata used by mortality and avg-visits calculations.
 
-    Mirrors ``computeCaseMetrics`` at kmc_flw_flags.py:371-403.
+    Walks visit rows once and produces, for each case_id:
+        - latest_visit_date: max(visit_date) seen on the case
+        - latest_status:     kmc_status from that latest-dated visit
+        - latest_child_alive: child_alive from that latest-dated visit
+        - visit_count:       number of visit rows we saw for this case
+
+    The doc (Overview of KMC flags, March 2026) is explicit that mortality
+    is defined by the LATEST visit's child_alive value, not by any
+    historical "no" record — so we track it at the visit-row granularity
+    here and let derive_flags() use that as the authoritative signal.
+
+    The doc also says flag_visits should use only the 50 most recently
+    closed cases (by last visit date). compute_avg_visits_top_50() below
+    uses this output to do that.
     """
     by_case: dict[str, dict[str, Any]] = {}
     for row in visit_rows:
@@ -385,23 +398,83 @@ def compute_case_metrics(visit_rows: list[Any]) -> dict[str, int]:
         if not cid:
             continue
         cid = str(cid)
-        slot = by_case.setdefault(cid, {"kmc_status": None, "visit_date": None})
+        slot = by_case.setdefault(cid, {
+            "case_id": cid,
+            "latest_visit_date": None,
+            "latest_status": None,
+            "latest_child_alive": None,
+            "visit_count": 0,
+        })
+        slot["visit_count"] += 1
         vdate = _parse_date(_row_get(row, "visit_date"))
-        status = _row_get(row, "kmc_status")
-        if status and (slot["visit_date"] is None or (vdate and vdate > slot["visit_date"])):
-            slot["kmc_status"] = status
-            slot["visit_date"] = vdate
+        if vdate is None:
+            continue
+        if slot["latest_visit_date"] is None or vdate > slot["latest_visit_date"]:
+            slot["latest_visit_date"] = vdate
+            status = _row_get(row, "kmc_status")
+            if status:
+                slot["latest_status"] = str(status).strip().lower() or None
+            ca = _row_get(row, "child_alive")
+            if ca is not None:
+                slot["latest_child_alive"] = str(ca).strip().lower() or None
 
-    closed_cases = 0
-    non_mort_closed = 0
-    for slot in by_case.values():
-        status = slot["kmc_status"]
-        if status in _CLOSED_STATUSES:
-            closed_cases += 1
-            if status != _DECEASED_STATUS:
-                non_mort_closed += 1
+    cases = list(by_case.values())
 
-    return {"closed_cases": closed_cases, "non_mort_closed": non_mort_closed}
+    # A case is "closed" if the latest-visit kmc_status is one of the
+    # closure statuses, OR the latest visit reports child_alive='no'
+    # (which the doc treats as a closing event regardless of status).
+    def _is_closed(c: dict) -> bool:
+        return c["latest_status"] in _CLOSED_STATUSES or c["latest_child_alive"] == "no"
+
+    def _is_mortality(c: dict) -> bool:
+        # Doc rule: mortality iff most recent visit records child_alive='no'.
+        # Falls back to status='deceased' for cases where child_alive isn't
+        # populated (older opportunities or registration-only cases).
+        if c["latest_child_alive"] == "no":
+            return True
+        if c["latest_child_alive"] == "yes":
+            return False
+        return c["latest_status"] == _DECEASED_STATUS
+
+    closed = [c for c in cases if _is_closed(c)]
+    closed_cases = len(closed)
+    non_mort_closed = sum(1 for c in closed if not _is_mortality(c))
+    deaths = sum(1 for c in cases if _is_mortality(c))
+
+    return {
+        "cases": cases,
+        "closed_cases": closed_cases,
+        "non_mort_closed": non_mort_closed,
+        "deaths": deaths,
+        "is_closed": _is_closed,
+        "is_mortality": _is_mortality,
+    }
+
+
+def compute_avg_visits_top_50(case_metrics: dict[str, Any]) -> tuple[float | None, int]:
+    """Avg visits per closed non-mortality case across the 50 most recently
+    closed cases (by last visit date), per the March-2026 doc:
+
+      "Computed using the 50 most recently closed cases (by last visit
+       date) to reflect current behavior rather than historical patterns."
+
+    Returns (avg_or_None, top_50_count). avg is None if fewer than
+    MIN_CASES["visits"] qualify after the filter.
+    """
+    cases = case_metrics["cases"]
+    is_closed = case_metrics["is_closed"]
+    is_mortality = case_metrics["is_mortality"]
+
+    closed = [c for c in cases if is_closed(c) and c["latest_visit_date"] is not None]
+    closed.sort(key=lambda c: c["latest_visit_date"], reverse=True)
+    top_50_closed = closed[:50]
+    top_50_non_mort = [c for c in top_50_closed if not is_mortality(c)]
+
+    if len(top_50_non_mort) < MIN_CASES["visits"]:
+        return None, len(top_50_non_mort)
+
+    total_visits = sum(c["visit_count"] for c in top_50_non_mort)
+    return total_visits / len(top_50_non_mort), len(top_50_non_mort)
 
 
 # =============================================================================
@@ -546,8 +619,6 @@ def derive_flags(aggregated_row: Any, visit_rows: list[Any]) -> FLWFlagResult:
     """
     username = str(_row_get(aggregated_row, "username") or "")
     total_cases = _safe_int(_row_get(aggregated_row, "total_cases"))
-    deaths = _safe_int(_row_get(aggregated_row, "deaths"))
-    total_visits = _safe_int(_row_get(aggregated_row, "total_visits"))
     danger_visit_count = _safe_int(_row_get(aggregated_row, "danger_visit_count"))
     danger_positive_count = _safe_int(_row_get(aggregated_row, "danger_positive_count"))
 
@@ -558,7 +629,9 @@ def derive_flags(aggregated_row: Any, visit_rows: list[Any]) -> FLWFlagResult:
 
     closed_cases = case_metrics["closed_cases"]
     non_mort_closed = case_metrics["non_mort_closed"]
-    avg_visits = (total_visits / non_mort_closed) if non_mort_closed > 0 else None
+    deaths = case_metrics["deaths"]
+    # Doc-faithful avg-visits: 50 most recently closed non-mortality cases.
+    avg_visits, top_50_count = compute_avg_visits_top_50(case_metrics)
     mort_rate = (deaths / total_cases) if total_cases > 0 else None
     danger_rate = (
         danger_positive_count / danger_visit_count if danger_visit_count > 0 else None
@@ -578,9 +651,11 @@ def derive_flags(aggregated_row: Any, visit_rows: list[Any]) -> FLWFlagResult:
 
     if not excluded:
         # ---- 9 currently in JS ----
+        # flag_visits uses the 50-closed-case window (compute_avg_visits_top_50
+        # already enforces MIN_CASES["visits"]; if too few qualify, avg_visits
+        # is None and the flag does not fire).
         flags["flag_visits"] = (
-            closed_cases >= MIN_CASES["visits"]
-            and avg_visits is not None
+            avg_visits is not None
             and avg_visits < THRESHOLDS["visits"]
         )
         flags["flag_mort_high"] = (

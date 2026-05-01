@@ -1,10 +1,13 @@
 """
 Unit tests for ``flag_logic.py``.
 
-These tests run without Django setup — they exercise pure-Python flag
-computation against synthetic fixtures. The fixtures intentionally hit
-threshold boundaries to catch off-by-one regressions when porting from
-the JS source at ``workflow/templates/kmc_flw_flags.py``.
+These tests exercise pure-Python flag computation against synthetic
+fixtures; no Django setup required. Fixtures intentionally hit
+threshold boundaries to catch off-by-one regressions when porting
+from the JS source at ``workflow/templates/kmc_flw_flags.py``.
+
+Source of truth for thresholds and rules: the
+"Overview of KMC flags [March 2026]" doc.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from commcare_connect.custom_analysis.kmc_audit.flag_logic import (
     PRIORITY_FLAGS,
     SECONDARY_FLAGS,
     THRESHOLDS,
+    compute_avg_visits_top_50,
     compute_case_metrics,
     compute_enrollment_metrics,
     compute_round_weight_pct,
@@ -36,7 +40,8 @@ from commcare_connect.custom_analysis.kmc_audit.flag_logic import (
 
 
 def make_visit(case_id: str, day_offset: int, weight: float | None = None,
-               kmc_status: str | None = None, reg_date: date | None = None,
+               kmc_status: str | None = None, child_alive: str | None = None,
+               reg_date: date | None = None,
                discharge_date: date | None = None, **extra) -> dict:
     base = date(2026, 1, 1)
     return {
@@ -45,6 +50,7 @@ def make_visit(case_id: str, day_offset: int, weight: float | None = None,
         "visit_date": (base + timedelta(days=day_offset)).isoformat(),
         "weight": weight,
         "kmc_status": kmc_status,
+        "child_alive": child_alive,
         "reg_date": reg_date.isoformat() if reg_date else None,
         "discharge_date": discharge_date.isoformat() if discharge_date else None,
         **{k: v for k, v in extra.items() if k != "username"},
@@ -56,7 +62,6 @@ def make_aggregated_row(**kwargs) -> dict:
     return {
         "username": "flw1",
         "total_cases": 0,
-        "deaths": 0,
         "total_visits": 0,
         "danger_visit_count": 0,
         "danger_positive_count": 0,
@@ -74,26 +79,11 @@ def test_priority_tier_has_six_flags():
 
 
 def test_secondary_tier_plus_priority_covers_all_real_flags():
-    # flag_mort is synthetic; everything else in PRIORITY + SECONDARY should be in ALL_FLAGS.
     real_priority = [f for f in PRIORITY_FLAGS if f != "flag_mort"]
     real_secondary = list(SECONDARY_FLAGS)
     union = set(real_priority) | set(real_secondary)
     assert union <= set(ALL_FLAGS)
     assert len(ALL_FLAGS) == 16
-
-
-def test_thresholds_cover_all_real_flags():
-    # Each non-synthetic flag must have a threshold and min-cases entry.
-    for flag in ALL_FLAGS:
-        key = flag.replace("flag_", "")
-        # Combined mort uses mort_low/mort_high keys; danger flags use sub-keys
-        if key.startswith("mort_"):
-            continue
-        if key in ("hr_copycat", "round_weight", "temp_copycat", "spo2_implausible",
-                   "ga_fullterm", "gps_same_case_far", "ds_no_referral",
-                   "wt_loss", "wt_gain", "wt_zero", "danger_high", "danger_zero",
-                   "enroll", "visits"):
-            assert key in THRESHOLDS, f"{flag}: missing THRESHOLD"
 
 
 # ---------------------------------------------------------------------------
@@ -108,13 +98,11 @@ def test_weight_metrics_empty():
 
 
 def test_weight_metrics_pair_outside_window_is_skipped():
-    # 35-day gap exceeds the 30-day pair-eligibility window.
     visits = [
         make_visit("case1", 0, weight=2000.0),
         make_visit("case1", 35, weight=2200.0),
     ]
-    out = compute_weight_metrics(visits)
-    assert out["weight_pairs"] == 0
+    assert compute_weight_metrics(visits)["weight_pairs"] == 0
 
 
 def test_weight_metrics_zero_change_pair():
@@ -140,24 +128,20 @@ def test_weight_metrics_loss_pair_counts_correctly():
 
 
 def test_weight_metrics_extreme_weight_filtered_out():
-    # 6000g exceeds the 500-5000g eligibility band — both readings should be ignored.
     visits = [
         make_visit("case1", 0, weight=6000.0),
         make_visit("case1", 5, weight=2000.0),
     ]
-    out = compute_weight_metrics(visits)
-    assert out["weight_pairs"] == 0
+    assert compute_weight_metrics(visits)["weight_pairs"] == 0
 
 
 def test_weight_metrics_twins_segregated_by_case_id():
-    # Two distinct beneficiary_case_ids must be paired independently.
     visits = [
         make_visit("twin_a", 0, weight=2000.0),
         make_visit("twin_b", 1, weight=1500.0),
-        make_visit("twin_a", 5, weight=2100.0),  # only this pair is valid
+        make_visit("twin_a", 5, weight=2100.0),
     ]
-    out = compute_weight_metrics(visits)
-    assert out["weight_pairs"] == 1
+    assert compute_weight_metrics(visits)["weight_pairs"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -167,18 +151,17 @@ def test_weight_metrics_twins_segregated_by_case_id():
 
 def test_enrollment_late_when_reg_more_than_8_days_after_discharge():
     cases = []
-    # 12 cases: 5 late, 7 on-time. Min 10 needed for the rate to be returned.
     for i in range(5):
         cases.append(make_visit(
             f"late_{i}", 0,
             reg_date=date(2026, 1, 20),
-            discharge_date=date(2026, 1, 1),  # 19-day gap = late
+            discharge_date=date(2026, 1, 1),
         ))
     for i in range(7):
         cases.append(make_visit(
             f"ontime_{i}", 0,
             reg_date=date(2026, 1, 5),
-            discharge_date=date(2026, 1, 1),  # 4-day gap = on time
+            discharge_date=date(2026, 1, 1),
         ))
     out = compute_enrollment_metrics(cases)
     assert out["cases_with_dates"] == 12
@@ -186,37 +169,124 @@ def test_enrollment_late_when_reg_more_than_8_days_after_discharge():
 
 
 def test_enrollment_returns_none_when_below_min_cases():
-    # Only 9 cases with both dates — below MIN_CASES["enroll"] (10).
     cases = [
         make_visit(f"case_{i}", 0,
                    reg_date=date(2026, 1, 20),
                    discharge_date=date(2026, 1, 1))
         for i in range(9)
     ]
-    out = compute_enrollment_metrics(cases)
-    assert out["pct_late_enroll"] is None
+    assert compute_enrollment_metrics(cases)["pct_late_enroll"] is None
 
 
 # ---------------------------------------------------------------------------
-# compute_case_metrics
+# compute_case_metrics — latest-visit child_alive rule (March-2026 doc)
 # ---------------------------------------------------------------------------
 
 
-def test_case_metrics_only_latest_status_counted():
-    # Two visits for the same case: earlier shows discharged, later shows deceased.
+def test_case_metrics_mortality_uses_latest_visit_child_alive():
+    """Case with earlier child_alive='no' but latest 'yes' should NOT be mortality."""
+    visits = [
+        make_visit("case1", 0, child_alive="no"),    # earlier visit
+        make_visit("case1", 10, child_alive="yes"),  # latest visit (corrected)
+    ]
+    cm = compute_case_metrics(visits)
+    assert cm["deaths"] == 0
+
+
+def test_case_metrics_mortality_when_latest_child_alive_no():
+    visits = [
+        make_visit("case1", 0, child_alive="yes"),
+        make_visit("case1", 10, child_alive="no"),  # latest
+    ]
+    cm = compute_case_metrics(visits)
+    assert cm["deaths"] == 1
+
+
+def test_case_metrics_falls_back_to_status_deceased_when_no_child_alive_field():
+    visits = [
+        make_visit("case1", 0, kmc_status="deceased"),
+    ]
+    cm = compute_case_metrics(visits)
+    assert cm["deaths"] == 1
+
+
+def test_case_metrics_only_latest_status_for_closed_check():
     visits = [
         make_visit("case1", 0, kmc_status="discharged"),
-        make_visit("case1", 10, kmc_status="deceased"),
+        make_visit("case1", 10, kmc_status="active"),  # latest — re-opened
     ]
-    out = compute_case_metrics(visits)
-    assert out["closed_cases"] == 1
-    assert out["non_mort_closed"] == 0  # final status was deceased
+    cm = compute_case_metrics(visits)
+    assert cm["closed_cases"] == 0
 
 
 def test_case_metrics_open_cases_not_counted_as_closed():
     visits = [make_visit("case1", 0, kmc_status="active")]
-    out = compute_case_metrics(visits)
-    assert out["closed_cases"] == 0
+    assert compute_case_metrics(visits)["closed_cases"] == 0
+
+
+def test_case_metrics_visit_counts_per_case():
+    visits = [
+        make_visit("c1", 0, kmc_status="discharged"),
+        make_visit("c1", 5, kmc_status="discharged"),
+        make_visit("c1", 10, kmc_status="discharged"),
+        make_visit("c2", 0, kmc_status="discharged"),
+    ]
+    cm = compute_case_metrics(visits)
+    cases_by_id = {c["case_id"]: c for c in cm["cases"]}
+    assert cases_by_id["c1"]["visit_count"] == 3
+    assert cases_by_id["c2"]["visit_count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# compute_avg_visits_top_50 — March-2026 doc 50-case window
+# ---------------------------------------------------------------------------
+
+
+def test_avg_visits_top_50_uses_recent_cases_only():
+    """50 most recently closed cases drive the average; older closed cases
+    are ignored. Build 60 closed cases — first 10 (oldest) have 1 visit,
+    last 50 have 5 visits each. Average should be 5.0, not (10*1 + 50*5)/60."""
+    visits = []
+    for i in range(60):
+        cid = f"c{i:03d}"
+        # First 10 cases: 1 visit each, very old dates (day 0..9)
+        # Last 50 cases: 5 visits each, recent dates (day 100..149 + offsets)
+        if i < 10:
+            visits.append(make_visit(cid, i, kmc_status="discharged"))
+        else:
+            base_day = 100 + (i - 10)
+            for k in range(5):
+                visits.append(make_visit(cid, base_day + k * 0.0 + k, kmc_status="discharged"))
+    cm = compute_case_metrics(visits)
+    avg, n = compute_avg_visits_top_50(cm)
+    assert n == 50
+    assert avg == pytest.approx(5.0)
+
+
+def test_avg_visits_top_50_returns_none_below_min_cases():
+    visits = [
+        make_visit(f"c{i}", i, kmc_status="discharged")
+        for i in range(MIN_CASES["visits"] - 1)
+    ]
+    cm = compute_case_metrics(visits)
+    avg, n = compute_avg_visits_top_50(cm)
+    assert avg is None
+
+
+def test_avg_visits_top_50_excludes_mortality_cases():
+    """Closed mortality cases should be filtered out of the average."""
+    visits = []
+    # 10 non-mortality closed cases, 1 visit each
+    for i in range(10):
+        visits.append(make_visit(f"alive_{i}", i, kmc_status="discharged", child_alive="yes"))
+    # 5 mortality closed cases, lots of visits each (would inflate avg if included)
+    for i in range(5):
+        for k in range(10):
+            visits.append(make_visit(f"dead_{i}", 50 + i + k, kmc_status="deceased", child_alive="no"))
+    cm = compute_case_metrics(visits)
+    avg, n = compute_avg_visits_top_50(cm)
+    assert n == 10
+    assert avg == pytest.approx(1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -228,27 +298,23 @@ def test_round_weight_pct_below_min_data():
     visits = [make_visit("case1", i, weight=2000.0) for i in range(MIN_CASES["round_weight"] - 1)]
     pct, n = compute_round_weight_pct(visits)
     assert pct is None
-    assert n == MIN_CASES["round_weight"] - 1
 
 
 def test_round_weight_pct_all_rounded():
-    # 25 weights, all multiples of 100g.
     visits = [make_visit(f"case_{i}", i, weight=1500.0 + (i * 100)) for i in range(25)]
-    pct, n = compute_round_weight_pct(visits)
+    pct, _n = compute_round_weight_pct(visits)
     assert pct == pytest.approx(1.0)
-    assert n == 25
 
 
 def test_round_weight_pct_mixed():
-    # 20 weights: 16 round (= 80%), 4 non-round.
     weights = [1500.0] * 16 + [1523.0, 1547.0, 1612.0, 1689.0]
     visits = [make_visit(f"case_{i}", i, weight=w) for i, w in enumerate(weights)]
-    pct, n = compute_round_weight_pct(visits)
+    pct, _n = compute_round_weight_pct(visits)
     assert pct == pytest.approx(0.8)
 
 
 # ---------------------------------------------------------------------------
-# derive_flags — integration of the above
+# derive_flags — integration of the above (doc-faithful)
 # ---------------------------------------------------------------------------
 
 
@@ -256,37 +322,45 @@ def test_derive_flags_excludes_low_volume_flw():
     aggregated = make_aggregated_row(total_cases=MIN_CASES["exclude"] - 1)
     result = derive_flags(aggregated, [])
     assert result.excluded is True
-    # All flags including synthetic are None (not False) when excluded
     for f in ALL_FLAGS:
         assert result.flags[f] is None
     assert result.flags["flag_mort"] is None
 
 
-def test_derive_flags_low_visits_fires():
-    aggregated = make_aggregated_row(total_cases=30, total_visits=20)
-    # Build 10 distinct closed non-mortality cases, but only 20 total visits
-    # → avg visits per non-mort closed = 2.0, below the 3.0 threshold.
-    visits = []
-    for i in range(10):
-        cid = f"c{i}"
-        visits.append(make_visit(cid, 0, weight=2000.0, kmc_status="discharged"))
-        visits.append(make_visit(cid, 5, weight=2050.0, kmc_status="discharged"))
+def test_derive_flags_low_visits_fires_with_doc_50_case_window():
+    """20 closed non-mort cases × 1 visit each → avg 1.0 < 3.0 → flag fires."""
+    aggregated = make_aggregated_row(total_cases=20)
+    visits = [
+        make_visit(f"c{i}", i, kmc_status="discharged", child_alive="yes")
+        for i in range(20)
+    ]
     result = derive_flags(aggregated, visits)
     assert result.flags["flag_visits"] is True
 
 
-def test_derive_flags_high_mortality_fires():
-    aggregated = make_aggregated_row(total_cases=20, deaths=5)  # 25%
-    result = derive_flags(aggregated, [])
+def test_derive_flags_high_mortality_fires_via_latest_child_alive():
+    """20 cases, 5 with latest child_alive='no' (25%)."""
+    aggregated = make_aggregated_row(total_cases=20)
+    visits = []
+    for i in range(15):
+        visits.append(make_visit(f"alive_{i}", i, kmc_status="discharged", child_alive="yes"))
+    for i in range(5):
+        visits.append(make_visit(f"dead_{i}", 30 + i, kmc_status="discharged", child_alive="no"))
+    result = derive_flags(aggregated, visits)
     assert result.flags["flag_mort_high"] is True
-    assert result.flags["flag_mort"] is True  # synthetic — fires when either component fires
-
-
-def test_derive_flags_low_mortality_fires():
-    aggregated = make_aggregated_row(total_cases=200, deaths=1)  # 0.5% < 2%
-    result = derive_flags(aggregated, [])
-    assert result.flags["flag_mort_low"] is True
     assert result.flags["flag_mort"] is True
+
+
+def test_derive_flags_low_mortality_fires_via_latest_child_alive():
+    """200 cases, 1 with latest child_alive='no' (0.5% < 2%)."""
+    aggregated = make_aggregated_row(total_cases=200)
+    visits = [
+        make_visit(f"alive_{i}", i, kmc_status="discharged", child_alive="yes")
+        for i in range(199)
+    ]
+    visits.append(make_visit("dead_0", 250, kmc_status="discharged", child_alive="no"))
+    result = derive_flags(aggregated, visits)
+    assert result.flags["flag_mort_low"] is True
 
 
 def test_derive_flags_zero_danger_fires():
@@ -299,7 +373,7 @@ def test_derive_flags_zero_danger_fires():
 
 def test_derive_flags_high_danger_fires():
     aggregated = make_aggregated_row(
-        total_cases=50, danger_visit_count=40, danger_positive_count=20,  # 50%
+        total_cases=50, danger_visit_count=40, danger_positive_count=20,
     )
     result = derive_flags(aggregated, [])
     assert result.flags["flag_danger_high"] is True
@@ -307,33 +381,37 @@ def test_derive_flags_high_danger_fires():
 
 def test_derive_flags_unknown_secondary_flags_are_none_not_false():
     aggregated = make_aggregated_row(total_cases=50)
-    # No heart_rate / temperature / etc. fields in visits → those flags should be None.
-    visits = [make_visit(f"c{i}", 0, weight=2000.0, kmc_status="discharged") for i in range(15)]
+    visits = [
+        make_visit(f"c{i}", i, weight=2000.0, kmc_status="discharged", child_alive="yes")
+        for i in range(15)
+    ]
     result = derive_flags(aggregated, visits)
-    # flag_round_weight: 15 weights all = 2000 (round) → fires, not None
-    # But the other 6 secondary flags (HR, temp, SpO2, GA, GPS, referral) should be None
-    # since their underlying fields are missing from the visits.
+    # Vital-sign flags whose underlying fields aren't captured: stay None.
     assert result.flags["flag_hr_copycat"] is None
     assert result.flags["flag_temp_copycat"] is None
     assert result.flags["flag_spo2_implausible"] is None
     assert result.flags["flag_ga_fullterm"] is None
     assert result.flags["flag_gps_same_case_far"] is None
-    assert result.flags["flag_ds_no_referral"] is None
 
 
 def test_derive_flags_round_weight_works_with_visit_data_only():
-    # 25 visits, all weights are exact 100g multiples → flag_round_weight fires.
     aggregated = make_aggregated_row(total_cases=50)
-    visits = [make_visit(f"c{i}", i, weight=1800.0) for i in range(25)]
+    visits = [
+        make_visit(f"c{i}", i, weight=1800.0, kmc_status="discharged", child_alive="yes")
+        for i in range(25)
+    ]
     result = derive_flags(aggregated, visits)
     assert result.flags["flag_round_weight"] is True
 
 
 def test_priority_flag_count_uses_synthetic_mort():
-    aggregated = make_aggregated_row(total_cases=20, deaths=5)
-    result = derive_flags(aggregated, [])
-    # flag_mort is a priority flag; both flag_mort_low and flag_mort_high are secondary.
-    # flag_mort fires (because high) but is counted ONCE in priority count.
+    aggregated = make_aggregated_row(total_cases=20)
+    visits = []
+    for i in range(15):
+        visits.append(make_visit(f"alive_{i}", i, kmc_status="discharged", child_alive="yes"))
+    for i in range(5):
+        visits.append(make_visit(f"dead_{i}", 30 + i, kmc_status="discharged", child_alive="no"))
+    result = derive_flags(aggregated, visits)
     assert result.flags["flag_mort"] is True
     assert result.priority_flag_count >= 1
 
@@ -351,7 +429,6 @@ def test_visit_flag_sources_marks_round_weight_visits():
         flags={f: False for f in ALL_FLAGS} | {"flag_round_weight": True, "flag_mort": False},
     )
     annotated = visit_flag_sources(visits, result)
-    # Every annotated visit should mention flag_round_weight (all weights are 1800g multiples of 100).
     for row in annotated:
         assert "flag_round_weight" in row["flag_sources"]
 

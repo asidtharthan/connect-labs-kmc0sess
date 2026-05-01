@@ -63,14 +63,9 @@ KMC_AUDIT_FLW_CONFIG = AnalysisPipelineConfig(
             aggregation="count_distinct",
             description="Distinct beneficiary case IDs handled by this FLW",
         ),
-        FieldComputation(
-            name="deaths",
-            paths=["form.kmc_beneficiary_case_id", "form.case.@case_id"],
-            aggregation="count_distinct",
-            filter_path="form.child_alive",
-            filter_value="no",
-            description="Distinct cases that ended in mortality",
-        ),
+        # Mortality is no longer derived from this aggregated count — flag_logic
+        # uses the latest-visit child_alive rule per the March-2026 doc — but
+        # we keep total_visits for historical display.
         FieldComputation(
             name="total_visits",
             path="form.grp_kmc_visit.visit_number",
@@ -193,6 +188,17 @@ KMC_AUDIT_VISIT_CONFIG = AnalysisPipelineConfig(
             ],
             aggregation="first",
             description="Was any danger sign positive on this visit (yes/no)",
+        ),
+        # child_alive recorded on each follow-up visit. Per the KMC flags
+        # March-2026 doc: "A case is considered a mortality if the most
+        # recent visit records child_alive='no'." Pulled at visit level
+        # so flag_logic can resolve mortality from the latest visit
+        # rather than counting any historical 'no' record.
+        FieldComputation(
+            name="child_alive",
+            path="form.child_alive",
+            aggregation="first",
+            description="Was the child alive at this visit (yes/no)",
         ),
         # Referral made on this visit. Path verified against the production
         # KMC Superset dashboard SQL ("KMC - Referral Rate within 28 Days"
