@@ -33,6 +33,7 @@ from commcare_connect.labs.analysis import (
     AnalysisPipeline,
     FLWAnalysisResult,
     VisitAnalysisResult,
+    fetch_flw_names,
 )
 
 from .constants import (
@@ -70,6 +71,7 @@ class OpportunityResult:
     error: str | None = None
     flw_aggregated: FLWAnalysisResult | None = None
     visit_result: VisitAnalysisResult | None = None
+    flw_names: dict[str, str] | None = None
 
 
 @dataclass
@@ -130,6 +132,16 @@ class KMCAuditDataAccess:
             visit_result: VisitAnalysisResult = pipeline.stream_analysis_ignore_events(
                 KMC_AUDIT_VISIT_CONFIG, opportunity_id=opportunity_id,
             )
+            # FLW display-name lookup. Stored on the OpportunityResult so
+            # build_dashboard() can attach it to each row without a second pass.
+            try:
+                flw_names = fetch_flw_names(
+                    access_token=self.request.session.get("labs_oauth", {}).get("access_token"),
+                    opportunity_id=opportunity_id,
+                )
+            except Exception:
+                logger.warning("[KMCAudit] fetch_flw_names failed for opp %d", opportunity_id)
+                flw_names = {}
         except Exception as e:
             logger.exception("[KMCAudit] opp %d pipeline failed", opportunity_id)
             return OpportunityResult(
@@ -161,6 +173,7 @@ class KMCAuditDataAccess:
             flw_results=flw_results,
             flw_aggregated=flw_aggregated,
             visit_result=visit_result,
+            flw_names=flw_names,
         )
 
     # ------------------------------------------------------------------------
@@ -196,18 +209,19 @@ class KMCAuditDataAccess:
                 opportunities_failed.append((opp.opportunity_id, opp.error))
                 continue
             opportunities_loaded.append(opp.opportunity_id)
-            # Build a username -> flw_name map from the aggregated pipeline rows
-            # so we can show human-readable FLW names in the table.
-            flw_name_by_user: dict[str, str] = {}
+            # FLW name lookup — prefer the dedicated names map (fetched via
+            # fetch_flw_names), fall back to the aggregated row's flw_name,
+            # and ultimately the username if no display name is known.
+            names_map: dict[str, str] = dict(opp.flw_names or {})
             if opp.flw_aggregated:
                 for r in opp.flw_aggregated.rows:
-                    if r.username and r.flw_name:
-                        flw_name_by_user[r.username] = r.flw_name
+                    if r.username and r.flw_name and r.username not in names_map:
+                        names_map[r.username] = r.flw_name
 
             for flw in opp.flw_results:
                 row = {
                     "username": flw.username,
-                    "flw_name": flw_name_by_user.get(flw.username, "") or flw.username,
+                    "flw_name": names_map.get(flw.username) or flw.username,
                     "opportunity_id": opp.opportunity_id,
                     "opportunity_name": opp.opportunity_name,
                     "llo": opp.llo or "",
@@ -252,6 +266,17 @@ class KMCAuditDataAccess:
     # ------------------------------------------------------------------------
     # Public: per-FLW drill-down
     # ------------------------------------------------------------------------
+
+    def _drill_down_lookup_name(self, opportunity_id: int, username: str) -> str:
+        """Best-effort FLW display name for the drill-down header."""
+        try:
+            names = fetch_flw_names(
+                access_token=self.request.session.get("labs_oauth", {}).get("access_token"),
+                opportunity_id=opportunity_id,
+            )
+            return names.get(username) or username
+        except Exception:
+            return username
 
     def drill_down(self, opportunity_id: int, username: str) -> dict[str, Any]:
         """Return the per-visit list for one FLW, annotated with flag sources.

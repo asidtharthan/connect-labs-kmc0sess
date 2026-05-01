@@ -6,50 +6,39 @@
 </div>
 {% else %}
 
-<div class="px-3 py-2.5 space-y-2.5">
+<div class="px-4 py-3 space-y-3">
 
-  {# ─────────── Per-FLW metric strip ─────────── #}
-  <div class="grid grid-cols-3 sm:grid-cols-6 gap-3 text-[12px]">
+  {# ─────────── Inline metric strip ─────────── #}
+  <div class="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[12px]">
+    <div><span class="text-gray-500">Cases</span> <span class="font-semibold tabular-nums ml-1">{{ metrics.total_cases }}</span></div>
+    <div><span class="text-gray-500">Closed</span> <span class="font-semibold tabular-nums ml-1">{{ metrics.closed_cases }}</span></div>
+    <div><span class="text-gray-500">Deaths</span> <span class="font-semibold tabular-nums ml-1">{{ metrics.deaths }}</span></div>
     <div>
-      <div class="text-[10px] text-gray-500 uppercase tracking-wide">Cases</div>
-      <div class="font-semibold tabular-nums">{{ metrics.total_cases }}</div>
-    </div>
-    <div>
-      <div class="text-[10px] text-gray-500 uppercase tracking-wide">Closed</div>
-      <div class="font-semibold tabular-nums">{{ metrics.closed_cases }}</div>
-    </div>
-    <div>
-      <div class="text-[10px] text-gray-500 uppercase tracking-wide">Deaths</div>
-      <div class="font-semibold tabular-nums">{{ metrics.deaths }}</div>
-    </div>
-    <div>
-      <div class="text-[10px] text-gray-500 uppercase tracking-wide">Avg visits</div>
-      <div class="font-semibold tabular-nums">
+      <span class="text-gray-500">Avg visits</span>
+      <span class="font-semibold tabular-nums ml-1">
         {% if metrics.avg_visits is not None %}{{ metrics.avg_visits|floatformat:1 }}{% else %}—{% endif %}
-      </div>
+      </span>
     </div>
     <div>
-      <div class="text-[10px] text-gray-500 uppercase tracking-wide">Mortality</div>
-      <div class="font-semibold tabular-nums">
+      <span class="text-gray-500">Mortality</span>
+      <span class="font-semibold tabular-nums ml-1">
         {% if metrics.mort_rate is not None %}{{ metrics.mort_rate|floatformat:3 }}{% else %}—{% endif %}
-      </div>
+      </span>
     </div>
     <div>
-      <div class="text-[10px] text-gray-500 uppercase tracking-wide">Weight pairs</div>
-      <div class="font-semibold tabular-nums">{{ metrics.weight_pairs }}</div>
+      <span class="text-gray-500">Weight pairs</span>
+      <span class="font-semibold tabular-nums ml-1">{{ metrics.weight_pairs }}</span>
     </div>
   </div>
 
-  {# ─────────── Active flags strip ─────────── #}
+  {# ─────────── Active flags row ─────────── #}
   {% if flags %}
   <div class="flex flex-wrap items-center gap-1.5">
-    <span class="text-[10px] uppercase tracking-wide text-gray-500 mr-1">Active flags:</span>
+    <span class="text-[11px] text-gray-500 mr-1">Active flags:</span>
     {% for k, v in flags.items %}
       {% if v == True %}
-      <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-50 text-red-700 ring-1 ring-red-200"
-            title="{{ k }}">
-        {{ k|cut:"flag_" }}
-      </span>
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-red-50 text-red-700 ring-1 ring-red-200"
+            title="{{ k }}">{{ k|cut:"flag_" }}</span>
       {% endif %}
     {% endfor %}
   </div>
@@ -57,9 +46,9 @@
 
   {# ─────────── Visit table ─────────── #}
   <div class="border border-gray-200 rounded overflow-hidden">
-    <div class="max-h-80 overflow-auto">
+    <div class="max-h-72 overflow-auto">
       <table class="min-w-full text-[12px]">
-        <thead class="bg-gray-100/70 sticky top-0 text-[10px] font-medium text-gray-500">
+        <thead class="bg-gray-100/70 sticky top-0 text-[11px] text-gray-500">
           <tr>
             <th class="px-2.5 py-1.5 text-left font-medium">Visit Date</th>
             <th class="px-2.5 py-1.5 text-left font-medium">Case ID</th>
@@ -118,9 +107,8 @@
     </div>
   </div>
 
-  <p class="text-[10px] text-gray-400 leading-snug">
-    Showing {{ visits|length }} visit(s). Aggregate flags (mortality, late enrollment, etc.) cannot be pinned to
-    a single visit and live at the FLW level above.
+  <p class="text-[11px] text-gray-400 leading-snug">
+    {{ visits|length }} visit(s). Aggregate flags (mortality, late enrollment, etc.) live at the FLW level above.
   </p>
 
 </div>
