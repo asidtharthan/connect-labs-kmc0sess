@@ -221,21 +221,24 @@
     </summary>
     <div class="px-4 py-3 border-t border-gray-200 text-[13px] text-gray-600 space-y-2 leading-relaxed">
       <div>
-        <span class="font-medium text-gray-900">10 flags compute live:</span>
+        <span class="font-medium text-gray-900">11 flags compute live:</span>
         Low Visits/Case, Low Mortality, High Mortality, Late Enrollment, High Danger Signs, Zero Danger Signs,
-        Weight Loss, Weight Gain, Zero Weight Change, Rounded Weights.
+        Weight Loss, Weight Gain, Zero Weight Change, Rounded Weights, DS Without Referral.
       </div>
       <div>
-        <span class="font-medium text-gray-900">6 flags show "—":</span>
-        underlying form fields not yet wired —
-        Copy-Paste HR, Copy-Paste Temp, Implausible SpO2, Gestational-Age Full-Term, GPS Spread, DS Without Referral.
-        Will populate once form paths are discovered via the CommCare MCP server.
+        <span class="font-medium text-gray-900">5 flags show "—" (not applicable to current KMC forms):</span>
+        Copy-Paste HR, Copy-Paste Temp, Implausible SpO2, Gestational-Age Full-Term, GPS Spread.
+        These vitals aren't captured by the KMC program forms — verified against the production Superset
+        dashboard SQL and the labs codebase. They'll populate automatically if the program adds those
+        questions to a future form revision.
       </div>
       <div>
         <span class="font-medium text-gray-900">Methodology:</span>
-        identical thresholds and rules to the existing
+        Same thresholds and rules as the
         <code class="px-1 py-0.5 rounded bg-gray-100 text-gray-800 text-[11px] font-mono">kmc_flw_flags</code>
-        workflow template. 27 unit tests cover threshold boundaries.
+        workflow template. Field paths cross-checked against the production Superset KMC dashboard
+        (<em>KMC – Master</em>, <em>Danger Signs Assessment</em>, <em>Referral Rate within 28 Days</em>
+        datasets). 27 unit tests cover threshold boundaries.
       </div>
     </div>
   </details>

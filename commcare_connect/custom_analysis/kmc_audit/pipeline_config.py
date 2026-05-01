@@ -183,9 +183,8 @@ KMC_AUDIT_VISIT_CONFIG = AnalysisPipelineConfig(
             aggregation="first",
             description="Latest KMC status (discharged/lost_to_followup/deceased)",
         ),
-        # Visit-level danger-sign flag — used by flag_ds_no_referral once
-        # ``child_referred`` is added below. Already in the aggregated config
-        # for counts, mirrored here for per-visit referral correlation.
+        # Visit-level danger-sign flag — paired with child_referred below
+        # for compute_ds_no_referral_pct.
         FieldComputation(
             name="danger_sign_positive",
             paths=[
@@ -195,22 +194,36 @@ KMC_AUDIT_VISIT_CONFIG = AnalysisPipelineConfig(
             aggregation="first",
             description="Was any danger sign positive on this visit (yes/no)",
         ),
+        # Referral made on this visit. Path verified against the production
+        # KMC Superset dashboard SQL ("KMC - Referral Rate within 28 Days"
+        # dataset, line: form.case.update.child_referred). Drives
+        # flag_ds_no_referral when paired with danger_sign_positive.
+        FieldComputation(
+            name="child_referred",
+            path="form.case.update.child_referred",
+            aggregation="first",
+            description="Was the child referred for medical attention on this visit (yes/no)",
+        ),
         # ----------------------------------------------------------------
-        # Fields below are intentionally NOT YET added — they need MCP
-        # ``get_form_json_paths`` discovery against the live KMC CommCare app:
+        # Five flags from the doc are NOT IMPLEMENTABLE against current KMC
+        # data — the underlying form fields are not collected by the KMC
+        # program forms. Verified by:
+        #   1) zero references to these field names in the production
+        #      Superset KMC dashboard SQL queries
+        #   2) zero references in the labs codebase workflow templates
         #
-        #   heart_rate            -> compute_hr_copycat_pct
-        #   temperature           -> compute_temp_copycat_pct
-        #   spo2_level            -> compute_spo2_implausible_pct
-        #   gestational_age_lmp   -> compute_ga_fullterm_pct
-        #   gps_lat / gps_lon /   -> compute_gps_same_case_far_pct
-        #     gps_accuracy_m
-        #   child_referred        -> compute_ds_no_referral_pct
-        #   visit_type            -> filter follow-up vs registration visits
+        # The flags concerned are:
+        #   flag_hr_copycat        (heart_rate)
+        #   flag_temp_copycat      (temperature)
+        #   flag_spo2_implausible  (spo2_level)
+        #   flag_ga_fullterm       (gestational_age_lmp)
+        #   flag_gps_same_case_far (gps_lat / gps_lon / gps_accuracy_m)
         #
-        # Add FieldComputation entries here once paths are confirmed, then
-        # the corresponding flag_logic.py compute functions will start
-        # returning real values instead of None.
+        # These flag columns will continue to render as "—" in the dashboard,
+        # which the transparency footer documents as "not applicable to
+        # current KMC forms". If the KMC program adds vitals capture in a
+        # future form revision, add FieldComputations here and the existing
+        # flag_logic.py compute functions will start returning real values.
         # ----------------------------------------------------------------
     ],
     histograms=[],
