@@ -139,11 +139,11 @@ FLAG_LABELS: dict[str, str] = {
     "flag_wt_gain": "High Weight Gain",
     "flag_wt_zero": "Zero Weight Change",
     "flag_round_weight": "Rounded Weights",
-    "flag_hr_copycat": "Copy-Paste HR",
-    "flag_temp_copycat": "Copy-Paste Temp",
-    "flag_spo2_implausible": "Implausible SpO2",
-    "flag_ga_fullterm": "Gest. Age Full-Term",
-    "flag_gps_same_case_far": "GPS Spread (Same Case)",
+    "flag_hr_copycat": "Heart Rate",
+    "flag_temp_copycat": "Temperature",
+    "flag_spo2_implausible": "SpO2",
+    "flag_ga_fullterm": "Gestational Age",
+    "flag_gps_same_case_far": "GPS Spread",
     "flag_ds_no_referral": "DS w/o Referral",
 }
 
