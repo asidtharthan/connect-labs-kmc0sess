@@ -41,23 +41,23 @@ from typing import Any
 
 THRESHOLDS: dict[str, float] = {
     # --- 9 currently in JS ---
-    "visits": 3.0,           # Avg visits/closed-non-mort case below this is concerning
-    "mort_low": 0.02,        # < 2% mortality is biologically implausible
-    "mort_high": 0.20,       # > 20% mortality is a quality concern
-    "enroll": 0.35,          # > 35% of cases enrolled 8+ days post-discharge
-    "danger_high": 0.30,     # > 30% follow-up visits with danger signs
-    "danger_zero": 0.0,      # Exactly 0 danger signs ever (implausible)
-    "wt_loss": 0.15,         # > 15% successive weight pairs show loss
-    "wt_gain": 60.0,         # Mean daily gain > 60 g/day (fabrication signal)
-    "wt_zero": 0.30,         # > 30% successive pairs show no weight change
+    "visits": 3.0,  # Avg visits/closed-non-mort case below this is concerning
+    "mort_low": 0.02,  # < 2% mortality is biologically implausible
+    "mort_high": 0.20,  # > 20% mortality is a quality concern
+    "enroll": 0.35,  # > 35% of cases enrolled 8+ days post-discharge
+    "danger_high": 0.30,  # > 30% follow-up visits with danger signs
+    "danger_zero": 0.0,  # Exactly 0 danger signs ever (implausible)
+    "wt_loss": 0.15,  # > 15% successive weight pairs show loss
+    "wt_gain": 60.0,  # Mean daily gain > 60 g/day (fabrication signal)
+    "wt_zero": 0.30,  # > 30% successive pairs show no weight change
     # --- 7 secondary, from "Overview of KMC flags [March 2026].docx" ---
-    "round_weight": 0.80,    # >= 80% weights as exact multiples of 100g
-    "hr_copycat": 0.75,      # > 75% follow-up visits share single HR value
-    "temp_copycat": 0.75,    # > 75% follow-up visits share single temp value
+    "round_weight": 0.80,  # >= 80% weights as exact multiples of 100g
+    "hr_copycat": 0.75,  # > 75% follow-up visits share single HR value
+    "temp_copycat": 0.75,  # > 75% follow-up visits share single temp value
     "spo2_implausible": 0.10,  # > 10% SpO2 readings outside 70-100%
-    "ga_fullterm": 0.30,     # > 30% registrations with gestational_age >= 37 weeks
+    "ga_fullterm": 0.30,  # > 30% registrations with gestational_age >= 37 weeks
     "gps_same_case_far": 0.30,  # > 30% same-case GPS pairs > 1km apart
-    "ds_no_referral": 0.0,   # Exactly 0% referral rate across DS-positive visits
+    "ds_no_referral": 0.0,  # Exactly 0% referral rate across DS-positive visits
 }
 
 MIN_CASES: dict[str, int] = {
@@ -67,7 +67,7 @@ MIN_CASES: dict[str, int] = {
     "danger_high": 20,
     "danger_zero": 30,
     "weight": 10,
-    "exclude": 20,           # FLWs with fewer total cases are excluded entirely
+    "exclude": 20,  # FLWs with fewer total cases are excluded entirely
     "round_weight": 20,
     "hr_copycat": 20,
     "temp_copycat": 20,
@@ -81,15 +81,16 @@ MIN_CASES: dict[str, int] = {
 # Flag display tiers
 # =============================================================================
 
-# Neal's six priority indicators surfaced in the top-tier UI table.
+# Priority indicators surfaced in the top-tier UI table.
 # ``flag_mort`` is synthetic — true if either flag_mort_low or flag_mort_high.
+# ``flag_data_quality`` is synthetic — true if any DATA_QUALITY_FLAGS sub-flag fires.
 PRIORITY_FLAGS: tuple[str, ...] = (
     "flag_visits",
     "flag_mort",
-    "flag_round_weight",
+    "flag_data_quality",
     "flag_enroll",
     "flag_danger_high",
-    "flag_hr_copycat",
+    "flag_ds_no_referral",
 )
 
 # All other flags shown in the collapsible secondary tier.
@@ -100,11 +101,12 @@ SECONDARY_FLAGS: tuple[str, ...] = (
     "flag_wt_loss",
     "flag_wt_gain",
     "flag_wt_zero",
+    "flag_round_weight",
+    "flag_hr_copycat",
     "flag_temp_copycat",
     "flag_spo2_implausible",
     "flag_ga_fullterm",
     "flag_gps_same_case_far",
-    "flag_ds_no_referral",
 )
 
 # Distinct flags actually computed (excludes the synthetic flag_mort).
@@ -128,24 +130,98 @@ ALL_FLAGS: tuple[str, ...] = (
 )
 
 FLAG_LABELS: dict[str, str] = {
-    "flag_visits": "Low Visits/Case",
-    "flag_mort": "Mortality (any)",
+    "flag_visits": "Visits/Case",
+    "flag_mort": "Mortality",
     "flag_mort_low": "Low Mortality",
     "flag_mort_high": "High Mortality",
     "flag_enroll": "Late Enrollment",
-    "flag_danger_high": "High Danger Signs",
-    "flag_danger_zero": "Zero Danger Signs",
-    "flag_wt_loss": "High Weight Loss",
-    "flag_wt_gain": "High Weight Gain",
-    "flag_wt_zero": "Zero Weight Change",
+    "flag_danger_high": "Danger Signs",
+    "flag_danger_zero": "No Danger Signs",
+    "flag_wt_loss": "Weight Loss",
+    "flag_wt_gain": "Weight Gain",
+    "flag_wt_zero": "Weight Stagnant",
     "flag_round_weight": "Rounded Weights",
-    "flag_hr_copycat": "Heart Rate",
-    "flag_temp_copycat": "Temperature",
-    "flag_spo2_implausible": "SpO2",
+    "flag_hr_copycat": "HR Copy-Paste",
+    "flag_temp_copycat": "Temp Copy-Paste",
+    "flag_spo2_implausible": "SpO2 Implausible",
     "flag_ga_fullterm": "Gestational Age",
     "flag_gps_same_case_far": "GPS Spread",
-    "flag_ds_no_referral": "DS w/o Referral",
+    "flag_ds_no_referral": "No Referral",
+    "flag_data_quality": "Data Quality",
 }
+
+# Detailed descriptions for info tooltips. Each value is a short sentence
+# explaining what the flag measures and its threshold.
+FLAG_DESCRIPTIONS: dict[str, str] = {
+    "flag_visits": "Avg follow-up visits per closed non-mortality case < 3.0 (min 10 cases, uses 50 most recent).",
+    "flag_mort": "Mortality rate < 2% (implausible) or > 20% (quality concern). Min 20 cases.",
+    "flag_mort_low": "Mortality rate < 2% — biologically implausible. Min 20 cases.",
+    "flag_mort_high": "Mortality rate > 20% — quality concern. Min 20 cases.",
+    "flag_enroll": "> 35% of cases enrolled 8+ days after hospital discharge. Min 10 cases with dates.",
+    "flag_danger_high": "> 30% of follow-up visits show danger signs. Min 20 visits.",
+    "flag_danger_zero": "Exactly 0% danger signs across 30+ visits — implausible.",
+    "flag_wt_loss": "> 15% of successive weight pairs show weight loss. Min 10 pairs.",
+    "flag_wt_gain": "Mean daily weight gain > 60 g/day — indicates fabrication. Min 10 pairs.",
+    "flag_wt_zero": "> 30% of successive weight pairs show no change. Min 10 pairs.",
+    "flag_round_weight": ">= 80% of weights are exact multiples of 100g. Min 20 weights.",
+    "flag_hr_copycat": "> 75% of heart rate readings are the same value. Min 20 visits.",
+    "flag_temp_copycat": "> 75% of temperature readings are the same value. Min 20 visits.",
+    "flag_spo2_implausible": "> 10% of SpO2 readings outside 70–100% range. Min 20 visits.",
+    "flag_ga_fullterm": "> 30% of registrations with gestational age >= 37 weeks. Min 10.",
+    "flag_gps_same_case_far": "> 30% of same-case GPS pairs > 1km apart. Min 20 visits.",
+    "flag_ds_no_referral": "0% referral rate for danger-sign-positive visits. Min 5 DS+ visits.",
+    "flag_data_quality": (
+        "Composite: fires if any of Rounded Weights, HR Copy-Paste," " Temp Copy-Paste, or SpO2 Implausible fires."
+    ),
+}
+
+# Mapping from flag key to the metric value to display in the cell,
+# the Python format string, and the threshold display text.
+FLAG_METRIC_KEY: dict[str, str] = {
+    "flag_visits": "avg_visits",
+    "flag_mort": "mort_rate",
+    "flag_enroll": "pct_late_enroll",
+    "flag_danger_high": "danger_rate",
+    "flag_danger_zero": "danger_rate",
+    "flag_wt_loss": "pct_wt_loss",
+    "flag_wt_gain": "mean_daily_gain",
+    "flag_wt_zero": "pct_wt_zero",
+    "flag_round_weight": "round_weight_pct",
+    "flag_hr_copycat": "hr_copycat_pct",
+    "flag_temp_copycat": "temp_copycat_pct",
+    "flag_spo2_implausible": "spo2_implausible_pct",
+    "flag_ga_fullterm": "ga_fullterm_pct",
+    "flag_gps_same_case_far": "gps_same_case_far_pct",
+    "flag_ds_no_referral": "ds_no_referral_pct",
+}
+
+FLAG_THRESHOLD_DISPLAY: dict[str, str] = {
+    "flag_visits": "< 3.0",
+    "flag_mort": "< 2% or > 20%",
+    "flag_mort_low": "< 2%",
+    "flag_mort_high": "> 20%",
+    "flag_enroll": "> 35%",
+    "flag_danger_high": "> 30%",
+    "flag_danger_zero": "= 0%",
+    "flag_wt_loss": "> 15%",
+    "flag_wt_gain": "> 60 g/d",
+    "flag_wt_zero": "> 30%",
+    "flag_round_weight": ">= 80%",
+    "flag_hr_copycat": "> 75%",
+    "flag_temp_copycat": "> 75%",
+    "flag_spo2_implausible": "> 10%",
+    "flag_ga_fullterm": "> 30%",
+    "flag_gps_same_case_far": "> 30%",
+    "flag_ds_no_referral": "= 0%",
+}
+
+# Sub-flags grouped under the composite "Data Quality" column.
+DATA_QUALITY_FLAGS: tuple[str, ...] = (
+    "flag_round_weight",
+    "flag_hr_copycat",
+    "flag_temp_copycat",
+    "flag_spo2_implausible",
+)
 
 # Closed-case kmc_status values used by ``compute_case_metrics``.
 _CLOSED_STATUSES: frozenset[str] = frozenset({"discharged", "lost_to_followup", "deceased"})
@@ -182,6 +258,7 @@ class FLWFlagResult:
 
     username: str
     total_cases: int = 0
+    total_cases_from_visits: int = 0  # Distinct case IDs seen in visit rows
     deaths: int = 0
     closed_cases: int = 0
     non_mort_closed: int = 0
@@ -194,17 +271,25 @@ class FLWFlagResult:
     mean_daily_gain: float | None = None
     pct_wt_zero: float | None = None
     weight_pairs: int = 0
+    # Secondary flag metric values (for numeric display in cells)
+    round_weight_pct: float | None = None
+    hr_copycat_pct: float | None = None
+    temp_copycat_pct: float | None = None
+    spo2_implausible_pct: float | None = None
+    ga_fullterm_pct: float | None = None
+    gps_same_case_far_pct: float | None = None
+    ds_no_referral_pct: float | None = None
     excluded: bool = False
     flags: dict[str, bool | None] = field(default_factory=dict)
 
     @property
     def flag_count(self) -> int:
-        """Number of distinct flags currently fired (excludes synthetic flag_mort)."""
+        """Number of distinct flags currently fired (excludes synthetics)."""
         return sum(1 for k in ALL_FLAGS if self.flags.get(k))
 
     @property
     def priority_flag_count(self) -> int:
-        """Number of priority-tier flags fired (uses synthetic flag_mort)."""
+        """Number of priority-tier flags fired (uses synthetics flag_mort + flag_data_quality)."""
         return sum(1 for k in PRIORITY_FLAGS if self.flags.get(k))
 
 
@@ -295,9 +380,9 @@ def compute_weight_metrics(visit_rows: list[Any]) -> dict[str, Any]:
 
     for visits in by_child.values():
         eligible = [
-            v for v in visits
-            if _safe_float(_row_get(v, "weight")) is not None
-            and _parse_date(_row_get(v, "visit_date")) is not None
+            v
+            for v in visits
+            if _safe_float(_row_get(v, "weight")) is not None and _parse_date(_row_get(v, "visit_date")) is not None
         ]
         eligible.sort(key=lambda v: _parse_date(_row_get(v, "visit_date")))
 
@@ -365,11 +450,7 @@ def compute_enrollment_metrics(visit_rows: list[Any]) -> dict[str, Any]:
                 late_cases += 1
 
     return {
-        "pct_late_enroll": (
-            (late_cases / cases_with_dates)
-            if cases_with_dates >= MIN_CASES["enroll"]
-            else None
-        ),
+        "pct_late_enroll": ((late_cases / cases_with_dates) if cases_with_dates >= MIN_CASES["enroll"] else None),
         "cases_with_dates": cases_with_dates,
     }
 
@@ -398,13 +479,16 @@ def compute_case_metrics(visit_rows: list[Any]) -> dict[str, Any]:
         if not cid:
             continue
         cid = str(cid)
-        slot = by_case.setdefault(cid, {
-            "case_id": cid,
-            "latest_visit_date": None,
-            "latest_status": None,
-            "latest_child_alive": None,
-            "visit_count": 0,
-        })
+        slot = by_case.setdefault(
+            cid,
+            {
+                "case_id": cid,
+                "latest_visit_date": None,
+                "latest_status": None,
+                "latest_child_alive": None,
+                "visit_count": 0,
+            },
+        )
         slot["visit_count"] += 1
         vdate = _parse_date(_row_get(row, "visit_date"))
         if vdate is None:
@@ -526,7 +610,7 @@ def compute_hr_copycat_pct(visit_rows: list[Any]) -> tuple[float | None, int]:
 def compute_temp_copycat_pct(visit_rows: list[Any]) -> tuple[float | None, int]:
     """Fraction of follow-up visits sharing the single most-frequent temperature.
 
-    NOT-YET-WIRED: returns (None, 0) until ``temperature`` field is added.
+    Wired via ``form.danger_signs_checklist.svn_temperature`` in pipeline_config.
     """
     temps = [_safe_float(_row_get(r, "temperature")) for r in visit_rows]
     temps = [t for t in temps if t is not None]
@@ -633,9 +717,7 @@ def derive_flags(aggregated_row: Any, visit_rows: list[Any]) -> FLWFlagResult:
     # Doc-faithful avg-visits: 50 most recently closed non-mortality cases.
     avg_visits, top_50_count = compute_avg_visits_top_50(case_metrics)
     mort_rate = (deaths / total_cases) if total_cases > 0 else None
-    danger_rate = (
-        danger_positive_count / danger_visit_count if danger_visit_count > 0 else None
-    )
+    danger_rate = danger_positive_count / danger_visit_count if danger_visit_count > 0 else None
 
     # Secondary flag inputs
     round_pct, _round_n = compute_round_weight_pct(visit_rows)
@@ -654,19 +736,12 @@ def derive_flags(aggregated_row: Any, visit_rows: list[Any]) -> FLWFlagResult:
         # flag_visits uses the 50-closed-case window (compute_avg_visits_top_50
         # already enforces MIN_CASES["visits"]; if too few qualify, avg_visits
         # is None and the flag does not fire).
-        flags["flag_visits"] = (
-            avg_visits is not None
-            and avg_visits < THRESHOLDS["visits"]
-        )
+        flags["flag_visits"] = avg_visits is not None and avg_visits < THRESHOLDS["visits"]
         flags["flag_mort_high"] = (
-            total_cases >= MIN_CASES["mort"]
-            and mort_rate is not None
-            and mort_rate > THRESHOLDS["mort_high"]
+            total_cases >= MIN_CASES["mort"] and mort_rate is not None and mort_rate > THRESHOLDS["mort_high"]
         )
         flags["flag_mort_low"] = (
-            total_cases >= MIN_CASES["mort"]
-            and mort_rate is not None
-            and mort_rate < THRESHOLDS["mort_low"]
+            total_cases >= MIN_CASES["mort"] and mort_rate is not None and mort_rate < THRESHOLDS["mort_low"]
         )
         flags["flag_enroll"] = (
             enrollment_metrics["cases_with_dates"] >= MIN_CASES["enroll"]
@@ -701,41 +776,61 @@ def derive_flags(aggregated_row: Any, visit_rows: list[Any]) -> FLWFlagResult:
 
         # ---- 7 secondary (1 live + 6 not-yet-wired returning None) ----
         flags["flag_round_weight"] = (
-            round_pct is not None and round_pct >= THRESHOLDS["round_weight"]
-        ) if round_pct is not None else None
+            (round_pct is not None and round_pct >= THRESHOLDS["round_weight"]) if round_pct is not None else None
+        )
 
         flags["flag_hr_copycat"] = (
-            hr_pct is not None and hr_pct > THRESHOLDS["hr_copycat"]
-        ) if hr_pct is not None else None
+            (hr_pct is not None and hr_pct > THRESHOLDS["hr_copycat"]) if hr_pct is not None else None
+        )
 
         flags["flag_temp_copycat"] = (
-            temp_pct is not None and temp_pct > THRESHOLDS["temp_copycat"]
-        ) if temp_pct is not None else None
+            (temp_pct is not None and temp_pct > THRESHOLDS["temp_copycat"]) if temp_pct is not None else None
+        )
 
         flags["flag_spo2_implausible"] = (
-            spo2_pct is not None and spo2_pct > THRESHOLDS["spo2_implausible"]
-        ) if spo2_pct is not None else None
+            (spo2_pct is not None and spo2_pct > THRESHOLDS["spo2_implausible"]) if spo2_pct is not None else None
+        )
 
         flags["flag_ga_fullterm"] = (
-            ga_pct is not None and ga_pct > THRESHOLDS["ga_fullterm"]
-        ) if ga_pct is not None else None
+            (ga_pct is not None and ga_pct > THRESHOLDS["ga_fullterm"]) if ga_pct is not None else None
+        )
 
         flags["flag_gps_same_case_far"] = (
-            gps_pct is not None and gps_pct > THRESHOLDS["gps_same_case_far"]
-        ) if gps_pct is not None else None
+            (gps_pct is not None and gps_pct > THRESHOLDS["gps_same_case_far"]) if gps_pct is not None else None
+        )
 
         flags["flag_ds_no_referral"] = (
-            referral_pct is not None and referral_pct == THRESHOLDS["ds_no_referral"]
-        ) if referral_pct is not None else None
+            (referral_pct is not None and referral_pct == THRESHOLDS["ds_no_referral"])
+            if referral_pct is not None
+            else None
+        )
 
     # Synthetic priority-tier mort flag: True if either component is True.
     flags["flag_mort"] = (
-        bool(flags.get("flag_mort_low")) or bool(flags.get("flag_mort_high"))
-    ) if not excluded else None
+        (bool(flags.get("flag_mort_low")) or bool(flags.get("flag_mort_high"))) if not excluded else None
+    )
+
+    # Synthetic data quality flag: True if ANY data-quality sub-flag fires.
+    dq_values = [flags.get(f) for f in DATA_QUALITY_FLAGS]
+    if excluded:
+        flags["flag_data_quality"] = None
+    elif any(v is True for v in dq_values):
+        flags["flag_data_quality"] = True
+    elif all(v is None for v in dq_values):
+        flags["flag_data_quality"] = None
+    else:
+        flags["flag_data_quality"] = False
+
+    # Count distinct case IDs from visit rows for mortality denominator cross-check
+    visit_case_ids = {
+        str(_row_get(r, "beneficiary_case_id")) for r in visit_rows if _row_get(r, "beneficiary_case_id")
+    }
+    total_cases_from_visits = len(visit_case_ids)
 
     return FLWFlagResult(
         username=username,
         total_cases=total_cases,
+        total_cases_from_visits=total_cases_from_visits,
         deaths=deaths,
         closed_cases=closed_cases,
         non_mort_closed=non_mort_closed,
@@ -748,6 +843,13 @@ def derive_flags(aggregated_row: Any, visit_rows: list[Any]) -> FLWFlagResult:
         mean_daily_gain=weight_metrics["mean_daily_gain"],
         pct_wt_zero=weight_metrics["pct_wt_zero"],
         weight_pairs=weight_metrics["weight_pairs"],
+        round_weight_pct=round_pct,
+        hr_copycat_pct=hr_pct,
+        temp_copycat_pct=temp_pct,
+        spo2_implausible_pct=spo2_pct,
+        ga_fullterm_pct=ga_pct,
+        gps_same_case_far_pct=gps_pct,
+        ds_no_referral_pct=referral_pct,
         excluded=excluded,
         flags=flags,
     )
@@ -783,9 +885,12 @@ def visit_flag_sources(visit_rows: list[Any], flw_result: FLWFlagResult) -> list
                 by_child.setdefault(str(cid), []).append(idx)
         for indices in by_child.values():
             sorted_idx = sorted(
-                [i for i in indices
-                 if _safe_float(_row_get(visit_rows[i], "weight")) is not None
-                 and _parse_date(_row_get(visit_rows[i], "visit_date")) is not None],
+                [
+                    i
+                    for i in indices
+                    if _safe_float(_row_get(visit_rows[i], "weight")) is not None
+                    and _parse_date(_row_get(visit_rows[i], "visit_date")) is not None
+                ],
                 key=lambda i: _parse_date(_row_get(visit_rows[i], "visit_date")),
             )
             for i in range(1, len(sorted_idx)):
@@ -869,14 +974,16 @@ def visit_flag_sources(visit_rows: list[Any], flw_result: FLWFlagResult) -> list
             if ds in ("yes", True, 1, "1") and referred not in ("yes", True, 1, "1"):
                 sources.append("flag_ds_no_referral")
 
-        rows.append({
-            "visit_date": _row_get(row, "visit_date"),
-            "weight": _row_get(row, "weight"),
-            "beneficiary_case_id": _row_get(row, "beneficiary_case_id"),
-            "visit_number": _row_get(row, "visit_number"),
-            "kmc_status": _row_get(row, "kmc_status"),
-            "flag_sources": sources,
-        })
+        rows.append(
+            {
+                "visit_date": _row_get(row, "visit_date"),
+                "weight": _row_get(row, "weight"),
+                "beneficiary_case_id": _row_get(row, "beneficiary_case_id"),
+                "visit_number": _row_get(row, "visit_number"),
+                "kmc_status": _row_get(row, "kmc_status"),
+                "flag_sources": sources,
+            }
+        )
 
     rows.sort(key=lambda r: str(r["visit_date"] or ""), reverse=True)
     return rows

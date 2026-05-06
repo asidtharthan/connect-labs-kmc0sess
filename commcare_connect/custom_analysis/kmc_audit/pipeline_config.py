@@ -17,24 +17,19 @@ Form-path strategy
 ------------------
 - Fields needed by the **9 currently-implemented flags** all have known
   form paths copied verbatim from kmc_flw_flags.py PIPELINE_SCHEMAS.
-- Fields needed by the **6 secondary flags that aren't yet implemented**
-  (heart_rate, temperature, spo2_level, gestational_age_lmp, gps_lat/lon,
-  child_referred, visit_type) require MCP ``get_form_json_paths``
-  discovery against the live KMC CommCare app to find their exact paths.
-  Until those paths are confirmed, those FieldComputation entries are
-  intentionally omitted — flag_logic.py's compute functions for those
-  flags return None gracefully when the data is absent.
-- The 7th secondary flag (``flag_round_weight``) is implementable today
-  using the existing ``weight`` field, so it works out of the box.
+- ``temperature`` is wired — path ``form.danger_signs_checklist.svn_temperature``
+  confirmed from kmc_longitudinal.py, kmc_project_metrics.py, and timeline_config.py.
+- ``child_referred`` is wired — path ``form.case.update.child_referred`` confirmed
+  from Superset "KMC - Referral Rate within 28 Days" SQL.
+- ``flag_round_weight`` uses the existing ``weight`` field.
+- **4 secondary flags** (heart_rate, spo2_level, gestational_age_lmp, gps)
+  still need form-path discovery via ``python manage.py verify_kmc_form_fields``.
+  Until confirmed, flag_logic.py returns None gracefully for those.
 """
 
 from __future__ import annotations
 
-from commcare_connect.labs.analysis import (
-    AnalysisPipelineConfig,
-    CacheStage,
-    FieldComputation,
-)
+from commcare_connect.labs.analysis import AnalysisPipelineConfig, CacheStage, FieldComputation
 
 # Experiment names — kept distinct from the existing ``kmc_flw_flags``
 # workflow template so caches don't collide.
@@ -210,26 +205,25 @@ KMC_AUDIT_VISIT_CONFIG = AnalysisPipelineConfig(
             aggregation="first",
             description="Was the child referred for medical attention on this visit (yes/no)",
         ),
+        # Temperature — path confirmed from kmc_longitudinal.py, kmc_project_metrics.py,
+        # and timeline_config.py. Drives flag_temp_copycat.
+        FieldComputation(
+            name="temperature",
+            path="form.danger_signs_checklist.svn_temperature",
+            aggregation="first",
+            transform=_to_float,
+            description="SVN temperature reading on this visit",
+        ),
         # ----------------------------------------------------------------
-        # Five flags from the doc are NOT IMPLEMENTABLE against current KMC
-        # data — the underlying form fields are not collected by the KMC
-        # program forms. Verified by:
-        #   1) zero references to these field names in the production
-        #      Superset KMC dashboard SQL queries
-        #   2) zero references in the labs codebase workflow templates
-        #
-        # The flags concerned are:
+        # Four flags still need form-path discovery via
+        # `python manage.py verify_kmc_form_fields`:
         #   flag_hr_copycat        (heart_rate)
-        #   flag_temp_copycat      (temperature)
         #   flag_spo2_implausible  (spo2_level)
         #   flag_ga_fullterm       (gestational_age_lmp)
         #   flag_gps_same_case_far (gps_lat / gps_lon / gps_accuracy_m)
         #
-        # These flag columns will continue to render as "—" in the dashboard,
-        # which the transparency footer documents as "not applicable to
-        # current KMC forms". If the KMC program adds vitals capture in a
-        # future form revision, add FieldComputations here and the existing
-        # flag_logic.py compute functions will start returning real values.
+        # These flag columns render as "—" until their form paths are
+        # confirmed and FieldComputations are added here.
         # ----------------------------------------------------------------
     ],
     histograms=[],

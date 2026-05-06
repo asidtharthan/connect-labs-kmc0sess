@@ -29,25 +29,19 @@ from typing import Any
 
 from django.http import HttpRequest
 
-from commcare_connect.labs.analysis import (
-    AnalysisPipeline,
-    FLWAnalysisResult,
-    VisitAnalysisResult,
-    fetch_flw_names,
-)
+from commcare_connect.labs.analysis import AnalysisPipeline, FLWAnalysisResult, VisitAnalysisResult, fetch_flw_names
 
-from .constants import (
-    KMC_OPPORTUNITIES,
-    KMC_OPPORTUNITY_IDS,
-    llo_for_opportunity,
-    opportunity_name,
-)
+from .constants import KMC_OPPORTUNITIES, KMC_OPPORTUNITY_IDS, llo_for_opportunity, opportunity_name
 from .flag_logic import (
     ALL_FLAGS,
+    DATA_QUALITY_FLAGS,
+    FLAG_DESCRIPTIONS,
     FLAG_LABELS,
-    FLWFlagResult,
+    FLAG_METRIC_KEY,
+    FLAG_THRESHOLD_DISPLAY,
     PRIORITY_FLAGS,
     SECONDARY_FLAGS,
+    FLWFlagResult,
     derive_flags,
     visit_flag_sources,
 )
@@ -127,10 +121,12 @@ class KMCAuditDataAccess:
             # stream progress to the browser at this layer; if we add
             # progress later it's a single-place change.
             flw_aggregated: FLWAnalysisResult = pipeline.stream_analysis_ignore_events(
-                KMC_AUDIT_FLW_CONFIG, opportunity_id=opportunity_id,
+                KMC_AUDIT_FLW_CONFIG,
+                opportunity_id=opportunity_id,
             )
             visit_result: VisitAnalysisResult = pipeline.stream_analysis_ignore_events(
-                KMC_AUDIT_VISIT_CONFIG, opportunity_id=opportunity_id,
+                KMC_AUDIT_VISIT_CONFIG,
+                opportunity_id=opportunity_id,
             )
             # FLW display-name lookup. Stored on the OpportunityResult so
             # build_dashboard() can attach it to each row without a second pass.
@@ -164,6 +160,20 @@ class KMCAuditDataAccess:
             uname = flw_row.username
             visit_rows = visits_by_flw.get(uname, [])
             result = derive_flags(flw_row, visit_rows)
+            # Cross-check: flag if aggregated total_cases diverges from visit-derived count
+            if (
+                result.total_cases > 0
+                and result.total_cases_from_visits > 0
+                and result.total_cases != result.total_cases_from_visits
+            ):
+                logger.warning(
+                    "[KMCAudit] opp %d FLW %s: total_cases mismatch — "
+                    "aggregated=%d, visit-derived=%d (mortality denominator may be skewed)",
+                    opportunity_id,
+                    uname,
+                    result.total_cases,
+                    result.total_cases_from_visits,
+                )
             flw_results.append(result)
 
         return OpportunityResult(
@@ -219,6 +229,23 @@ class KMCAuditDataAccess:
                         names_map[r.username] = r.flw_name
 
             for flw in opp.flw_results:
+                # Build a metrics dict keyed by flag metric names for cell display
+                metrics = {
+                    "avg_visits": flw.avg_visits,
+                    "mort_rate": flw.mort_rate,
+                    "danger_rate": flw.danger_rate,
+                    "pct_late_enroll": flw.pct_late_enroll,
+                    "pct_wt_loss": flw.pct_wt_loss,
+                    "mean_daily_gain": flw.mean_daily_gain,
+                    "pct_wt_zero": flw.pct_wt_zero,
+                    "round_weight_pct": flw.round_weight_pct,
+                    "hr_copycat_pct": flw.hr_copycat_pct,
+                    "temp_copycat_pct": flw.temp_copycat_pct,
+                    "spo2_implausible_pct": flw.spo2_implausible_pct,
+                    "ga_fullterm_pct": flw.ga_fullterm_pct,
+                    "gps_same_case_far_pct": flw.gps_same_case_far_pct,
+                    "ds_no_referral_pct": flw.ds_no_referral_pct,
+                }
                 row = {
                     "username": flw.username,
                     "flw_name": names_map.get(flw.username) or flw.username,
@@ -226,6 +253,7 @@ class KMCAuditDataAccess:
                     "opportunity_name": opp.opportunity_name,
                     "llo": opp.llo or "",
                     "total_cases": flw.total_cases,
+                    "total_cases_from_visits": flw.total_cases_from_visits,
                     "deaths": flw.deaths,
                     "closed_cases": flw.closed_cases,
                     "non_mort_closed": flw.non_mort_closed,
@@ -241,14 +269,13 @@ class KMCAuditDataAccess:
                     "flag_count": flw.flag_count,
                     "priority_flag_count": flw.priority_flag_count,
                     "flags": flw.flags,
+                    "metrics": metrics,
                 }
                 rows.append(row)
 
         # Sort by priority flag count descending so the most concerning
         # FLWs surface at the top.
-        rows.sort(
-            key=lambda r: (-(r["priority_flag_count"] or 0), -(r["flag_count"] or 0), r["username"])
-        )
+        rows.sort(key=lambda r: (-(r["priority_flag_count"] or 0), -(r["flag_count"] or 0), r["username"]))
 
         # Unique-FLW counts (an FLW working in multiple opportunities still
         # counts ONCE here, even though they show up as multiple rows in the
@@ -256,16 +283,11 @@ class KMCAuditDataAccess:
         # per-opp, but the headline numbers should reflect distinct people.
         unique_usernames: set[str] = {r["username"] for r in rows}
         total_flws = len(unique_usernames)
-        flws_with_priority_flag = len({
-            r["username"] for r in rows if r["priority_flag_count"] >= 1
-        })
+        flws_with_priority_flag = len({r["username"] for r in rows if r["priority_flag_count"] >= 1})
         # An FLW is "excluded" only if EVERY opp they appear in is excluded
         # (i.e. they have <20 cases everywhere). If they have ≥20 cases in
         # any single opp, they're not excluded for that opp.
-        excluded_only_users = {
-            u for u in unique_usernames
-            if all(r["excluded"] for r in rows if r["username"] == u)
-        }
+        excluded_only_users = {u for u in unique_usernames if all(r["excluded"] for r in rows if r["username"] == u)}
         flws_excluded = len(excluded_only_users)
 
         return DashboardSummary(
@@ -306,10 +328,12 @@ class KMCAuditDataAccess:
         try:
             pipeline = AnalysisPipeline(self.request)
             flw_aggregated: FLWAnalysisResult = pipeline.stream_analysis_ignore_events(
-                KMC_AUDIT_FLW_CONFIG, opportunity_id=opportunity_id,
+                KMC_AUDIT_FLW_CONFIG,
+                opportunity_id=opportunity_id,
             )
             visit_result: VisitAnalysisResult = pipeline.stream_analysis_ignore_events(
-                KMC_AUDIT_VISIT_CONFIG, opportunity_id=opportunity_id,
+                KMC_AUDIT_VISIT_CONFIG,
+                opportunity_id=opportunity_id,
             )
         except Exception as e:
             logger.exception("[KMCAudit] drill-down opp %d / %s failed", opportunity_id, username)
@@ -319,7 +343,7 @@ class KMCAuditDataAccess:
         flw_row = next((r for r in flw_aggregated.rows if r.username == username), None)
         if flw_row is None:
             return {
-                "error": f"FLW '{username}' not found in opportunity {opportunity_id}",
+                "error": f"FLW '{username}' not found in opportunity {opportunity_id}",  # noqa: E713
                 "visits": [],
             }
         visit_rows = [r for r in visit_result.rows if getattr(r, "username", "") == username]
@@ -334,14 +358,28 @@ class KMCAuditDataAccess:
             "llo": llo_for_opportunity(opportunity_id),
             "metrics": {
                 "total_cases": flw_result.total_cases,
+                "total_cases_from_visits": flw_result.total_cases_from_visits,
                 "closed_cases": flw_result.closed_cases,
                 "deaths": flw_result.deaths,
+                "non_mort_closed": flw_result.non_mort_closed,
                 "avg_visits": flw_result.avg_visits,
                 "mort_rate": flw_result.mort_rate,
+                "danger_rate": flw_result.danger_rate,
+                "pct_late_enroll": flw_result.pct_late_enroll,
+                "cases_with_dates": flw_result.cases_with_dates,
                 "weight_pairs": flw_result.weight_pairs,
+                "pct_wt_loss": flw_result.pct_wt_loss,
+                "mean_daily_gain": flw_result.mean_daily_gain,
+                "pct_wt_zero": flw_result.pct_wt_zero,
+                "round_weight_pct": flw_result.round_weight_pct,
+                "temp_copycat_pct": flw_result.temp_copycat_pct,
+                "ds_no_referral_pct": flw_result.ds_no_referral_pct,
             },
             "flags": flw_result.flags,
             "visits": annotated_visits,
+            "flag_labels": FLAG_LABELS,
+            "flag_descriptions": FLAG_DESCRIPTIONS,
+            "flag_thresholds": FLAG_THRESHOLD_DISPLAY,
             "error": None,
         }
 
@@ -352,14 +390,19 @@ class KMCAuditDataAccess:
     @staticmethod
     def column_definitions() -> dict[str, list[dict[str, str]]]:
         """Column metadata for the priority and secondary tables."""
+
+        def _col(k: str) -> dict[str, str]:
+            return {
+                "key": k,
+                "label": FLAG_LABELS.get(k, k),
+                "description": FLAG_DESCRIPTIONS.get(k, ""),
+                "threshold": FLAG_THRESHOLD_DISPLAY.get(k, ""),
+                "metric_key": FLAG_METRIC_KEY.get(k, ""),
+            }
+
         return {
-            "priority": [
-                {"key": k, "label": FLAG_LABELS[k]} for k in PRIORITY_FLAGS
-            ],
-            "secondary": [
-                {"key": k, "label": FLAG_LABELS[k]} for k in SECONDARY_FLAGS
-            ],
-            "all": [
-                {"key": k, "label": FLAG_LABELS[k]} for k in ALL_FLAGS
-            ],
+            "priority": [_col(k) for k in PRIORITY_FLAGS],
+            "secondary": [_col(k) for k in SECONDARY_FLAGS],
+            "all": [_col(k) for k in ALL_FLAGS],
+            "data_quality_sub_flags": [_col(k) for k in DATA_QUALITY_FLAGS],
         }

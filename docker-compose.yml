@@ -8,11 +8,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data/
     environment:
-      - POSTGRES_DB=commcare_connect
+      - POSTGRES_DB=commcare_connect_kmc
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
     ports:
-      - '5432:5432'
+      - '5433:5432'
     healthcheck:
       test: pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}
       interval: 2s
@@ -24,7 +24,7 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - '6379:6379'
+      - '6380:6379'
     healthcheck:
       test: bash -c 'exec 6<>/dev/tcp/redis/6379'
       interval: 2s

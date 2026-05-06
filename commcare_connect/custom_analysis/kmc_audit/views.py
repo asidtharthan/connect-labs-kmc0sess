@@ -21,7 +21,6 @@ import json
 import logging
 import uuid
 
-from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import HttpRequest, JsonResponse
 from django.urls import reverse
@@ -31,7 +30,18 @@ from commcare_connect.audit.data_access import AuditDataAccess
 
 from .constants import KMC_OPPORTUNITIES, KMC_OPPORTUNITY_IDS, LLO_CHOICES, opportunity_name
 from .data_access import KMCAuditDataAccess
-from .flag_logic import ALL_FLAGS, FLAG_LABELS, PRIORITY_FLAGS, SECONDARY_FLAGS
+from .flag_logic import (
+    ALL_FLAGS,
+    DATA_QUALITY_FLAGS,
+    FLAG_DESCRIPTIONS,
+    FLAG_LABELS,
+    FLAG_METRIC_KEY,
+    FLAG_THRESHOLD_DISPLAY,
+    MIN_CASES,
+    PRIORITY_FLAGS,
+    SECONDARY_FLAGS,
+    THRESHOLDS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,11 +75,13 @@ class KMCAuditDashboardView(LoginRequiredMixin, TemplateView):
         # informative error pane — never a 500.
         labs_oauth = self.request.session.get("labs_oauth", {})
         if not labs_oauth.get("access_token"):
-            context.update({
-                "load_error": "No OAuth token in session. Please log in via /labs/login/.",
-                "summary": None,
-                "rows": [],
-            })
+            context.update(
+                {
+                    "load_error": "No OAuth token in session. Please log in via /labs/login/.",
+                    "summary": None,
+                    "rows": [],
+                }
+            )
             return self._add_static_context(context, opp_ids)
 
         try:
@@ -77,39 +89,51 @@ class KMCAuditDashboardView(LoginRequiredMixin, TemplateView):
             summary = data_access.build_dashboard()
         except Exception as e:
             logger.exception("[KMCAudit] dashboard build failed")
-            context.update({
-                "load_error": str(e),
-                "summary": None,
-                "rows": [],
-            })
+            context.update(
+                {
+                    "load_error": str(e),
+                    "summary": None,
+                    "rows": [],
+                }
+            )
             return self._add_static_context(context, opp_ids)
 
-        context.update({
-            "load_error": None,
-            "summary": summary,
-            "rows": summary.rows,
-        })
+        context.update(
+            {
+                "load_error": None,
+                "summary": summary,
+                "rows": summary.rows,
+            }
+        )
         return self._add_static_context(context, opp_ids)
 
     def _add_static_context(self, context: dict, opp_ids: list[int]) -> dict:
         """Filter chips, column metadata, and opp catalogue used by the template."""
         cols = KMCAuditDataAccess.column_definitions()
-        context.update({
-            "selected_opp_ids": opp_ids,
-            "all_kmc_opportunities": [
-                {
-                    "id": oid,
-                    "name": meta["name"],
-                    "llo": meta["llo"],
-                    "selected": oid in opp_ids,
-                }
-                for oid, meta in KMC_OPPORTUNITIES.items()
-            ],
-            "llo_choices": list(LLO_CHOICES),
-            "priority_columns": cols["priority"],
-            "secondary_columns": cols["secondary"],
-            "flag_labels": FLAG_LABELS,
-        })
+        context.update(
+            {
+                "selected_opp_ids": opp_ids,
+                "all_kmc_opportunities": [
+                    {
+                        "id": oid,
+                        "name": meta["name"],
+                        "llo": meta["llo"],
+                        "selected": oid in opp_ids,
+                    }
+                    for oid, meta in KMC_OPPORTUNITIES.items()
+                ],
+                "llo_choices": list(LLO_CHOICES),
+                "priority_columns": cols["priority"],
+                "secondary_columns": cols["secondary"],
+                "data_quality_sub_flags": cols["data_quality_sub_flags"],
+                "flag_labels": FLAG_LABELS,
+                "flag_descriptions": FLAG_DESCRIPTIONS,
+                "flag_thresholds": FLAG_THRESHOLD_DISPLAY,
+                "flag_metric_keys": FLAG_METRIC_KEY,
+                "thresholds": THRESHOLDS,
+                "min_cases": MIN_CASES,
+            }
+        )
         return context
 
 
@@ -131,25 +155,35 @@ class KMCFLWDrilldownView(LoginRequiredMixin, View):
 
         labs_oauth = request.session.get("labs_oauth", {})
         if not labs_oauth.get("access_token"):
-            return render(request, self.template_name, {
-                "error": "Not authenticated. Refresh the page and log in again.",
-                "visits": [],
-            })
+            return render(
+                request,
+                self.template_name,
+                {
+                    "error": "Not authenticated. Refresh the page and log in again.",
+                    "visits": [],
+                },
+            )
 
         data_access = KMCAuditDataAccess(request)
         result = data_access.drill_down(opportunity_id=opportunity_id, username=username)
 
-        return render(request, self.template_name, {
-            "username": username,
-            "opportunity_id": opportunity_id,
-            "opportunity_name": result.get("opportunity_name", ""),
-            "llo": result.get("llo", ""),
-            "metrics": result.get("metrics", {}),
-            "flags": result.get("flags", {}),
-            "visits": result.get("visits", []),
-            "error": result.get("error"),
-            "flag_labels": FLAG_LABELS,
-        })
+        return render(
+            request,
+            self.template_name,
+            {
+                "username": username,
+                "opportunity_id": opportunity_id,
+                "opportunity_name": result.get("opportunity_name", ""),
+                "llo": result.get("llo", ""),
+                "metrics": result.get("metrics", {}),
+                "flags": result.get("flags", {}),
+                "visits": result.get("visits", []),
+                "error": result.get("error"),
+                "flag_labels": FLAG_LABELS,
+                "flag_descriptions": FLAG_DESCRIPTIONS,
+                "flag_thresholds": FLAG_THRESHOLD_DISPLAY,
+            },
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -173,12 +207,16 @@ class KMCAuditModalView(LoginRequiredMixin, View):
         except ValueError:
             opp_id = None
 
-        return render(request, self.template_name, {
-            "usernames": usernames,
-            "opp_id": opp_id,
-            "opp_name": opportunity_name(opp_id) if opp_id else "",
-            "create_url": reverse("kmc_audit:create_audit"),
-        })
+        return render(
+            request,
+            self.template_name,
+            {
+                "usernames": usernames,
+                "opp_id": opp_id,
+                "opp_name": opportunity_name(opp_id) if opp_id else "",
+                "create_url": reverse("kmc_audit:create_audit"),
+            },
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -291,6 +329,7 @@ class KMCAuditCreateView(LoginRequiredMixin, View):
         # pattern at audit/views.py:954-967 to avoid the eager-mode race).
         try:
             from commcare_connect.audit.tasks import run_audit_creation
+
             run_audit_creation.apply_async(
                 kwargs={
                     "access_token": access_token,
@@ -311,20 +350,25 @@ class KMCAuditCreateView(LoginRequiredMixin, View):
 
         logger.info(
             "[KMCAudit] queued audit task %s for opp %d (%d FLWs) by %s",
-            task_id, opportunity_id, len(usernames), username_for_record,
+            task_id,
+            opportunity_id,
+            len(usernames),
+            username_for_record,
         )
 
         # Tell the client where to poll. The audit app already exposes a
         # status endpoint — no need for us to wrap it.
         status_url = f"/audit/api/audit/task/{task_id}/status/"
 
-        return JsonResponse({
-            "success": True,
-            "task_id": task_id,
-            "job_id": job["id"],
-            "status_url": status_url,
-            "message": "Audit creation queued.",
-        })
+        return JsonResponse(
+            {
+                "success": True,
+                "task_id": task_id,
+                "job_id": job["id"],
+                "status_url": status_url,
+                "message": "Audit creation queued.",
+            }
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -334,12 +378,17 @@ class KMCAuditCreateView(LoginRequiredMixin, View):
 
 
 class KMCFlagCatalogueView(LoginRequiredMixin, View):
-    """Returns the flag list + labels as JSON. Used by the dashboard JS for tooltips."""
+    """Returns the flag list + labels + descriptions as JSON. Used by the dashboard JS for tooltips."""
 
     def get(self, request: HttpRequest):
-        return JsonResponse({
-            "priority": list(PRIORITY_FLAGS),
-            "secondary": list(SECONDARY_FLAGS),
-            "all": list(ALL_FLAGS),
-            "labels": FLAG_LABELS,
-        })
+        return JsonResponse(
+            {
+                "priority": list(PRIORITY_FLAGS),
+                "secondary": list(SECONDARY_FLAGS),
+                "all": list(ALL_FLAGS),
+                "data_quality": list(DATA_QUALITY_FLAGS),
+                "labels": FLAG_LABELS,
+                "descriptions": FLAG_DESCRIPTIONS,
+                "thresholds": FLAG_THRESHOLD_DISPLAY,
+            }
+        )

@@ -211,7 +211,12 @@ function kmcChildList() {
             this.loadError = null;
             this.loadingMessage = 'Connecting...';
 
-            const streamUrl = '{{ stream_url }}?opportunity_id={{ opportunity_id }}';
+            let streamUrl = '{{ stream_url }}?opportunity_id={{ opportunity_id }}';
+            // Forward refresh param to SSE stream so pipeline can bypass cache
+            const pageParams = new URLSearchParams(window.location.search);
+            if (pageParams.get('refresh') === '1') {
+                streamUrl += '&refresh=1';
+            }
             console.log('[KMC Child List] Starting SSE load:', streamUrl);
 
             const eventSource = new EventSource(streamUrl);

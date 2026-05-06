@@ -87,7 +87,7 @@ PIPELINE_SCHEMAS = [
                         "form.child_details.birth_weight_reg.child_weight_reg",
                     ],
                     "aggregation": "first",
-                    "transform": "float",
+                    "transform": "kg_to_g",
                 },
                 {
                     "name": "visit_number",
@@ -275,7 +275,10 @@ RENDER_CODE = r"""function WorkflowUI({ definition, instance, workers, pipelines
         if (formatted === null) {
             return <td className={cellClass} title="Not Eligible — insufficient data for this metric"><span className="text-gray-400 italic">NE</span></td>;
         }
-        return <td className={cellClass}>{formatted}</td>;
+        if (flagged) {
+            return <td className={cellClass}>{formatted}</td>;
+        }
+        return <td className={cellClass}>{formatted}<span className="ml-1 text-green-500 text-xs">{'\u2713'}</span></td>;
     };
 
     // =========================================================================
@@ -936,6 +939,7 @@ RENDER_CODE = r"""function WorkflowUI({ definition, instance, workers, pipelines
                                         <td className={'px-3 py-3 text-sm text-center ' + (d.flags.high_danger ? 'bg-red-50 text-red-800 font-semibold' : d.flags.zero_danger ? 'bg-amber-50 text-amber-800 font-semibold' : '')}>
                                             {fmt(d.dangerRate, 'pct') === null ? <span className="text-gray-400 italic" title="Not Eligible — insufficient data for this metric">NE</span> : fmt(d.dangerRate, 'pct')}
                                             {d.flags.zero_danger && !d.flags.high_danger && <span className="ml-1 text-xs" title="Zero danger signs across 30+ visits">&#9888;</span>}
+                                            {!d.flags.high_danger && !d.flags.zero_danger && fmt(d.dangerRate, 'pct') !== null && <span className="ml-1 text-green-500 text-xs">{'\u2713'}</span>}
                                         </td>
                                         {renderCell(d.pctWtLoss, 'pct', 'high_wt_loss', d.flags)}
                                         {renderCell(d.meanDailyGain, 'gain', 'high_wt_gain', d.flags)}
@@ -952,7 +956,7 @@ RENDER_CODE = r"""function WorkflowUI({ definition, instance, workers, pipelines
                                                     {d.flagCount}
                                                 </span>
                                             ) : (
-                                                <span className="text-gray-300">0</span>
+                                                <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-green-100 text-green-600 text-xs font-bold" title="No flags">{'\u2713'}</span>
                                             )}
                                         </td>
                                     </tr>

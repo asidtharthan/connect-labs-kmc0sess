@@ -17,7 +17,6 @@ from commcare_connect.custom_analysis.kmc.pipeline_config import KMC_PIPELINE_CO
 from commcare_connect.labs.analysis.pipeline import AnalysisPipeline
 from commcare_connect.labs.analysis.sse_streaming import AnalysisPipelineSSEMixin, BaseSSEStreamView, send_sse_event
 from commcare_connect.labs.configurable_ui.views import GenericTimelineDataStreamView, GenericTimelineDetailView
-from commcare_connect.opportunity.models import BlobMeta
 
 logger = logging.getLogger(__name__)
 
@@ -237,12 +236,8 @@ class KMCImageProxyView(LoginRequiredMixin, View):
                 )
                 response.raise_for_status()
 
-                # Get content type from BlobMeta if available
-                try:
-                    blob_meta = BlobMeta.objects.get(blob_id=blob_id)
-                    content_type = blob_meta.content_type or "image/jpeg"
-                except BlobMeta.DoesNotExist:
-                    content_type = "image/jpeg"
+                # Use content type from the API response headers
+                content_type = response.headers.get("content-type", "image/jpeg")
 
                 return HttpResponse(response.content, content_type=content_type)
 

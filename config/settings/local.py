@@ -1,5 +1,3 @@
-import platform
-
 from .base import *  # noqa
 from .base import env
 
@@ -11,6 +9,11 @@ SECRET_KEY = env(
     default="5xpjGRDKKXRiO2u1AiwUT6fbl5iM89JkQ9lnMCJEhvW1JQvXdNroF2OMSe60KEcR",
 )
 ALLOWED_HOSTS = ["localhost", "0.0.0.0", "127.0.0.1"] + env.list("DJANGO_ALLOWED_HOSTS", default=[])
+
+# Session isolation for parallel local instances (e.g. AaS on :8000, KMC on :8001).
+# Cookies are NOT port-scoped (RFC 6265), so each project on localhost needs a
+# unique cookie name to avoid cross-project session collisions.
+SESSION_COOKIE_NAME = env("SESSION_COOKIE_NAME", default="sessionid_kmc")
 CSRF_TRUSTED_ORIGINS = ["https://*.127.0.0.1", "https://*.loca.lt"] + env.list("CSRF_TRUSTED_ORIGINS", default=[])
 
 # django-debug-toolbar
@@ -72,7 +75,7 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 # Add labs app to installed apps
-INSTALLED_APPS = INSTALLED_APPS + [
+INSTALLED_APPS = INSTALLED_APPS + [  # noqa: F405
     "commcare_connect.labs",
     "commcare_connect.custom_analysis.chc_nutrition",
 ]  # noqa: F405
@@ -91,6 +94,19 @@ MIDDLEWARE.insert(_auth_idx + 3, "commcare_connect.labs.context.LabsContextMiddl
 PIPELINE_CACHE_TTL_HOURS = 24
 # Accept cache if it has >= 70% of expected visits (handles production streaming truncation)
 PIPELINE_CACHE_TOLERANCE_PCT = 70
+
+# Cache isolation — prevent key collisions with other local instances sharing Redis.
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": env("REDIS_URL", default="redis://localhost:6379/0"),
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "IGNORE_EXCEPTIONS": True,
+            "KEY_PREFIX": "kmc",
+        },
+    }
+}
 
 # Labs apps configuration
 # No longer need hardcoded opportunity_id - API now supports organization_id/program_id

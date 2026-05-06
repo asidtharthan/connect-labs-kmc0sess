@@ -14,11 +14,14 @@ SKIP_KEYS = frozenset({"@xmlns", "@name", "@uiVersion", "@version", "meta", "#ty
 
 
 def _is_valid_weight(x) -> bool:
-    """Check if value is a valid weight (numeric)."""
+    """Check if value is a valid positive weight (numeric, non-negative)."""
     if not x:
         return False
-    s = str(x).strip()
-    return s.replace(".", "").replace("-", "").isdigit()
+    try:
+        val = float(str(x).strip())
+        return val > 0
+    except (ValueError, TypeError):
+        return False
 
 
 def _get_transform_function(transform_name: str):

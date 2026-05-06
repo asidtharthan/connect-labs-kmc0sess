@@ -8,22 +8,36 @@
 
 <div class="px-4 py-3 space-y-3">
 
-  {# ─────────── Inline metric strip ─────────── #}
+  {# ─────────── Metric strip with threshold context ─────────── #}
   <div class="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[12px]">
-    <div><span class="text-gray-500">Cases</span> <span class="font-semibold tabular-nums ml-1">{{ metrics.total_cases }}</span></div>
-    <div><span class="text-gray-500">Closed</span> <span class="font-semibold tabular-nums ml-1">{{ metrics.closed_cases }}</span></div>
-    <div><span class="text-gray-500">Deaths</span> <span class="font-semibold tabular-nums ml-1">{{ metrics.deaths }}</span></div>
+    <div>
+      <span class="text-gray-500">Cases</span>
+      <span class="font-semibold tabular-nums ml-1">{{ metrics.total_cases }}</span>
+    </div>
+    <div>
+      <span class="text-gray-500">Closed</span>
+      <span class="font-semibold tabular-nums ml-1">{{ metrics.closed_cases }}</span>
+    </div>
+    <div>
+      <span class="text-gray-500">Deaths</span>
+      <span class="font-semibold tabular-nums ml-1 {% if metrics.deaths > 0 %}text-red-600{% endif %}">{{ metrics.deaths }}</span>
+      {% if metrics.total_cases %}
+      <span class="text-gray-400 ml-0.5">/ {{ metrics.total_cases }}</span>
+      {% endif %}
+    </div>
     <div>
       <span class="text-gray-500">Avg visits</span>
-      <span class="font-semibold tabular-nums ml-1">
+      <span class="font-semibold tabular-nums ml-1" title="Threshold: < 3.0 visits/case (min 10 cases, 50 most recent closed)">
         {% if metrics.avg_visits is not None %}{{ metrics.avg_visits|floatformat:1 }}{% else %}—{% endif %}
       </span>
+      <span class="text-gray-400 text-[10px] ml-0.5">thr &lt; 3.0</span>
     </div>
     <div>
       <span class="text-gray-500">Mortality</span>
-      <span class="font-semibold tabular-nums ml-1">
+      <span class="font-semibold tabular-nums ml-1" title="Threshold: < 2% or > 20% (min 20 cases). {{ metrics.deaths }} deaths / {{ metrics.total_cases }} cases">
         {% if metrics.mort_rate is not None %}{{ metrics.mort_rate|floatformat:3 }}{% else %}—{% endif %}
       </span>
+      <span class="text-gray-400 text-[10px] ml-0.5">thr &lt;2% or &gt;20%</span>
     </div>
     <div>
       <span class="text-gray-500">Weight pairs</span>
@@ -31,16 +45,93 @@
     </div>
   </div>
 
-  {# ─────────── Active flags row ─────────── #}
+  {# ─────────── Weight pair summary (when available) ─────────── #}
+  {% if metrics.weight_pairs > 0 %}
+  <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-gray-600 bg-gray-50 rounded px-3 py-1.5">
+    <span class="font-medium text-gray-700">Weight pairs: {{ metrics.weight_pairs }}</span>
+    {% if metrics.pct_wt_loss is not None %}
+    <span title="Threshold: > 15%">
+      Loss: <span class="tabular-nums {% if metrics.pct_wt_loss > 0.15 %}text-red-600 font-semibold{% endif %}">
+        {% widthratio metrics.pct_wt_loss 1 100 as wl_pct %}{{ metrics.pct_wt_loss|floatformat:3 }}
+      </span>
+    </span>
+    {% endif %}
+    {% if metrics.mean_daily_gain is not None %}
+    <span title="Threshold: > 60 g/day">
+      Gain: <span class="tabular-nums {% if metrics.mean_daily_gain > 60 %}text-red-600 font-semibold{% endif %}">{{ metrics.mean_daily_gain|floatformat:1 }} g/d</span>
+    </span>
+    {% endif %}
+    {% if metrics.pct_wt_zero is not None %}
+    <span title="Threshold: > 30%">
+      Zero: <span class="tabular-nums {% if metrics.pct_wt_zero > 0.30 %}text-red-600 font-semibold{% endif %}">
+        {% widthratio metrics.pct_wt_zero 1 100 as wz_pct %}{{ metrics.pct_wt_zero|floatformat:3 }}
+      </span>
+    </span>
+    {% endif %}
+    {% if metrics.round_weight_pct is not None %}
+    <span title="Threshold: >= 80%">
+      Rounded: <span class="tabular-nums {% if metrics.round_weight_pct >= 0.80 %}text-red-600 font-semibold{% endif %}">
+        {% widthratio metrics.round_weight_pct 1 100 as rw_pct %}{{ metrics.round_weight_pct|floatformat:3 }}
+      </span>
+    </span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# ─────────── Enrollment & danger sign metrics ─────────── #}
+  {% if metrics.pct_late_enroll is not None or metrics.danger_rate is not None or metrics.ds_no_referral_pct is not None %}
+  <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-gray-600 bg-gray-50 rounded px-3 py-1.5">
+    {% if metrics.pct_late_enroll is not None %}
+    <span title="Threshold: > 35% (min 10 cases with dates)">
+      Late enrollment: <span class="tabular-nums {% if metrics.pct_late_enroll > 0.35 %}text-red-600 font-semibold{% endif %}">
+        {% widthratio metrics.pct_late_enroll 1 100 as le_pct %}{{ metrics.pct_late_enroll|floatformat:3 }}
+      </span>
+      <span class="text-gray-400">({{ metrics.cases_with_dates }} w/ dates)</span>
+    </span>
+    {% endif %}
+    {% if metrics.danger_rate is not None %}
+    <span title="Threshold: > 30% (min 20 visits)">
+      Danger signs: <span class="tabular-nums {% if metrics.danger_rate > 0.30 %}text-red-600 font-semibold{% endif %}">
+        {% widthratio metrics.danger_rate 1 100 as dr_pct %}{{ metrics.danger_rate|floatformat:3 }}
+      </span>
+    </span>
+    {% endif %}
+    {% if metrics.ds_no_referral_pct is not None %}
+    <span title="Threshold: = 0% referral rate (min 5 DS+ visits)">
+      DS referral rate: <span class="tabular-nums {% if metrics.ds_no_referral_pct == 0 %}text-red-600 font-semibold{% endif %}">
+        {% widthratio metrics.ds_no_referral_pct 1 100 as nr_pct %}{{ metrics.ds_no_referral_pct|floatformat:3 }}
+      </span>
+    </span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# ─────────── Flags summary ─────────── #}
   {% if flags %}
-  <div class="flex flex-wrap items-center gap-1.5">
-    <span class="text-[11px] text-gray-500 mr-1">Active flags:</span>
-    {% for k, v in flags.items %}
-      {% if v == True %}
-      <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-red-50 text-red-700 ring-1 ring-red-200"
-            title="{{ k }}">{{ k|cut:"flag_" }}</span>
-      {% endif %}
-    {% endfor %}
+  <div class="space-y-1">
+    <div class="flex flex-wrap items-center gap-1.5">
+      <span class="text-[11px] text-gray-500 mr-1">Flagged:</span>
+      {% for k, v in flags.items %}
+        {% if v == True %}
+        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-red-50 text-red-700 ring-1 ring-red-200"
+              title="{{ k }}{% if flag_descriptions %} — {% for dk, dv in flag_descriptions.items %}{% if dk == k %}{{ dv }}{% endif %}{% endfor %}{% endif %}">
+          {% for lk, lv in flag_labels.items %}{% if lk == k %}{{ lv }}{% endif %}{% endfor %}
+        </span>
+        {% endif %}
+      {% endfor %}
+    </div>
+    <div class="flex flex-wrap items-center gap-1.5">
+      <span class="text-[11px] text-gray-500 mr-1">Passing:</span>
+      {% for k, v in flags.items %}
+        {% if v == False %}
+        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-green-50 text-green-700 ring-1 ring-green-200"
+              title="{{ k }}">
+          <i class="fa-solid fa-check text-[9px] mr-0.5"></i>
+          {% for lk, lv in flag_labels.items %}{% if lk == k %}{{ lv }}{% endif %}{% endfor %}
+        </span>
+        {% endif %}
+      {% endfor %}
+    </div>
   </div>
   {% endif %}
 
@@ -87,11 +178,13 @@
               <div class="flex flex-wrap gap-1">
                 {% for src in v.flag_sources %}
                 <span class="inline-flex items-center px-1 py-0.5 rounded text-[10px] bg-red-100 text-red-700"
-                      title="{{ src }}">{{ src|cut:"flag_" }}</span>
+                      title="{{ src }}">
+                  {% for lk, lv in flag_labels.items %}{% if lk == src %}{{ lv }}{% endif %}{% endfor %}
+                </span>
                 {% endfor %}
               </div>
               {% else %}
-              <span class="text-gray-300 text-[11px]">—</span>
+              <i class="fa-solid fa-check text-green-500 text-xs" title="Clean visit"></i>
               {% endif %}
             </td>
           </tr>
