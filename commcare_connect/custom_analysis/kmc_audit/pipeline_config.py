@@ -22,9 +22,26 @@ Form-path strategy
 - ``child_referred`` is wired — path ``form.case.update.child_referred`` confirmed
   from Superset "KMC - Referral Rate within 28 Days" SQL.
 - ``flag_round_weight`` uses the existing ``weight`` field.
+- **Weight unit auto-detection.** Production V2 CommCare forms store weight
+  in *grams* (e.g. ``1345`` for a 1.345 kg baby). Earlier prototypes
+  and kg-input test fixtures store weight in *kg* (e.g. ``1.5``).
+  ``flag_logic._read_weight_g`` auto-detects by magnitude — values
+  < 50 are interpreted as kg (and multiplied by 1000), values 100-10000
+  as grams (used as-is). The kg-only assumption in the JS template
+  (``workflow/templates/kmc_flw_flags.py``) was a latent bug that
+  masked all four weight-based flags on production data.
 - **4 secondary flags** (heart_rate, spo2_level, gestational_age_lmp, gps)
   still need form-path discovery via ``python manage.py verify_kmc_form_fields``.
   Until confirmed, flag_logic.py returns None gracefully for those.
+
+Naming-collision note
+---------------------
+``build_flw_aggregation_query`` in the SQL backend always emits
+``COUNT(*) AS total_visits`` as a built-in column.  That counts ALL form
+submissions (registration + follow-up).  To get only KMC visit forms
+(where ``visit_number`` is populated), we define ``kmc_visit_count``
+with a distinct name that avoids the collision.  ``flag_logic.derive_flags``
+reads ``kmc_visit_count`` for the "KMC Visits" column and KPI card.
 """
 
 from __future__ import annotations
@@ -58,14 +75,15 @@ KMC_AUDIT_FLW_CONFIG = AnalysisPipelineConfig(
             aggregation="count_distinct",
             description="Distinct beneficiary case IDs handled by this FLW",
         ),
-        # Mortality is no longer derived from this aggregated count — flag_logic
-        # uses the latest-visit child_alive rule per the March-2026 doc — but
-        # we keep total_visits for historical display.
+        # KMC visit count — only forms where visit_number is populated
+        # (excludes registration-only forms). Named "kmc_visit_count" to
+        # avoid collision with the built-in "total_visits" (COUNT(*)) that
+        # the SQL backend always emits.
         FieldComputation(
-            name="total_visits",
+            name="kmc_visit_count",
             path="form.grp_kmc_visit.visit_number",
             aggregation="count",
-            description="Total follow-up visits performed",
+            description="KMC visits where visit_number is populated (matches JS template total_visits)",
         ),
         FieldComputation(
             name="danger_visit_count",
@@ -146,7 +164,7 @@ KMC_AUDIT_VISIT_CONFIG = AnalysisPipelineConfig(
             ],
             aggregation="first",
             transform=_to_float,
-            description="Weight in grams — used by all weight-related flags",
+            description="Weight in kg (form storage unit) — flag_logic converts to grams via _read_weight_g",
         ),
         FieldComputation(
             name="visit_number",

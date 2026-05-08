@@ -78,6 +78,7 @@ AUTHENTICATION_BACKENDS = [
 INSTALLED_APPS = INSTALLED_APPS + [  # noqa: F405
     "commcare_connect.labs",
     "commcare_connect.custom_analysis.chc_nutrition",
+    "commcare_connect.custom_analysis.kmc_audit",
 ]  # noqa: F405
 
 # Add labs middleware after standard auth (keep both for local dev/admin)

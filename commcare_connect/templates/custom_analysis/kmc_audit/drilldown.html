@@ -21,20 +21,20 @@
     <div>
       <span class="text-gray-500">Deaths</span>
       <span class="font-semibold tabular-nums ml-1 {% if metrics.deaths > 0 %}text-red-600{% endif %}">{{ metrics.deaths }}</span>
-      {% if metrics.total_cases %}
-      <span class="text-gray-400 ml-0.5">/ {{ metrics.total_cases }}</span>
+      {% if metrics.closed_cases %}
+      <span class="text-gray-400 ml-0.5">/ {{ metrics.closed_cases }} closed</span>
       {% endif %}
     </div>
     <div>
       <span class="text-gray-500">Avg visits</span>
-      <span class="font-semibold tabular-nums ml-1" title="Threshold: < 3.0 visits/case (min 10 cases, 50 most recent closed)">
+      <span class="font-semibold tabular-nums ml-1" title="Threshold: < 3.0 visits/case (min 10 closed non-mortality cases)">
         {% if metrics.avg_visits is not None %}{{ metrics.avg_visits|floatformat:1 }}{% else %}—{% endif %}
       </span>
       <span class="text-gray-400 text-[10px] ml-0.5">thr &lt; 3.0</span>
     </div>
     <div>
       <span class="text-gray-500">Mortality</span>
-      <span class="font-semibold tabular-nums ml-1" title="Threshold: < 2% or > 20% (min 20 cases). {{ metrics.deaths }} deaths / {{ metrics.total_cases }} cases">
+      <span class="font-semibold tabular-nums ml-1" title="Threshold: < 2% or > 20% (min 20 closed cases). {{ metrics.deaths }} deaths / {{ metrics.closed_cases }} closed cases">
         {% if metrics.mort_rate is not None %}{{ metrics.mort_rate|floatformat:3 }}{% else %}—{% endif %}
       </span>
       <span class="text-gray-400 text-[10px] ml-0.5">thr &lt;2% or &gt;20%</span>

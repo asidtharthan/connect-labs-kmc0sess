@@ -17,12 +17,15 @@ from datetime import date, timedelta
 import pytest
 
 from commcare_connect.custom_analysis.kmc_audit.flag_logic import (
+    compute_avg_visits_top_50,  # Backwards-compat alias to compute_avg_visits
+)
+from commcare_connect.custom_analysis.kmc_audit.flag_logic import (
     ALL_FLAGS,
     MIN_CASES,
     PRIORITY_FLAGS,
     SECONDARY_FLAGS,
     FLWFlagResult,
-    compute_avg_visits_top_50,
+    compute_avg_visits,
     compute_case_metrics,
     compute_enrollment_metrics,
     compute_round_weight_pct,
@@ -65,7 +68,7 @@ def make_aggregated_row(**kwargs) -> dict:
     return {
         "username": "flw1",
         "total_cases": 0,
-        "total_visits": 0,
+        "kmc_visit_count": 0,
         "danger_visit_count": 0,
         "danger_positive_count": 0,
         **kwargs,
@@ -100,52 +103,74 @@ def test_secondary_tier_plus_priority_covers_all_real_flags():
 
 def test_weight_metrics_empty():
     out = compute_weight_metrics([])
-    assert out == {"pct_wt_loss": None, "mean_daily_gain": None, "pct_wt_zero": None, "weight_pairs": 0}
+    assert out == {
+        "pct_wt_loss": None,
+        "mean_daily_gain": None,
+        "pct_wt_zero": None,
+        "weight_pairs": 0,
+        "gain_pairs": 0,
+    }
 
 
 def test_weight_metrics_pair_outside_window_is_skipped():
     visits = [
-        make_visit("case1", 0, weight=2000.0),
-        make_visit("case1", 35, weight=2200.0),
+        make_visit("case1", 0, weight=2.0),
+        make_visit("case1", 35, weight=2.2),
     ]
     assert compute_weight_metrics(visits)["weight_pairs"] == 0
 
 
 def test_weight_metrics_zero_change_pair():
     visits = [
-        make_visit("case1", 0, weight=2000.0),
-        make_visit("case1", 5, weight=2000.0),
+        make_visit("case1", 0, weight=2.0),
+        make_visit("case1", 5, weight=2.0),
     ]
     out = compute_weight_metrics(visits)
     assert out["weight_pairs"] == 1
     assert out["pct_wt_zero"] == pytest.approx(1.0)
     assert out["pct_wt_loss"] == pytest.approx(0.0)
-    assert out["mean_daily_gain"] == pytest.approx(0.0)
+    # Zero-change pair has diff=0 → not a gain pair → mean_daily_gain is None
+    assert out["mean_daily_gain"] is None
 
 
 def test_weight_metrics_loss_pair_counts_correctly():
     visits = [
-        make_visit("case1", 0, weight=2000.0),
-        make_visit("case1", 5, weight=1900.0),
+        make_visit("case1", 0, weight=2.0),
+        make_visit("case1", 5, weight=1.9),
     ]
     out = compute_weight_metrics(visits)
     assert out["pct_wt_loss"] == pytest.approx(1.0)
-    assert out["mean_daily_gain"] == pytest.approx(-20.0)
+    # Loss pair has diff<0 → not a gain pair → mean_daily_gain is None
+    assert out["mean_daily_gain"] is None
+
+
+def test_weight_metrics_gain_only_mean():
+    """mean_daily_gain should use only gain pairs (positive diff), per the April follow-on doc."""
+    visits = [
+        make_visit("case1", 0, weight=2.0),
+        make_visit("case1", 5, weight=1.9),  # loss pair: diff = -100g
+        make_visit("case1", 10, weight=2.1),  # gain pair: diff = +200g in 5 days = 40 g/day
+    ]
+    out = compute_weight_metrics(visits)
+    assert out["weight_pairs"] == 2
+    assert out["pct_wt_loss"] == pytest.approx(0.5)
+    # Mean daily gain = 200/5 = 40.0 (only the gain pair, NOT averaged with the loss)
+    assert out["mean_daily_gain"] == pytest.approx(40.0)
 
 
 def test_weight_metrics_extreme_weight_filtered_out():
     visits = [
-        make_visit("case1", 0, weight=6000.0),
-        make_visit("case1", 5, weight=2000.0),
+        make_visit("case1", 0, weight=6.0),
+        make_visit("case1", 5, weight=2.0),
     ]
     assert compute_weight_metrics(visits)["weight_pairs"] == 0
 
 
 def test_weight_metrics_twins_segregated_by_case_id():
     visits = [
-        make_visit("twin_a", 0, weight=2000.0),
-        make_visit("twin_b", 1, weight=1500.0),
-        make_visit("twin_a", 5, weight=2100.0),
+        make_visit("twin_a", 0, weight=2.0),
+        make_visit("twin_b", 1, weight=1.5),
+        make_visit("twin_a", 5, weight=2.1),
     ]
     assert compute_weight_metrics(visits)["weight_pairs"] == 1
 
@@ -232,11 +257,12 @@ def test_case_metrics_open_cases_not_counted_as_closed():
 
 
 def test_case_metrics_visit_counts_per_case():
+    """visit_count only includes follow-up visits (visit_number populated)."""
     visits = [
-        make_visit("c1", 0, kmc_status="discharged"),
-        make_visit("c1", 5, kmc_status="discharged"),
-        make_visit("c1", 10, kmc_status="discharged"),
-        make_visit("c2", 0, kmc_status="discharged"),
+        make_visit("c1", 0, kmc_status="discharged", visit_number=1),
+        make_visit("c1", 5, kmc_status="discharged", visit_number=2),
+        make_visit("c1", 10, kmc_status="discharged", visit_number=3),
+        make_visit("c2", 0, kmc_status="discharged", visit_number=1),
     ]
     cm = compute_case_metrics(visits)
     cases_by_id = {c["case_id"]: c for c in cm["cases"]}
@@ -244,53 +270,81 @@ def test_case_metrics_visit_counts_per_case():
     assert cases_by_id["c2"]["visit_count"] == 1
 
 
+def test_case_metrics_registration_visits_excluded_from_count():
+    """Registration forms (no visit_number) should not inflate visit_count."""
+    visits = [
+        make_visit("c1", 0, kmc_status="active"),  # registration — no visit_number
+        make_visit("c1", 5, kmc_status="discharged", visit_number=1),  # follow-up
+        make_visit("c1", 10, kmc_status="discharged", visit_number=2),  # follow-up
+    ]
+    cm = compute_case_metrics(visits)
+    cases_by_id = {c["case_id"]: c for c in cm["cases"]}
+    assert cases_by_id["c1"]["visit_count"] == 2  # Only follow-ups counted
+
+
 # ---------------------------------------------------------------------------
-# compute_avg_visits_top_50 — March-2026 doc 50-case window
+# compute_avg_visits — April canonical (no 50-cap; uses ALL non-mort closed)
 # ---------------------------------------------------------------------------
 
 
-def test_avg_visits_top_50_uses_recent_cases_only():
-    """50 most recently closed cases drive the average; older closed cases
-    are ignored. Build 60 closed cases — first 10 (oldest) have 1 visit,
-    last 50 have 5 visits each. Average should be 5.0, not (10*1 + 50*5)/60."""
+def test_avg_visits_uses_all_non_mort_closed_cases():
+    """April canonical doc Table 0 row 1 dropped the March-narrative 50-cap.
+    Build 60 closed non-mortality cases — first 10 have 1 follow-up visit,
+    next 50 have 5 follow-up visits each. Average across ALL 60 should be:
+    (10*1 + 50*5) / 60 = 260/60 ≈ 4.333."""
     visits = []
     for i in range(60):
         cid = f"c{i:03d}"  # noqa: E231
-        # First 10 cases: 1 visit each, very old dates (day 0..9)
-        # Last 50 cases: 5 visits each, recent dates (day 100..149 + offsets)
         if i < 10:
-            visits.append(make_visit(cid, i, kmc_status="discharged"))
+            visits.append(make_visit(cid, i, kmc_status="discharged", visit_number=1))
         else:
             base_day = 100 + (i - 10)
             for k in range(5):
-                visits.append(make_visit(cid, base_day + k * 0.0 + k, kmc_status="discharged"))
+                visits.append(make_visit(cid, base_day + k, kmc_status="discharged", visit_number=k + 1))
     cm = compute_case_metrics(visits)
-    avg, n = compute_avg_visits_top_50(cm)
-    assert n == 50
-    assert avg == pytest.approx(5.0)
+    avg, n = compute_avg_visits(cm)
+    assert n == 60, f"expected all 60 non-mort closed cases (no 50-cap), got {n}"
+    assert avg == pytest.approx(260 / 60)
 
 
-def test_avg_visits_top_50_returns_none_below_min_cases():
+def test_avg_visits_returns_none_below_min_cases():
+    """fewer than MIN_CASES["visits"] (10) non-mort closed → None."""
     visits = [make_visit(f"c{i}", i, kmc_status="discharged") for i in range(MIN_CASES["visits"] - 1)]
     cm = compute_case_metrics(visits)
-    avg, n = compute_avg_visits_top_50(cm)
+    avg, n = compute_avg_visits(cm)
     assert avg is None
 
 
-def test_avg_visits_top_50_excludes_mortality_cases():
+def test_avg_visits_excludes_mortality_cases():
     """Closed mortality cases should be filtered out of the average."""
     visits = []
-    # 10 non-mortality closed cases, 1 visit each
     for i in range(10):
-        visits.append(make_visit(f"alive_{i}", i, kmc_status="discharged", child_alive="yes"))
-    # 5 mortality closed cases, lots of visits each (would inflate avg if included)
+        visits.append(make_visit(f"alive_{i}", i, kmc_status="discharged", child_alive="yes", visit_number=1))
     for i in range(5):
         for k in range(10):
-            visits.append(make_visit(f"dead_{i}", 50 + i + k, kmc_status="deceased", child_alive="no"))
+            visits.append(
+                make_visit(f"dead_{i}", 50 + i + k, kmc_status="deceased", child_alive="no", visit_number=k + 1)
+            )
     cm = compute_case_metrics(visits)
-    avg, n = compute_avg_visits_top_50(cm)
+    avg, n = compute_avg_visits(cm)
     assert n == 10
     assert avg == pytest.approx(1.0)
+
+
+# Backwards-compat: the old function name is kept as an alias so external
+# callers don't break. Smoke-check that it dispatches to the new behavior.
+def test_compute_avg_visits_top_50_alias_drops_50_cap():
+    """The old name is kept as an alias of compute_avg_visits — no longer
+    enforces the 50-cap (the alias's behavior changed when April canonical
+    dropped the cap)."""
+    visits = []
+    for i in range(60):
+        visits.append(
+            make_visit(f"c{i:03d}", i, kmc_status="discharged", child_alive="yes", visit_number=1)  # noqa: E231
+        )
+    cm = compute_case_metrics(visits)
+    avg, n = compute_avg_visits_top_50(cm)
+    assert n == 60  # All 60, not capped to 50
 
 
 # ---------------------------------------------------------------------------
@@ -299,22 +353,37 @@ def test_avg_visits_top_50_excludes_mortality_cases():
 
 
 def test_round_weight_pct_below_min_data():
-    visits = [make_visit("case1", i, weight=2000.0) for i in range(MIN_CASES["round_weight"] - 1)]
+    # April canonical doc Table 0 row 13: round_weight uses follow-up weights only.
+    # visit_number must be set for a visit row to be counted as follow-up.
+    visits = [make_visit("case1", i, weight=2.0, visit_number=1) for i in range(MIN_CASES["round_weight"] - 1)]
     pct, n = compute_round_weight_pct(visits)
     assert pct is None
 
 
 def test_round_weight_pct_all_rounded():
-    visits = [make_visit(f"case_{i}", i, weight=1500.0 + (i * 100)) for i in range(25)]
+    visits = [make_visit(f"case_{i}", i, weight=1.5 + (i * 0.1), visit_number=1) for i in range(25)]
     pct, _n = compute_round_weight_pct(visits)
     assert pct == pytest.approx(1.0)
 
 
 def test_round_weight_pct_mixed():
-    weights = [1500.0] * 16 + [1523.0, 1547.0, 1612.0, 1689.0]
-    visits = [make_visit(f"case_{i}", i, weight=w) for i, w in enumerate(weights)]
+    weights = [1.5] * 16 + [1.523, 1.547, 1.612, 1.689]
+    visits = [make_visit(f"case_{i}", i, weight=w, visit_number=1) for i, w in enumerate(weights)]
     pct, _n = compute_round_weight_pct(visits)
     assert pct == pytest.approx(0.8)
+
+
+def test_round_weight_pct_excludes_registration_weights():
+    """Per April canonical Table 0 row 13 ('follow-up weights'),
+    rows without visit_number (registration forms) must NOT be counted."""
+    # 20 follow-up visits (visit_number set) with rounded weights
+    follow_ups = [make_visit(f"f{i}", i, weight=1.5, visit_number=1) for i in range(20)]
+    # 10 registration visits (visit_number=None) with non-rounded weights
+    # Older code counted these toward the denominator; new code drops them.
+    registrations = [make_visit(f"r{i}", 100 + i, weight=1.523) for i in range(10)]
+    pct, n = compute_round_weight_pct(follow_ups + registrations)
+    assert n == 20, f"expected 20 follow-up weights only, got {n}"
+    assert pct == pytest.approx(1.0), "all 20 follow-up weights are rounded"
 
 
 # ---------------------------------------------------------------------------
@@ -333,15 +402,15 @@ def test_derive_flags_excludes_low_volume_flw():
 
 
 def test_derive_flags_low_visits_fires_with_doc_50_case_window():
-    """20 closed non-mort cases × 1 visit each → avg 1.0 < 3.0 → flag fires."""
+    """20 closed non-mort cases × 1 follow-up visit each → avg 1.0 < 3.0 → flag fires."""
     aggregated = make_aggregated_row(total_cases=20)
-    visits = [make_visit(f"c{i}", i, kmc_status="discharged", child_alive="yes") for i in range(20)]
+    visits = [make_visit(f"c{i}", i, kmc_status="discharged", child_alive="yes", visit_number=1) for i in range(20)]
     result = derive_flags(aggregated, visits)
     assert result.flags["flag_visits"] is True
 
 
 def test_derive_flags_high_mortality_fires_via_latest_child_alive():
-    """20 cases, 5 with latest child_alive='no' (25%)."""
+    """20 closed cases, 5 with latest child_alive='no'. mort_rate = 5/20 = 25% > 20%."""
     aggregated = make_aggregated_row(total_cases=20)
     visits = []
     for i in range(15):
@@ -349,16 +418,21 @@ def test_derive_flags_high_mortality_fires_via_latest_child_alive():
     for i in range(5):
         visits.append(make_visit(f"dead_{i}", 30 + i, kmc_status="discharged", child_alive="no"))
     result = derive_flags(aggregated, visits)
+    # mort_rate = deaths / closed_cases = 5 / 20 = 25%
+    assert result.mort_rate == pytest.approx(0.25)
     assert result.flags["flag_mort_high"] is True
     assert result.flags["flag_mort"] is True
 
 
 def test_derive_flags_low_mortality_fires_via_latest_child_alive():
-    """200 cases, 1 with latest child_alive='no' (0.5% < 2%)."""
+    """200 closed cases, 1 with latest child_alive='no'.
+    mort_rate = 1/200 = 0.5% < 2% → flag fires."""
     aggregated = make_aggregated_row(total_cases=200)
     visits = [make_visit(f"alive_{i}", i, kmc_status="discharged", child_alive="yes") for i in range(199)]
     visits.append(make_visit("dead_0", 250, kmc_status="discharged", child_alive="no"))
     result = derive_flags(aggregated, visits)
+    # mort_rate = deaths / closed_cases = 1 / 200 = 0.5%
+    assert result.mort_rate == pytest.approx(0.005)
     assert result.flags["flag_mort_low"] is True
 
 
@@ -382,9 +456,61 @@ def test_derive_flags_high_danger_fires():
     assert result.flags["flag_danger_high"] is True
 
 
+def test_primary_flags_return_none_not_false_when_insufficient_data():
+    """Primary flags must return None (insufficient data) — not False
+    (passes) — when the minimum data requirement isn't met. Otherwise
+    the UI shows a green "pass" indicator where it should show a neutral
+    "—" dash."""
+    aggregated = make_aggregated_row(
+        total_cases=50,
+        danger_visit_count=5,
+        danger_positive_count=0,
+    )
+    # Only 5 visits, all open cases → not enough for most flags
+    visits = [make_visit(f"c{i}", i, weight=2.0, kmc_status="active") for i in range(5)]
+    result = derive_flags(aggregated, visits)
+    # danger_high needs 20+ visits, only 5
+    assert result.flags["flag_danger_high"] is None
+    # danger_zero needs 30+ visits, only 5
+    assert result.flags["flag_danger_zero"] is None
+    # weight flags need 10+ pairs, we have <10
+    assert result.flags["flag_wt_loss"] is None
+    assert result.flags["flag_wt_gain"] is None
+    assert result.flags["flag_wt_zero"] is None
+
+
+def test_mortality_flags_none_when_below_min_cases():
+    """Mortality flags need 20+ closed_cases. With fewer than 20 total
+    cases the FLW is excluded entirely (all flags None)."""
+    aggregated = make_aggregated_row(total_cases=15)
+    visits = [make_visit(f"c{i}", i, kmc_status="discharged", child_alive="yes") for i in range(15)]
+    result = derive_flags(aggregated, visits)
+    assert result.excluded is True
+    assert result.flags["flag_mort_low"] is None
+    assert result.flags["flag_mort_high"] is None
+    assert result.flags["flag_mort"] is None
+
+
+def test_mortality_flags_none_when_insufficient_closed_cases():
+    """Mortality flags need 20+ closed_cases (not total_cases). An FLW
+    with 30 total cases but only 15 closed should not be assessed."""
+    aggregated = make_aggregated_row(total_cases=30)
+    # 15 closed (discharged) + 15 open (active) → closed_cases=15 < 20
+    visits = []
+    for i in range(15):
+        visits.append(make_visit(f"closed_{i}", i, kmc_status="discharged", child_alive="yes"))
+    for i in range(15):
+        visits.append(make_visit(f"open_{i}", 50 + i, kmc_status="active"))
+    result = derive_flags(aggregated, visits)
+    assert result.excluded is False  # Not excluded — 30 total cases >= 20
+    assert result.flags["flag_mort_low"] is None  # Insufficient closed cases
+    assert result.flags["flag_mort_high"] is None
+    assert result.flags["flag_mort"] is None
+
+
 def test_derive_flags_unknown_secondary_flags_are_none_not_false():
     aggregated = make_aggregated_row(total_cases=50)
-    visits = [make_visit(f"c{i}", i, weight=2000.0, kmc_status="discharged", child_alive="yes") for i in range(15)]
+    visits = [make_visit(f"c{i}", i, weight=2.0, kmc_status="discharged", child_alive="yes") for i in range(15)]
     result = derive_flags(aggregated, visits)
     # Vital-sign flags whose underlying fields aren't captured: stay None.
     assert result.flags["flag_hr_copycat"] is None
@@ -395,8 +521,12 @@ def test_derive_flags_unknown_secondary_flags_are_none_not_false():
 
 
 def test_derive_flags_round_weight_works_with_visit_data_only():
+    """Round-weight requires follow-up visits (visit_number set), per April canonical doc."""
     aggregated = make_aggregated_row(total_cases=50)
-    visits = [make_visit(f"c{i}", i, weight=1800.0, kmc_status="discharged", child_alive="yes") for i in range(25)]
+    visits = [
+        make_visit(f"c{i}", i, weight=1.8, kmc_status="discharged", child_alive="yes", visit_number=1)
+        for i in range(25)
+    ]
     result = derive_flags(aggregated, visits)
     assert result.flags["flag_round_weight"] is True
 
@@ -405,9 +535,9 @@ def test_priority_flag_count_uses_synthetic_mort():
     aggregated = make_aggregated_row(total_cases=20)
     visits = []
     for i in range(15):
-        visits.append(make_visit(f"alive_{i}", i, kmc_status="discharged", child_alive="yes"))
+        visits.append(make_visit(f"alive_{i}", i, kmc_status="discharged", child_alive="yes", visit_number=1))
     for i in range(5):
-        visits.append(make_visit(f"dead_{i}", 30 + i, kmc_status="discharged", child_alive="no"))
+        visits.append(make_visit(f"dead_{i}", 30 + i, kmc_status="discharged", child_alive="no", visit_number=1))
     result = derive_flags(aggregated, visits)
     assert result.flags["flag_mort"] is True
     assert result.priority_flag_count >= 1
@@ -419,7 +549,7 @@ def test_priority_flag_count_uses_synthetic_mort():
 
 
 def test_visit_flag_sources_marks_round_weight_visits():
-    visits = [make_visit(f"c{i}", i, weight=1800.0) for i in range(25)]
+    visits = [make_visit(f"c{i}", i, weight=1.8) for i in range(25)]
     result = FLWFlagResult(
         username="flw1",
         excluded=False,
@@ -431,7 +561,7 @@ def test_visit_flag_sources_marks_round_weight_visits():
 
 
 def test_visit_flag_sources_returns_empty_sources_when_no_flag_fires():
-    visits = [make_visit(f"c{i}", i, weight=2000.0) for i in range(5)]
+    visits = [make_visit(f"c{i}", i, weight=2.0) for i in range(5)]
     result = FLWFlagResult(
         username="flw1",
         excluded=False,
@@ -448,9 +578,13 @@ def test_visit_flag_sources_returns_empty_sources_when_no_flag_fires():
 
 
 def test_data_quality_fires_when_round_weight_fires():
-    """flag_data_quality should be True if flag_round_weight fires (sub-flag)."""
+    """flag_data_quality should be True if flag_round_weight fires (sub-flag).
+    Note: visit_number must be set so weights are counted as follow-up visits per April spec."""
     aggregated = make_aggregated_row(total_cases=50)
-    visits = [make_visit(f"c{i}", i, weight=1800.0, kmc_status="discharged", child_alive="yes") for i in range(25)]
+    visits = [
+        make_visit(f"c{i}", i, weight=1.8, kmc_status="discharged", child_alive="yes", visit_number=1)
+        for i in range(25)
+    ]
     result = derive_flags(aggregated, visits)
     assert result.flags["flag_round_weight"] is True
     assert result.flags["flag_data_quality"] is True
@@ -459,9 +593,9 @@ def test_data_quality_fires_when_round_weight_fires():
 def test_data_quality_false_when_all_sub_flags_pass():
     """flag_data_quality should be False if all sub-flags are False."""
     aggregated = make_aggregated_row(total_cases=50)
-    # Weights NOT rounded to 100g (e.g. 1501, 1602, 1703, ...)
+    # Weights NOT rounded to 100g (e.g. 1502, 1602, 1703, ...). Follow-up visits.
     visits = [
-        make_visit(f"c{i}", i, weight=1501.0 + i * 100 + 1, kmc_status="discharged", child_alive="yes")
+        make_visit(f"c{i}", i, weight=1.502 + i * 0.1, kmc_status="discharged", child_alive="yes", visit_number=1)
         for i in range(25)
     ]
     result = derive_flags(aggregated, visits)
@@ -499,7 +633,7 @@ def test_temp_copycat_none_when_no_temperature_field():
     """Without temperature in visit rows, compute returns None."""
     from commcare_connect.custom_analysis.kmc_audit.flag_logic import compute_temp_copycat_pct
 
-    visits = [make_visit(f"c{i}", i, weight=2000.0) for i in range(25)]
+    visits = [make_visit(f"c{i}", i, weight=2.0) for i in range(25)]
     pct, n = compute_temp_copycat_pct(visits)
     assert pct is None
     assert n == 0
@@ -519,9 +653,13 @@ def test_total_cases_from_visits_matches_distinct_case_ids():
 
 
 def test_metric_fields_populated_on_result():
-    """Secondary metric fields should be populated on the FLWFlagResult."""
+    """Secondary metric fields should be populated on the FLWFlagResult.
+    Note: visit_number=1 needed so round_weight has follow-up data to count."""
     aggregated = make_aggregated_row(total_cases=50)
-    visits = [make_visit(f"c{i}", i, weight=1800.0, kmc_status="discharged", child_alive="yes") for i in range(25)]
+    visits = [
+        make_visit(f"c{i}", i, weight=1.8, kmc_status="discharged", child_alive="yes", visit_number=1)
+        for i in range(25)
+    ]
     result = derive_flags(aggregated, visits)
     assert result.round_weight_pct is not None
     assert result.round_weight_pct == pytest.approx(1.0)
@@ -530,3 +668,291 @@ def test_metric_fields_populated_on_result():
     assert result.spo2_implausible_pct is None
     assert result.ga_fullterm_pct is None
     assert result.gps_same_case_far_pct is None
+
+
+# ---------------------------------------------------------------------------
+# April canonical fixes — explicit tests for the 4 doc-alignment changes
+# ---------------------------------------------------------------------------
+
+
+def test_late_enroll_inclusive_8_day_boundary():
+    """Doc text: '8 or more days' / '8+ days' — code must use >= 8.
+    Case at exactly 8 days post-discharge is late."""
+    # Build 10 cases all enrolled exactly 8 days after discharge.
+    visits = [
+        make_visit(
+            f"case_{i}",
+            0,
+            reg_date=date(2026, 1, 9),  # 8 days after discharge
+            discharge_date=date(2026, 1, 1),
+        )
+        for i in range(10)
+    ]
+    out = compute_enrollment_metrics(visits)
+    assert out["cases_with_dates"] == 10
+    assert out["pct_late_enroll"] == pytest.approx(
+        1.0
+    ), "Expected 100% late at exactly 8 days post-discharge (April canonical: '8+ days')"
+
+
+def test_late_enroll_7_day_boundary_not_late():
+    """7 days post-discharge is not late under either old or new rule."""
+    visits = [
+        make_visit(
+            f"case_{i}",
+            0,
+            reg_date=date(2026, 1, 8),  # 7 days after discharge
+            discharge_date=date(2026, 1, 1),
+        )
+        for i in range(10)
+    ]
+    out = compute_enrollment_metrics(visits)
+    assert out["pct_late_enroll"] == pytest.approx(0.0)
+
+
+def test_read_weight_g_auto_detects_grams_vs_kg():
+    """Production CommCare V2 forms store weight in grams (e.g. 1345 for a
+    1.345 kg baby). Tests historically pass kg (e.g. 1.5). _read_weight_g
+    must accept both and normalise to grams. This test locks in the
+    auto-detect behaviour so regressing to a unconditional kg→g
+    multiply is caught."""
+    from commcare_connect.custom_analysis.kmc_audit.flag_logic import _read_weight_g
+
+    # Grams (production format) — used as-is.
+    assert _read_weight_g({"weight": "1345"}) == 1345.0
+    assert _read_weight_g({"weight": "1845.0"}) == 1845.0
+    assert _read_weight_g({"weight": 2500}) == 2500.0
+    # Kilograms (test-fixture format) — multiplied by 1000.
+    assert _read_weight_g({"weight": "1.5"}) == 1500.0
+    assert _read_weight_g({"weight": 2.0}) == 2000.0
+    assert _read_weight_g({"weight": 0.8}) == 800.0
+    # Edge cases.
+    assert _read_weight_g({"weight": None}) is None
+    assert _read_weight_g({"weight": ""}) is None
+    assert _read_weight_g({"weight": 0}) is None
+    assert _read_weight_g({"weight": -1.5}) is None
+    # Implausible — a 50 (kg or g) baby is rejected as out-of-range.
+    # 50 falls in the "neither kg nor grams" gap (50-100).
+    assert _read_weight_g({"weight": 80}) is None
+    # 50000 g (= 50 kg) is far too heavy for a neonate.
+    assert _read_weight_g({"weight": 50000}) is None
+
+
+def test_compute_weight_metrics_exposes_gain_pairs():
+    """Per April canonical Table 0 row 8, flag_wt_gain gates on gain pairs only.
+    compute_weight_metrics must expose gain_pairs as a separate field."""
+    visits = [
+        make_visit("case1", 0, weight=2.0),
+        make_visit("case1", 5, weight=1.9),  # loss
+        make_visit("case1", 10, weight=2.1),  # gain
+        make_visit("case2", 0, weight=2.0),
+        make_visit("case2", 5, weight=2.0),  # zero
+    ]
+    out = compute_weight_metrics(visits)
+    assert out["weight_pairs"] == 3  # 1 loss + 1 gain + 1 zero
+    assert out["gain_pairs"] == 1
+
+
+def test_flag_wt_gain_returns_none_when_too_few_gain_pairs():
+    """20 total pairs but only 5 are gain pairs → flag_wt_gain returns None
+    (per April canonical: '10 valid weight gain pairs')."""
+    aggregated = make_aggregated_row(total_cases=50)
+    visits = []
+    # 15 loss pairs, all in their own case (so each pair is independent)
+    for i in range(15):
+        cid = f"loss_{i}"
+        visits.append(make_visit(cid, 0, weight=2.0))
+        visits.append(make_visit(cid, 5, weight=1.9))  # loss
+    # 5 gain pairs
+    for i in range(5):
+        cid = f"gain_{i}"
+        visits.append(make_visit(cid, 0, weight=1.5))
+        visits.append(make_visit(cid, 5, weight=2.0))  # gain, very high g/day
+    result = derive_flags(aggregated, visits)
+    # 20 total pairs, but only 5 gain pairs — under the 10-gain-pair threshold
+    assert (
+        result.flags["flag_wt_gain"] is None
+    ), f"Expected None (only 5 gain pairs < 10), got {result.flags['flag_wt_gain']}"
+    # Loss flag should still evaluate (15 loss pairs out of 20 = 75% > 15%)
+    assert result.flags["flag_wt_loss"] is True
+
+
+def test_flag_wt_gain_fires_when_gain_pairs_meet_minimum():
+    """≥10 valid gain pairs and mean daily gain > 60g/day → fires."""
+    aggregated = make_aggregated_row(total_cases=50)
+    visits = []
+    for i in range(12):
+        cid = f"gain_{i}"
+        visits.append(make_visit(cid, 0, weight=1.0))
+        visits.append(make_visit(cid, 5, weight=1.5))  # +500g/5d = 100 g/day
+    result = derive_flags(aggregated, visits)
+    assert result.flags["flag_wt_gain"] is True
+    assert result.mean_daily_gain == pytest.approx(100.0)
+
+
+# ---------------------------------------------------------------------------
+# Doc-example fixture tests — encode the actual numbered FLW examples in
+# Tables 1-16 of the April Follow-on so the algorithm is provably faithful
+# to the doc's own example data.
+# ---------------------------------------------------------------------------
+
+
+def test_doc_example_flw_2328_high_mortality_32_4pct():
+    """Doc Table 3 row 1: FLW 2328 (PIPN), 108 closed cases, 35 deaths,
+    mortality rate 32.4%. Flag_mort_high should fire."""
+    aggregated = make_aggregated_row(total_cases=108)
+    visits = []
+    # 73 alive closed cases
+    for i in range(73):
+        visits.append(make_visit(f"alive_{i}", i, kmc_status="discharged", child_alive="yes", visit_number=1))
+    # 35 deceased closed cases (latest visit reports child_alive='no')
+    for i in range(35):
+        visits.append(make_visit(f"dead_{i}", 200 + i, kmc_status="discharged", child_alive="no", visit_number=1))
+    result = derive_flags(aggregated, visits)
+    assert result.deaths == 35
+    assert result.closed_cases == 108
+    assert result.mort_rate == pytest.approx(35 / 108)
+    assert result.mort_rate == pytest.approx(0.324, abs=0.001)  # doc rounds to 32.4%
+    assert result.flags["flag_mort_high"] is True
+    assert result.flags["flag_mort"] is True
+
+
+def test_doc_example_flw_2274_zero_mortality():
+    """Doc Table 2 row 1: FLW 2274 (PIPN), 47 closed cases, 0 deaths.
+    flag_mort_low should fire (rate 0% < 2%)."""
+    aggregated = make_aggregated_row(total_cases=47)
+    visits = [
+        make_visit(f"alive_{i}", i, kmc_status="discharged", child_alive="yes", visit_number=1) for i in range(47)
+    ]
+    result = derive_flags(aggregated, visits)
+    assert result.deaths == 0
+    assert result.closed_cases == 47
+    assert result.mort_rate == pytest.approx(0.0)
+    assert result.flags["flag_mort_low"] is True
+
+
+def test_doc_example_flw_2208_low_avg_visits():
+    """Doc Table 1 row 1: FLW 2208 (Nama), 14 closed cases assessed,
+    avg 1.07 follow-up visits/case. flag_visits should fire (1.07 < 3.0)."""
+    aggregated = make_aggregated_row(total_cases=20)  # ≥20 to avoid exclusion
+    # 14 closed non-mortality cases; 1 case has 2 visits, the other 13 have 1.
+    # Total = 13 + 2 = 15; avg = 15/14 = 1.071
+    visits = []
+    for i in range(13):
+        visits.append(make_visit(f"c{i}", i, kmc_status="discharged", child_alive="yes", visit_number=1))
+    visits.append(make_visit("c13", 13, kmc_status="discharged", child_alive="yes", visit_number=1))
+    visits.append(make_visit("c13", 14, kmc_status="discharged", child_alive="yes", visit_number=2))
+    # 6 open cases to round to 20 total cases (won't count in avg)
+    for i in range(6):
+        visits.append(make_visit(f"open_{i}", 100 + i, kmc_status="active"))
+    result = derive_flags(aggregated, visits)
+    assert result.flags["flag_visits"] is True
+    assert result.avg_visits == pytest.approx(15 / 14, abs=0.01)
+    assert result.avg_visits < 1.10  # doc says 1.07
+
+
+def test_doc_example_flw_2262_late_enrollment_82pct():
+    """Doc Table 4 row 1: FLW 2262 (PIPN), 28 cases with discharge date,
+    23 late enrollments (82.1%). Flag fires at the user-chosen 35% threshold."""
+    aggregated = make_aggregated_row(total_cases=28)
+    visits = []
+    # 23 late cases (registered exactly 9+ days after discharge)
+    for i in range(23):
+        visits.append(make_visit(f"late_{i}", 0, reg_date=date(2026, 1, 11), discharge_date=date(2026, 1, 1)))
+    # 5 on-time cases (registered 0-7 days after discharge)
+    for i in range(5):
+        visits.append(make_visit(f"ontime_{i}", 0, reg_date=date(2026, 1, 5), discharge_date=date(2026, 1, 1)))
+    result = derive_flags(aggregated, visits)
+    assert result.cases_with_dates == 28
+    assert result.pct_late_enroll == pytest.approx(23 / 28, abs=0.01)
+    assert result.pct_late_enroll == pytest.approx(0.821, abs=0.005)  # doc says 82.1%
+    assert result.flags["flag_enroll"] is True
+
+
+def test_doc_example_flw_4841_high_danger_88pct():
+    """Doc Table 5 row 1: FLW 4841 (PIPN), 69 follow-up visits, 61 danger sign positive.
+    Danger rate 88.4%. Fires at >30% threshold."""
+    aggregated = make_aggregated_row(
+        total_cases=50,  # plenty
+        danger_visit_count=69,  # 69 visits where field was filled
+        danger_positive_count=61,  # 61 of those said yes
+    )
+    result = derive_flags(aggregated, [])
+    assert result.danger_rate == pytest.approx(61 / 69, abs=0.001)
+    assert result.danger_rate == pytest.approx(0.884, abs=0.005)
+    assert result.flags["flag_danger_high"] is True
+
+
+def test_doc_example_flw_4871_zero_danger_signs():
+    """Doc Table 6 row 1: FLW 4871 (PIPN), 360 follow-up visits, 0 danger signs.
+    Danger rate 0%. flag_danger_zero fires (zero rate across 30+ visits)."""
+    aggregated = make_aggregated_row(
+        total_cases=50,
+        danger_visit_count=360,
+        danger_positive_count=0,
+    )
+    result = derive_flags(aggregated, [])
+    assert result.danger_rate == pytest.approx(0.0)
+    assert result.flags["flag_danger_zero"] is True
+
+
+def test_doc_example_flw_2328_weight_gain_125_5_g_per_day():
+    """Doc Table 8 row 1: FLW 2328 (PIPN), 162 valid gain pairs, mean 125.5 g/day.
+    Flag fires (>60 g/day)."""
+    aggregated = make_aggregated_row(total_cases=50)
+    visits = []
+    # 162 gain pairs distributed across cases (one pair per case for simplicity).
+    # Each pair: +500g over 4 days = 125 g/day (close to 125.5).
+    for i in range(162):
+        cid = f"gain_{i}"
+        visits.append(make_visit(cid, 0, weight=1.0))
+        visits.append(make_visit(cid, 4, weight=1.5))  # +500g / 4d = 125 g/day
+    result = derive_flags(aggregated, visits)
+    assert result.weight_pairs == 162
+    assert result.mean_daily_gain == pytest.approx(125.0, abs=0.5)
+    assert result.flags["flag_wt_gain"] is True
+
+
+def test_doc_example_flw_2208_zero_change_71pct():
+    """Doc Table 9 row 1: FLW 2208 (Nama), 28 valid weight pairs,
+    20 zero-change pairs (71.4%). Flag fires (>30%)."""
+    aggregated = make_aggregated_row(total_cases=50)
+    visits = []
+    # 20 zero-change pairs (one per case)
+    for i in range(20):
+        cid = f"zero_{i}"
+        visits.append(make_visit(cid, 0, weight=2.0))
+        visits.append(make_visit(cid, 5, weight=2.0))
+    # 8 gain pairs (loss/gain doesn't matter as long as it's not zero)
+    for i in range(8):
+        cid = f"gain_{i}"
+        visits.append(make_visit(cid, 0, weight=2.0))
+        visits.append(make_visit(cid, 5, weight=2.1))
+    result = derive_flags(aggregated, visits)
+    assert result.weight_pairs == 28
+    assert result.pct_wt_zero == pytest.approx(20 / 28, abs=0.001)
+    assert result.flags["flag_wt_zero"] is True
+
+
+def test_doc_example_flw_2198_round_weight_100pct():
+    """Doc Table 13 row 1: FLW 2198 (Nama), 26 valid weight entries, ALL rounded.
+    Flag fires (>=80%). Visits must be marked as follow-ups (visit_number set)."""
+    aggregated = make_aggregated_row(total_cases=50)
+    visits = [
+        make_visit(f"c{i}", i, weight=1.5 + (i * 0.1), kmc_status="discharged", child_alive="yes", visit_number=1)
+        for i in range(26)
+    ]
+    result = derive_flags(aggregated, visits)
+    assert result.round_weight_pct == pytest.approx(1.0)
+    assert result.flags["flag_round_weight"] is True
+
+
+def test_doc_example_flw_2251_no_referral():
+    """Doc Table 14 row 1: FLW 2251 (PIPN), 672 DS-positive visits, 0 referrals.
+    Referral rate 0% → flag fires."""
+    aggregated = make_aggregated_row(total_cases=50)
+    # Build 672 DS-positive visits, all with no referral
+    visits = [make_visit(f"v{i}", i, danger_sign_positive="yes", child_referred="no") for i in range(672)]
+    result = derive_flags(aggregated, visits)
+    assert result.ds_no_referral_pct == pytest.approx(0.0)
+    assert result.flags["flag_ds_no_referral"] is True

@@ -232,6 +232,11 @@ _DECEASED_STATUS: str = "deceased"
 _WEIGHT_MIN_G: int = 500
 _WEIGHT_MAX_G: int = 5000
 
+# CommCare KMC forms store weight in kg. The JS template applies
+# ``kg_to_g`` (×1000) during pipeline extraction; our SQL backend
+# does not recognise our Python callables, so we convert at read time.
+_KG_TO_G: int = 1000
+
 # Days between successive weight visits to be eligible for pair analysis.
 _PAIR_MIN_DAYS: int = 1
 _PAIR_MAX_DAYS: int = 30
@@ -259,6 +264,7 @@ class FLWFlagResult:
     username: str
     total_cases: int = 0
     total_cases_from_visits: int = 0  # Distinct case IDs seen in visit rows
+    total_visits: int = 0  # Total follow-up visits from aggregated pipeline
     deaths: int = 0
     closed_cases: int = 0
     non_mort_closed: int = 0
@@ -354,6 +360,39 @@ def _row_get(row: Any, key: str, default: Any = None) -> Any:
     return default
 
 
+def _read_weight_g(row: Any) -> float | None:
+    """Read weight from a visit row, normalised to grams.
+
+    Unit detection: production CommCare KMC V2 forms store weight in
+    *grams* (e.g. ``1345`` = 1.345 kg). Earlier prototypes / kg-input
+    test fixtures store weight in *kilograms* (e.g. ``1.5`` = 1500 g).
+    Both are common in our codebase, so we auto-detect by magnitude:
+
+      * 0 <  w  < 50         → kilograms; multiply by 1000.
+      * 100 <= w <= 10000    → grams; use as-is.
+      * Anything else        → reject (implausible for a neonate).
+
+    Returns None on missing / out-of-range / non-numeric input.
+
+    Historical note: the JS template at ``workflow/templates/kmc_flw_flags.py``
+    assumes kg-only input and unconditionally multiplies by 1000. That
+    bug masked all four weight-based flags (wt_loss / wt_gain / wt_zero
+    / round_weight) because real production weights came in as grams
+    (e.g. 1345 → 1,345,000g → rejected as out-of-range).
+    """
+    w = _safe_float(_row_get(row, "weight"))
+    if w is None or w <= 0:
+        return None
+    # Kilograms: typical premature infant 0.5 - 5 kg.
+    if w < 50:
+        return w * _KG_TO_G
+    # Grams: typical premature infant 500 - 5000 g.
+    if 100 <= w <= 10000:
+        return w
+    # Implausible (a baby weighing 80 of *something*, or > 10kg) → drop.
+    return None
+
+
 # =============================================================================
 # Visit-level metric computations
 # Direct ports of kmc_flw_flags.py:284-403 (JS).
@@ -380,15 +419,13 @@ def compute_weight_metrics(visit_rows: list[Any]) -> dict[str, Any]:
 
     for visits in by_child.values():
         eligible = [
-            v
-            for v in visits
-            if _safe_float(_row_get(v, "weight")) is not None and _parse_date(_row_get(v, "visit_date")) is not None
+            v for v in visits if _read_weight_g(v) is not None and _parse_date(_row_get(v, "visit_date")) is not None
         ]
         eligible.sort(key=lambda v: _parse_date(_row_get(v, "visit_date")))
 
         for i in range(1, len(eligible)):
-            prev_w = _safe_float(_row_get(eligible[i - 1], "weight"))
-            curr_w = _safe_float(_row_get(eligible[i], "weight"))
+            prev_w = _read_weight_g(eligible[i - 1])
+            curr_w = _read_weight_g(eligible[i])
             if prev_w is None or curr_w is None:
                 continue
             if not (_WEIGHT_MIN_G <= prev_w <= _WEIGHT_MAX_G):
@@ -408,7 +445,9 @@ def compute_weight_metrics(visit_rows: list[Any]) -> dict[str, Any]:
                 loss_pairs += 1
             if abs(diff) < 0.001:
                 zero_pairs += 1
-            if days_between > 0:
+            # Mean daily gain uses only positive-change pairs per the
+            # April follow-on doc: "gain pairs only".
+            if diff > 0 and days_between > 0:
                 total_daily_gain += diff / days_between
                 gain_pair_count += 1
 
@@ -417,6 +456,11 @@ def compute_weight_metrics(visit_rows: list[Any]) -> dict[str, Any]:
         "mean_daily_gain": (total_daily_gain / gain_pair_count) if gain_pair_count > 0 else None,
         "pct_wt_zero": (zero_pairs / total_pairs) if total_pairs > 0 else None,
         "weight_pairs": total_pairs,
+        # Gain-only pair count exposed separately so flag_wt_gain can gate
+        # on it directly (April canonical doc Table 0 row 8: "10 valid
+        # weight gain pairs"). flag_wt_loss / flag_wt_zero still use
+        # weight_pairs which is the total (loss + gain + zero) count.
+        "gain_pairs": gain_pair_count,
     }
 
 
@@ -446,7 +490,11 @@ def compute_enrollment_metrics(visit_rows: list[Any]) -> dict[str, Any]:
         dd = slot["discharge_date"]
         if rd and dd:
             cases_with_dates += 1
-            if (rd - dd).days > _LATE_ENROLL_DAYS:
+            # Doc text: "8 or more days" / "8+ days" → inclusive >= 8.
+            # JS template uses strict > 8; we deviate intentionally to match
+            # the doc literally (a case at exactly 8 days post-discharge
+            # is "late").
+            if (rd - dd).days >= _LATE_ENROLL_DAYS:
                 late_cases += 1
 
     return {
@@ -489,7 +537,11 @@ def compute_case_metrics(visit_rows: list[Any]) -> dict[str, Any]:
                 "visit_count": 0,
             },
         )
-        slot["visit_count"] += 1
+        # Only count follow-up visits (where visit_number is populated)
+        # — registration-only forms should not inflate the visit count.
+        # The doc says "average follow-up visits per closed case".
+        if _row_get(row, "visit_number") is not None:
+            slot["visit_count"] += 1
         vdate = _parse_date(_row_get(row, "visit_date"))
         if vdate is None:
             continue
@@ -535,30 +587,36 @@ def compute_case_metrics(visit_rows: list[Any]) -> dict[str, Any]:
     }
 
 
-def compute_avg_visits_top_50(case_metrics: dict[str, Any]) -> tuple[float | None, int]:
-    """Avg visits per closed non-mortality case across the 50 most recently
-    closed cases (by last visit date), per the March-2026 doc:
+def compute_avg_visits(case_metrics: dict[str, Any]) -> tuple[float | None, int]:
+    """Avg follow-up visits per closed non-mortality case.
 
-      "Computed using the 50 most recently closed cases (by last visit
-       date) to reflect current behavior rather than historical patterns."
+    Per April canonical doc Table 0 row 1: "Avg follow-up visits per closed
+    case < 3.0", min "10 closed non-mortality cases" — no cap on how many
+    closed cases are considered.
 
-    Returns (avg_or_None, top_50_count). avg is None if fewer than
-    MIN_CASES["visits"] qualify after the filter.
+    Returns (avg_or_None, non_mort_closed_count). avg is None if fewer than
+    MIN_CASES["visits"] non-mortality closed cases exist.
+
+    Note: an earlier version of this function applied a "50 most recent
+    cases" cap from the March narrative ("reflect current behavior rather
+    than historical patterns"). The April canonical table does not retain
+    that cap, so we now use all non-mortality closed cases the FLW has.
     """
     cases = case_metrics["cases"]
     is_closed = case_metrics["is_closed"]
     is_mortality = case_metrics["is_mortality"]
 
-    closed = [c for c in cases if is_closed(c) and c["latest_visit_date"] is not None]
-    closed.sort(key=lambda c: c["latest_visit_date"], reverse=True)
-    top_50_closed = closed[:50]
-    top_50_non_mort = [c for c in top_50_closed if not is_mortality(c)]
+    non_mort_closed = [c for c in cases if is_closed(c) and not is_mortality(c)]
 
-    if len(top_50_non_mort) < MIN_CASES["visits"]:
-        return None, len(top_50_non_mort)
+    if len(non_mort_closed) < MIN_CASES["visits"]:
+        return None, len(non_mort_closed)
 
-    total_visits = sum(c["visit_count"] for c in top_50_non_mort)
-    return total_visits / len(top_50_non_mort), len(top_50_non_mort)
+    total_visits = sum(c["visit_count"] for c in non_mort_closed)
+    return total_visits / len(non_mort_closed), len(non_mort_closed)
+
+
+# Backwards-compatible alias for any external callers still using the old name.
+compute_avg_visits_top_50 = compute_avg_visits
 
 
 # =============================================================================
@@ -571,14 +629,24 @@ def compute_avg_visits_top_50(case_metrics: dict[str, Any]) -> tuple[float | Non
 
 
 def compute_round_weight_pct(visit_rows: list[Any]) -> tuple[float | None, int]:
-    """Fraction of valid weight readings that are exact multiples of 100g.
+    """Fraction of valid follow-up weight readings that are exact multiples of 100g.
+
+    Per April canonical doc Table 0 row 13: "≥ 80% of *follow-up weights*
+    recorded as exact multiples of 100g". Registration birth weights are
+    excluded so that an FLW's calculation isn't biased by birth weights
+    (which are often estimated as round hundreds at the hospital). A row
+    is a follow-up if its ``visit_number`` field is populated.
 
     Returns (pct_or_None, valid_weight_count). If valid_weight_count is below
     MIN_CASES["round_weight"], pct is None to signal insufficient data.
     """
     valid_weights: list[float] = []
     for row in visit_rows:
-        w = _safe_float(_row_get(row, "weight"))
+        # Follow-up filter: visit_number is populated only for follow-up
+        # forms; registration forms leave it null.
+        if _row_get(row, "visit_number") is None:
+            continue
+        w = _read_weight_g(row)
         if w is None:
             continue
         if not (_WEIGHT_MIN_G <= w <= _WEIGHT_MAX_G):
@@ -703,6 +771,7 @@ def derive_flags(aggregated_row: Any, visit_rows: list[Any]) -> FLWFlagResult:
     """
     username = str(_row_get(aggregated_row, "username") or "")
     total_cases = _safe_int(_row_get(aggregated_row, "total_cases"))
+    total_visits = _safe_int(_row_get(aggregated_row, "kmc_visit_count"))
     danger_visit_count = _safe_int(_row_get(aggregated_row, "danger_visit_count"))
     danger_positive_count = _safe_int(_row_get(aggregated_row, "danger_positive_count"))
 
@@ -714,9 +783,13 @@ def derive_flags(aggregated_row: Any, visit_rows: list[Any]) -> FLWFlagResult:
     closed_cases = case_metrics["closed_cases"]
     non_mort_closed = case_metrics["non_mort_closed"]
     deaths = case_metrics["deaths"]
-    # Doc-faithful avg-visits: 50 most recently closed non-mortality cases.
-    avg_visits, top_50_count = compute_avg_visits_top_50(case_metrics)
-    mort_rate = (deaths / total_cases) if total_cases > 0 else None
+    # April canonical: avg follow-up visits across ALL closed non-mortality
+    # cases (no recent-N cap; the March narrative's "50 most recent" rule
+    # was dropped in the April table).
+    avg_visits, _non_mort_count = compute_avg_visits(case_metrics)
+    # Mortality rate denominator is closed_cases, per the doc data
+    # tables (e.g. FLW 2328: 35 deaths / 108 closed = 32.4%).
+    mort_rate = (deaths / closed_cases) if closed_cases > 0 else None
     danger_rate = danger_positive_count / danger_visit_count if danger_visit_count > 0 else None
 
     # Secondary flag inputs
@@ -729,49 +802,60 @@ def derive_flags(aggregated_row: Any, visit_rows: list[Any]) -> FLWFlagResult:
     referral_pct, _ref_n = compute_ds_no_referral_pct(visit_rows)
 
     excluded = total_cases < MIN_CASES["exclude"]
-    flags: dict[str, bool | None] = {f: None if excluded else False for f in ALL_FLAGS}
+    flags: dict[str, bool | None] = {f: None for f in ALL_FLAGS}
 
     if not excluded:
         # ---- 9 currently in JS ----
-        # flag_visits uses the 50-closed-case window (compute_avg_visits_top_50
-        # already enforces MIN_CASES["visits"]; if too few qualify, avg_visits
-        # is None and the flag does not fire).
-        flags["flag_visits"] = avg_visits is not None and avg_visits < THRESHOLDS["visits"]
+        # Each flag returns True (fires), False (passes), or None
+        # (insufficient data). The conditional expression ensures that
+        # when the minimum-data requirement isn't met the flag is None —
+        # not False — so the UI renders "—" with neutral styling instead
+        # of an incorrect green "pass" indicator.
+        flags["flag_visits"] = (avg_visits < THRESHOLDS["visits"]) if avg_visits is not None else None
         flags["flag_mort_high"] = (
-            total_cases >= MIN_CASES["mort"] and mort_rate is not None and mort_rate > THRESHOLDS["mort_high"]
+            (mort_rate > THRESHOLDS["mort_high"])
+            if closed_cases >= MIN_CASES["mort"] and mort_rate is not None
+            else None
         )
         flags["flag_mort_low"] = (
-            total_cases >= MIN_CASES["mort"] and mort_rate is not None and mort_rate < THRESHOLDS["mort_low"]
+            (mort_rate < THRESHOLDS["mort_low"])
+            if closed_cases >= MIN_CASES["mort"] and mort_rate is not None
+            else None
         )
         flags["flag_enroll"] = (
-            enrollment_metrics["cases_with_dates"] >= MIN_CASES["enroll"]
+            (enrollment_metrics["pct_late_enroll"] > THRESHOLDS["enroll"])
+            if enrollment_metrics["cases_with_dates"] >= MIN_CASES["enroll"]
             and enrollment_metrics["pct_late_enroll"] is not None
-            and enrollment_metrics["pct_late_enroll"] > THRESHOLDS["enroll"]
+            else None
         )
         flags["flag_danger_high"] = (
-            danger_visit_count >= MIN_CASES["danger_high"]
-            and danger_rate is not None
-            and danger_rate > THRESHOLDS["danger_high"]
+            (danger_rate > THRESHOLDS["danger_high"])
+            if danger_visit_count >= MIN_CASES["danger_high"] and danger_rate is not None
+            else None
         )
         flags["flag_danger_zero"] = (
-            danger_visit_count >= MIN_CASES["danger_zero"]
-            and danger_rate is not None
-            and danger_rate == THRESHOLDS["danger_zero"]
+            (danger_rate == THRESHOLDS["danger_zero"])
+            if danger_visit_count >= MIN_CASES["danger_zero"] and danger_rate is not None
+            else None
         )
         flags["flag_wt_loss"] = (
-            weight_metrics["weight_pairs"] >= MIN_CASES["weight"]
-            and weight_metrics["pct_wt_loss"] is not None
-            and weight_metrics["pct_wt_loss"] > THRESHOLDS["wt_loss"]
+            (weight_metrics["pct_wt_loss"] > THRESHOLDS["wt_loss"])
+            if weight_metrics["weight_pairs"] >= MIN_CASES["weight"] and weight_metrics["pct_wt_loss"] is not None
+            else None
         )
+        # April canonical doc Table 0 row 8: gate on "10 valid weight GAIN pairs"
+        # specifically (not total pairs). This makes the flag conservative —
+        # an FLW with 12 total pairs but only 2 gain pairs no longer evaluates.
         flags["flag_wt_gain"] = (
-            weight_metrics["weight_pairs"] >= MIN_CASES["weight"]
+            (weight_metrics["mean_daily_gain"] > THRESHOLDS["wt_gain"])
+            if weight_metrics.get("gain_pairs", 0) >= MIN_CASES["weight"]
             and weight_metrics["mean_daily_gain"] is not None
-            and weight_metrics["mean_daily_gain"] > THRESHOLDS["wt_gain"]
+            else None
         )
         flags["flag_wt_zero"] = (
-            weight_metrics["weight_pairs"] >= MIN_CASES["weight"]
-            and weight_metrics["pct_wt_zero"] is not None
-            and weight_metrics["pct_wt_zero"] > THRESHOLDS["wt_zero"]
+            (weight_metrics["pct_wt_zero"] > THRESHOLDS["wt_zero"])
+            if weight_metrics["weight_pairs"] >= MIN_CASES["weight"] and weight_metrics["pct_wt_zero"] is not None
+            else None
         )
 
         # ---- 7 secondary (1 live + 6 not-yet-wired returning None) ----
@@ -805,10 +889,14 @@ def derive_flags(aggregated_row: Any, visit_rows: list[Any]) -> FLWFlagResult:
             else None
         )
 
-    # Synthetic priority-tier mort flag: True if either component is True.
-    flags["flag_mort"] = (
-        (bool(flags.get("flag_mort_low")) or bool(flags.get("flag_mort_high"))) if not excluded else None
-    )
+    # Synthetic priority-tier mort flag: True if either component is True,
+    # None if both sub-flags are None (insufficient data).
+    mort_low = flags.get("flag_mort_low")
+    mort_high = flags.get("flag_mort_high")
+    if excluded or (mort_low is None and mort_high is None):
+        flags["flag_mort"] = None
+    else:
+        flags["flag_mort"] = bool(mort_low) or bool(mort_high)
 
     # Synthetic data quality flag: True if ANY data-quality sub-flag fires.
     dq_values = [flags.get(f) for f in DATA_QUALITY_FLAGS]
@@ -831,6 +919,7 @@ def derive_flags(aggregated_row: Any, visit_rows: list[Any]) -> FLWFlagResult:
         username=username,
         total_cases=total_cases,
         total_cases_from_visits=total_cases_from_visits,
+        total_visits=total_visits,
         deaths=deaths,
         closed_cases=closed_cases,
         non_mort_closed=non_mort_closed,
@@ -888,15 +977,15 @@ def visit_flag_sources(visit_rows: list[Any], flw_result: FLWFlagResult) -> list
                 [
                     i
                     for i in indices
-                    if _safe_float(_row_get(visit_rows[i], "weight")) is not None
+                    if _read_weight_g(visit_rows[i]) is not None
                     and _parse_date(_row_get(visit_rows[i], "visit_date")) is not None
                 ],
                 key=lambda i: _parse_date(_row_get(visit_rows[i], "visit_date")),
             )
             for i in range(1, len(sorted_idx)):
                 p, c = sorted_idx[i - 1], sorted_idx[i]
-                w1 = _safe_float(_row_get(visit_rows[p], "weight"))
-                w2 = _safe_float(_row_get(visit_rows[c], "weight"))
+                w1 = _read_weight_g(visit_rows[p])
+                w2 = _read_weight_g(visit_rows[c])
                 d1 = _parse_date(_row_get(visit_rows[p], "visit_date"))
                 d2 = _parse_date(_row_get(visit_rows[c], "visit_date"))
                 if w1 is None or w2 is None or d1 is None or d2 is None:
@@ -944,7 +1033,7 @@ def visit_flag_sources(visit_rows: list[Any], flw_result: FLWFlagResult) -> list
 
         # Round-weight: any individual visit whose weight is a 100g multiple
         if flags.get("flag_round_weight"):
-            w = _safe_float(_row_get(row, "weight"))
+            w = _read_weight_g(row)
             if w is not None and _WEIGHT_MIN_G <= w <= _WEIGHT_MAX_G:
                 if abs(w - round(w / 100) * 100) < 0.001:
                     sources.append("flag_round_weight")

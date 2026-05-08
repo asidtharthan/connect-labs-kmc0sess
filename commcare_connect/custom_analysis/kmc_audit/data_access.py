@@ -75,7 +75,10 @@ class DashboardSummary:
     rows: list[dict[str, Any]]
     total_flws: int
     flws_with_priority_flag: int
+    flws_with_any_flag: int
     flws_excluded: int
+    total_kmc_visits: int
+    total_cases_all: int
     opportunities_loaded: list[int]
     opportunities_failed: list[tuple[int, str]]
 
@@ -192,9 +195,18 @@ class KMCAuditDataAccess:
 
     def build_dashboard(self) -> DashboardSummary:
         """Load all selected opportunities in parallel and merge into one
-        flat row list ready for table rendering."""
+        flat row list ready for table rendering.
+
+        Rows are merged by ``(llo, username)`` so that V1+V2 of the same
+        program (e.g. PIPN: 524 + 874) collapse into a single row per FLW.
+        Aggregated counts are summed across opportunities and visit rows
+        are concatenated; ``derive_flags`` is then re-run once on the
+        merged data so flag thresholds apply to the combined sample. The
+        underlying per-opp breakdown is preserved on each row so the
+        audit modal can still target a single opportunity.
+        """
         if not self.opportunity_ids:
-            return DashboardSummary([], 0, 0, 0, [], [])
+            return DashboardSummary([], 0, 0, 0, 0, 0, 0, [], [])
 
         results: list[OpportunityResult] = []
         max_workers = min(_MAX_CONCURRENT_OPPS, len(self.opportunity_ids))
@@ -208,52 +220,164 @@ class KMCAuditDataAccess:
         # but a request-scoped attribute saves a DB roundtrip.
         self._last_results: dict[int, OpportunityResult] = {r.opportunity_id: r for r in results}
 
-        # Build the merged row list for template rendering. Each row carries
-        # everything the table needs so the template stays dumb.
-        rows: list[dict[str, Any]] = []
         opportunities_loaded: list[int] = []
         opportunities_failed: list[tuple[int, str]] = []
+
+        # ──────────────────────────────────────────────────────────────────
+        # Step 1: collect per-(llo, username) buckets across all opps.
+        # Each bucket carries summed aggregate counts + concatenated visits.
+        # ──────────────────────────────────────────────────────────────────
+        from .flag_logic import derive_flags  # local import to avoid cycles in tests
+
+        buckets: dict[tuple[str, str], dict[str, Any]] = {}
 
         for opp in sorted(results, key=lambda r: r.opportunity_id):
             if opp.error:
                 opportunities_failed.append((opp.opportunity_id, opp.error))
                 continue
+            if opp.flw_aggregated is None or opp.visit_result is None:
+                # Defensive: pipeline returned but with no rows. Skip the merge.
+                continue
             opportunities_loaded.append(opp.opportunity_id)
-            # FLW name lookup — prefer the dedicated names map (fetched via
-            # fetch_flw_names), fall back to the aggregated row's flw_name,
-            # and ultimately the username if no display name is known.
-            names_map: dict[str, str] = dict(opp.flw_names or {})
-            if opp.flw_aggregated:
-                for r in opp.flw_aggregated.rows:
-                    if r.username and r.flw_name and r.username not in names_map:
-                        names_map[r.username] = r.flw_name
 
-            for flw in opp.flw_results:
-                # Build a metrics dict keyed by flag metric names for cell display
-                metrics = {
-                    "avg_visits": flw.avg_visits,
-                    "mort_rate": flw.mort_rate,
-                    "danger_rate": flw.danger_rate,
-                    "pct_late_enroll": flw.pct_late_enroll,
-                    "pct_wt_loss": flw.pct_wt_loss,
-                    "mean_daily_gain": flw.mean_daily_gain,
-                    "pct_wt_zero": flw.pct_wt_zero,
-                    "round_weight_pct": flw.round_weight_pct,
-                    "hr_copycat_pct": flw.hr_copycat_pct,
-                    "temp_copycat_pct": flw.temp_copycat_pct,
-                    "spo2_implausible_pct": flw.spo2_implausible_pct,
-                    "ga_fullterm_pct": flw.ga_fullterm_pct,
-                    "gps_same_case_far_pct": flw.gps_same_case_far_pct,
-                    "ds_no_referral_pct": flw.ds_no_referral_pct,
-                }
-                row = {
-                    "username": flw.username,
-                    "flw_name": names_map.get(flw.username) or flw.username,
-                    "opportunity_id": opp.opportunity_id,
-                    "opportunity_name": opp.opportunity_name,
-                    "llo": opp.llo or "",
+            # Group this opp's visit rows by username once.
+            visits_by_flw: dict[str, list[Any]] = {}
+            for v in opp.visit_result.rows:
+                u = getattr(v, "username", None) or ""
+                if u:
+                    visits_by_flw.setdefault(u, []).append(v)
+
+            # Names map for this opp (display names take precedence over username).
+            names_map: dict[str, str] = dict(opp.flw_names or {})
+            for r in opp.flw_aggregated.rows:
+                if r.username and r.flw_name and r.username not in names_map:
+                    names_map[r.username] = r.flw_name
+
+            for agg_row in opp.flw_aggregated.rows:
+                uname = agg_row.username
+                if not uname:
+                    continue
+                key = (opp.llo or "", uname)
+                bucket = buckets.setdefault(
+                    key,
+                    {
+                        "username": uname,
+                        "llo": opp.llo or "",
+                        "flw_name": None,
+                        # summed aggregate counts (matches FieldComputation names in pipeline_config)
+                        "agg_total_cases": 0,
+                        "agg_kmc_visit_count": 0,
+                        "agg_danger_visit_count": 0,
+                        "agg_danger_positive_count": 0,
+                        "visit_rows": [],
+                        # per-opp breakdown for audit modal / drill-down routing
+                        "opportunity_ids": [],
+                        "opportunity_breakdown": [],
+                    },
+                )
+                # Prefer the first non-empty display name we see.
+                if not bucket["flw_name"]:
+                    bucket["flw_name"] = names_map.get(uname) or getattr(agg_row, "flw_name", None)
+
+                # Sum the four aggregate counts from this opp.
+                opp_cases = int(getattr(agg_row, "total_cases", 0) or 0)
+                opp_visits = int(getattr(agg_row, "kmc_visit_count", 0) or 0)
+                opp_danger_visits = int(getattr(agg_row, "danger_visit_count", 0) or 0)
+                opp_danger_pos = int(getattr(agg_row, "danger_positive_count", 0) or 0)
+                bucket["agg_total_cases"] += opp_cases
+                bucket["agg_kmc_visit_count"] += opp_visits
+                bucket["agg_danger_visit_count"] += opp_danger_visits
+                bucket["agg_danger_positive_count"] += opp_danger_pos
+
+                # Concatenate this opp's visits for this FLW.
+                bucket["visit_rows"].extend(visits_by_flw.get(uname, []))
+
+                bucket["opportunity_ids"].append(opp.opportunity_id)
+                bucket["opportunity_breakdown"].append(
+                    {
+                        "opportunity_id": opp.opportunity_id,
+                        "opportunity_name": opp.opportunity_name,
+                        "cases": opp_cases,
+                        "visits": opp_visits,
+                    }
+                )
+
+        # ──────────────────────────────────────────────────────────────────
+        # Step 2: per bucket, build a synthetic aggregated-row dict and run
+        # derive_flags on the combined visit history.
+        # ──────────────────────────────────────────────────────────────────
+        rows: list[dict[str, Any]] = []
+        for bucket in buckets.values():
+            agg_dict = {
+                "username": bucket["username"],
+                "flw_name": bucket["flw_name"],
+                "total_cases": bucket["agg_total_cases"],
+                "kmc_visit_count": bucket["agg_kmc_visit_count"],
+                "danger_visit_count": bucket["agg_danger_visit_count"],
+                "danger_positive_count": bucket["agg_danger_positive_count"],
+            }
+            flw = derive_flags(agg_dict, bucket["visit_rows"])
+
+            # Cross-check: warn if aggregated cases diverge from visit-derived
+            # case count (would indicate a stale cache or partial data load).
+            if (
+                flw.total_cases > 0
+                and flw.total_cases_from_visits > 0
+                and flw.total_cases != flw.total_cases_from_visits
+            ):
+                logger.warning(
+                    "[KMCAudit] merged llo=%s FLW=%s: total_cases mismatch — " "aggregated=%d, visit-derived=%d",
+                    bucket["llo"],
+                    bucket["username"],
+                    flw.total_cases,
+                    flw.total_cases_from_visits,
+                )
+
+            metrics = {
+                "avg_visits": flw.avg_visits,
+                "mort_rate": flw.mort_rate,
+                "danger_rate": flw.danger_rate,
+                "pct_late_enroll": flw.pct_late_enroll,
+                "pct_wt_loss": flw.pct_wt_loss,
+                "mean_daily_gain": flw.mean_daily_gain,
+                "pct_wt_zero": flw.pct_wt_zero,
+                "round_weight_pct": flw.round_weight_pct,
+                "hr_copycat_pct": flw.hr_copycat_pct,
+                "temp_copycat_pct": flw.temp_copycat_pct,
+                "spo2_implausible_pct": flw.spo2_implausible_pct,
+                "ga_fullterm_pct": flw.ga_fullterm_pct,
+                "gps_same_case_far_pct": flw.gps_same_case_far_pct,
+                "ds_no_referral_pct": flw.ds_no_referral_pct,
+            }
+
+            # Primary opp_id for audit creation: pick the highest ID, which
+            # corresponds to the V2 opportunity (874 > 524, 938 > 523).
+            # If only one opp contributed, that's the primary.
+            primary_opp_id = max(bucket["opportunity_ids"]) if bucket["opportunity_ids"] else 0
+            primary_opp_name = next(
+                (
+                    b["opportunity_name"]
+                    for b in bucket["opportunity_breakdown"]
+                    if b["opportunity_id"] == primary_opp_id
+                ),
+                "",
+            )
+
+            rows.append(
+                {
+                    "username": bucket["username"],
+                    "flw_name": bucket["flw_name"] or bucket["username"],
+                    # Primary opp drives audit creation + drill-down routing.
+                    "opportunity_id": primary_opp_id,
+                    "opportunity_name": primary_opp_name,
+                    # Full breakdown — used for tooltips ("64+163 cases across V1+V2") and
+                    # by the audit modal if we add an opp picker later.
+                    "opportunity_ids": bucket["opportunity_ids"],
+                    "opportunity_breakdown": bucket["opportunity_breakdown"],
+                    "llo": bucket["llo"],
                     "total_cases": flw.total_cases,
                     "total_cases_from_visits": flw.total_cases_from_visits,
+                    "total_visits": flw.total_visits,
                     "deaths": flw.deaths,
                     "closed_cases": flw.closed_cases,
                     "non_mort_closed": flw.non_mort_closed,
@@ -271,30 +395,35 @@ class KMCAuditDataAccess:
                     "flags": flw.flags,
                     "metrics": metrics,
                 }
-                rows.append(row)
+            )
 
-        # Sort by priority flag count descending so the most concerning
-        # FLWs surface at the top.
-        rows.sort(key=lambda r: (-(r["priority_flag_count"] or 0), -(r["flag_count"] or 0), r["username"]))
+        # Sort alphabetically by FLW name so the dashboard shows a natural
+        # mix of flagged and non-flagged FLWs. The "Show flagged only"
+        # checkbox filters to concerning cases when needed.
+        rows.sort(key=lambda r: (r.get("flw_name") or r["username"]).lower())
 
-        # Unique-FLW counts (an FLW working in multiple opportunities still
-        # counts ONCE here, even though they show up as multiple rows in the
-        # table). The table is per-(FLW, opp) because audit creation is
-        # per-opp, but the headline numbers should reflect distinct people.
+        # Headline counts — rows are now per-(llo, FLW) so dedup by username
+        # still gives "distinct people across LLOs" (an FLW is rare across LLOs
+        # but possible). Cases / visits sums no longer double-count V1+V2
+        # because the merge already collapsed them.
         unique_usernames: set[str] = {r["username"] for r in rows}
         total_flws = len(unique_usernames)
         flws_with_priority_flag = len({r["username"] for r in rows if r["priority_flag_count"] >= 1})
-        # An FLW is "excluded" only if EVERY opp they appear in is excluded
-        # (i.e. they have <20 cases everywhere). If they have ≥20 cases in
-        # any single opp, they're not excluded for that opp.
+        flws_with_any_flag = len({r["username"] for r in rows if r["flag_count"] >= 1})
         excluded_only_users = {u for u in unique_usernames if all(r["excluded"] for r in rows if r["username"] == u)}
         flws_excluded = len(excluded_only_users)
+
+        total_kmc_visits = sum(r.get("total_visits", 0) for r in rows)
+        total_cases_all = sum(r.get("total_cases", 0) for r in rows)
 
         return DashboardSummary(
             rows=rows,
             total_flws=total_flws,
             flws_with_priority_flag=flws_with_priority_flag,
+            flws_with_any_flag=flws_with_any_flag,
             flws_excluded=flws_excluded,
+            total_kmc_visits=total_kmc_visits,
+            total_cases_all=total_cases_all,
             opportunities_loaded=opportunities_loaded,
             opportunities_failed=opportunities_failed,
         )

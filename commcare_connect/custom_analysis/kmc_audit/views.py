@@ -110,6 +110,8 @@ class KMCAuditDashboardView(LoginRequiredMixin, TemplateView):
     def _add_static_context(self, context: dict, opp_ids: list[int]) -> dict:
         """Filter chips, column metadata, and opp catalogue used by the template."""
         cols = KMCAuditDataAccess.column_definitions()
+        # Build ALL_FLAGS list with labels for the flag frequency grid
+        all_flags_for_template = [{"key": k, "label": FLAG_LABELS.get(k, k)} for k in ALL_FLAGS]
         context.update(
             {
                 "selected_opp_ids": opp_ids,
@@ -126,6 +128,7 @@ class KMCAuditDashboardView(LoginRequiredMixin, TemplateView):
                 "priority_columns": cols["priority"],
                 "secondary_columns": cols["secondary"],
                 "data_quality_sub_flags": cols["data_quality_sub_flags"],
+                "all_flags": all_flags_for_template,
                 "flag_labels": FLAG_LABELS,
                 "flag_descriptions": FLAG_DESCRIPTIONS,
                 "flag_thresholds": FLAG_THRESHOLD_DISPLAY,

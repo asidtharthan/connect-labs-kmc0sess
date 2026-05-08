@@ -44,7 +44,7 @@ AWS_S3_MAX_MEMORY_SIZE = env.int("DJANGO_AWS_S3_MAX_MEMORY_SIZE", default=100_00
 AWS_S3_REGION_NAME = env("AWS_DEFAULT_REGION", default=None)
 AWS_S3_CUSTOM_DOMAIN = env("DJANGO_AWS_S3_CUSTOM_DOMAIN", default=None)
 aws_s3_domain = AWS_S3_CUSTOM_DOMAIN or f"{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com"
-MEDIA_URL = f"https://{aws_s3_domain}/media/"
+MEDIA_URL = f"https://{aws_s3_domain}/media/"  # noqa: E231
 STORAGES["default"]["BACKEND"] = "commcare_connect.utils.storages.MediaRootS3Boto3Storage"
 
 # EMAIL (SES)
@@ -97,6 +97,7 @@ AUTHENTICATION_BACKENDS = [
 # Add labs app and custom_analysis
 INSTALLED_APPS.append("commcare_connect.labs")
 INSTALLED_APPS.append("commcare_connect.custom_analysis.chc_nutrition")
+INSTALLED_APPS.append("commcare_connect.custom_analysis.kmc_audit")
 
 # Replace default AuthenticationMiddleware with labs version
 MIDDLEWARE = list(MIDDLEWARE)

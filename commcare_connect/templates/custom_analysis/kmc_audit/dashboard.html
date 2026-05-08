@@ -1,37 +1,41 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}KMC Audit Dashboard{% endblock %}
+{% block title %}KMC FLW Audit Dashboard{% endblock %}
 
 {% block content %}
 <div class="container mx-auto px-6 py-5 max-w-screen-2xl"
      x-data="kmcAuditDashboard()"
      x-init="init()">
 
-  {# ─────────── Header with info toggle ─────────── #}
-  <div class="mb-5 flex items-start justify-between">
+  {# ─────────── Header ─────────── #}
+  <div class="mb-4 flex items-start justify-between">
     <div>
-      <h1 class="text-xl font-semibold text-gray-900">KMC Audit Dashboard</h1>
-      <p class="text-sm text-gray-500 mt-0.5">
-        Quality flags across all KMC opportunities
-        {% if summary.opportunities_failed %}
-          <span class="text-red-600">— {{ summary.opportunities_failed|length }} failed to load</span>
-        {% endif %}
-      </p>
+      <h1 class="text-xl font-semibold text-gray-900">KMC FLW Audit Dashboard</h1>
+      {% if summary.opportunities_failed %}
+      <p class="text-sm text-red-600 mt-0.5">{{ summary.opportunities_failed|length }} failed to load</p>
+      {% endif %}
     </div>
-    <button @click="showInfoPanel = !showInfoPanel"
-            class="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 px-3 py-1.5 rounded-md border border-gray-200 hover:border-gray-300 transition-colors"
-            :class="{ 'bg-gray-100 border-gray-300': showInfoPanel }">
-      <i class="fa-solid fa-circle-info text-xs"></i>
-      <span>Flag reference</span>
-    </button>
+    <div class="flex items-center gap-2">
+      <button onclick="window.location.reload()"
+              class="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 px-3 py-1.5 rounded-md border border-gray-200 hover:border-gray-300 transition-colors">
+        <i class="fa-solid fa-arrows-rotate text-xs"></i>
+        <span>Refresh</span>
+      </button>
+      <button @click="showInfoPanel = !showInfoPanel"
+              class="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 px-3 py-1.5 rounded-md border border-gray-200 hover:border-gray-300 transition-colors"
+              :class="{ 'bg-gray-100 border-gray-300': showInfoPanel }">
+        <i class="fa-solid fa-book text-xs"></i>
+        <span>Legend</span>
+      </button>
+    </div>
   </div>
 
-  {# ─────────── Info banner (toggled) ─────────── #}
+  {# ─────────── Legend panel (toggled) ─────────── #}
   <div x-show="showInfoPanel" x-cloak
        class="bg-white border border-gray-200 rounded-md overflow-hidden mb-4">
     <div class="px-4 py-2.5 border-b border-gray-200 bg-gray-50/60 flex items-center justify-between">
-      <h2 class="text-sm font-semibold text-gray-800">Flag Reference — Thresholds &amp; Minimum Data Requirements</h2>
+      <h2 class="text-sm font-semibold text-gray-800">Flag Reference &mdash; Thresholds &amp; Minimum Data Requirements</h2>
       <button @click="showInfoPanel = false" class="text-gray-400 hover:text-gray-700 text-xs">
         <i class="fa-solid fa-xmark"></i>
       </button>
@@ -52,7 +56,7 @@
           <tr><td class="px-3 py-1.5 font-medium text-gray-800">Mortality</td><td class="px-3 py-1.5 text-gray-600">Death rate &lt; 2% (implausible) or &gt; 20% (quality concern)</td><td class="px-3 py-1.5 text-center tabular-nums">&lt; 2% or &gt; 20%</td><td class="px-3 py-1.5 text-center tabular-nums">20 cases</td><td class="px-3 py-1.5 text-center"><span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-green-50 text-green-700">Active</span></td></tr>
           <tr><td class="px-3 py-1.5 font-medium text-gray-800">Late Enrollment</td><td class="px-3 py-1.5 text-gray-600">Cases enrolled 8+ days after hospital discharge</td><td class="px-3 py-1.5 text-center tabular-nums">&gt; 35%</td><td class="px-3 py-1.5 text-center tabular-nums">10 cases</td><td class="px-3 py-1.5 text-center"><span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-green-50 text-green-700">Active</span></td></tr>
           <tr><td class="px-3 py-1.5 font-medium text-gray-800">Danger Signs</td><td class="px-3 py-1.5 text-gray-600">Follow-up visits showing danger signs</td><td class="px-3 py-1.5 text-center tabular-nums">&gt; 30%</td><td class="px-3 py-1.5 text-center tabular-nums">20 visits</td><td class="px-3 py-1.5 text-center"><span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-green-50 text-green-700">Active</span></td></tr>
-          <tr><td class="px-3 py-1.5 font-medium text-gray-800">No Danger Signs</td><td class="px-3 py-1.5 text-gray-600">Exactly 0% danger signs — implausible</td><td class="px-3 py-1.5 text-center tabular-nums">= 0%</td><td class="px-3 py-1.5 text-center tabular-nums">30 visits</td><td class="px-3 py-1.5 text-center"><span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-green-50 text-green-700">Active</span></td></tr>
+          <tr><td class="px-3 py-1.5 font-medium text-gray-800">No Danger Signs</td><td class="px-3 py-1.5 text-gray-600">Exactly 0% danger signs &mdash; implausible</td><td class="px-3 py-1.5 text-center tabular-nums">= 0%</td><td class="px-3 py-1.5 text-center tabular-nums">30 visits</td><td class="px-3 py-1.5 text-center"><span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-green-50 text-green-700">Active</span></td></tr>
           <tr><td class="px-3 py-1.5 font-medium text-gray-800">No Referral</td><td class="px-3 py-1.5 text-gray-600">0% referral rate across DS-positive visits</td><td class="px-3 py-1.5 text-center tabular-nums">= 0%</td><td class="px-3 py-1.5 text-center tabular-nums">5 DS+ visits</td><td class="px-3 py-1.5 text-center"><span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-green-50 text-green-700">Active</span></td></tr>
           <tr><td class="px-3 py-1.5 font-medium text-gray-800">Weight Loss</td><td class="px-3 py-1.5 text-gray-600">Successive weight pairs showing loss</td><td class="px-3 py-1.5 text-center tabular-nums">&gt; 15%</td><td class="px-3 py-1.5 text-center tabular-nums">10 pairs</td><td class="px-3 py-1.5 text-center"><span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-green-50 text-green-700">Active</span></td></tr>
           <tr><td class="px-3 py-1.5 font-medium text-gray-800">Weight Gain</td><td class="px-3 py-1.5 text-gray-600">Mean daily gain (fabrication signal)</td><td class="px-3 py-1.5 text-center tabular-nums">&gt; 60 g/d</td><td class="px-3 py-1.5 text-center tabular-nums">10 pairs</td><td class="px-3 py-1.5 text-center"><span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-green-50 text-green-700">Active</span></td></tr>
@@ -60,7 +64,7 @@
           <tr><td class="px-3 py-1.5 font-medium text-gray-800">Rounded Weights</td><td class="px-3 py-1.5 text-gray-600">Weights as exact 100g multiples</td><td class="px-3 py-1.5 text-center tabular-nums">&ge; 80%</td><td class="px-3 py-1.5 text-center tabular-nums">20 weights</td><td class="px-3 py-1.5 text-center"><span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-green-50 text-green-700">Active</span></td></tr>
           <tr><td class="px-3 py-1.5 font-medium text-gray-800">Temp Copy-Paste</td><td class="px-3 py-1.5 text-gray-600">Most-frequent temperature value frequency</td><td class="px-3 py-1.5 text-center tabular-nums">&gt; 75%</td><td class="px-3 py-1.5 text-center tabular-nums">20 visits</td><td class="px-3 py-1.5 text-center"><span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-green-50 text-green-700">Active</span></td></tr>
           <tr><td class="px-3 py-1.5 font-medium text-gray-800">HR Copy-Paste</td><td class="px-3 py-1.5 text-gray-600">Most-frequent heart rate value frequency</td><td class="px-3 py-1.5 text-center tabular-nums">&gt; 75%</td><td class="px-3 py-1.5 text-center tabular-nums">20 visits</td><td class="px-3 py-1.5 text-center"><span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-amber-50 text-amber-700">Pending</span></td></tr>
-          <tr><td class="px-3 py-1.5 font-medium text-gray-800">SpO2 Implausible</td><td class="px-3 py-1.5 text-gray-600">SpO2 readings outside 70–100% range</td><td class="px-3 py-1.5 text-center tabular-nums">&gt; 10%</td><td class="px-3 py-1.5 text-center tabular-nums">20 visits</td><td class="px-3 py-1.5 text-center"><span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-amber-50 text-amber-700">Pending</span></td></tr>
+          <tr><td class="px-3 py-1.5 font-medium text-gray-800">SpO2 Implausible</td><td class="px-3 py-1.5 text-gray-600">SpO2 readings outside 70&ndash;100% range</td><td class="px-3 py-1.5 text-center tabular-nums">&gt; 10%</td><td class="px-3 py-1.5 text-center tabular-nums">20 visits</td><td class="px-3 py-1.5 text-center"><span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-amber-50 text-amber-700">Pending</span></td></tr>
           <tr><td class="px-3 py-1.5 font-medium text-gray-800">Gestational Age</td><td class="px-3 py-1.5 text-gray-600">Registrations with GA &ge; 37 weeks (full-term)</td><td class="px-3 py-1.5 text-center tabular-nums">&gt; 30%</td><td class="px-3 py-1.5 text-center tabular-nums">10</td><td class="px-3 py-1.5 text-center"><span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-amber-50 text-amber-700">Pending</span></td></tr>
           <tr><td class="px-3 py-1.5 font-medium text-gray-800">GPS Spread</td><td class="px-3 py-1.5 text-gray-600">Same-case GPS pairs &gt; 1km apart</td><td class="px-3 py-1.5 text-center tabular-nums">&gt; 30%</td><td class="px-3 py-1.5 text-center tabular-nums">20 visits</td><td class="px-3 py-1.5 text-center"><span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-amber-50 text-amber-700">Pending</span></td></tr>
         </tbody>
@@ -80,87 +84,114 @@
   </div>
   {% else %}
 
-  {# ─────────── KPI cards ─────────── #}
-  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-    <div class="bg-white border border-gray-200 rounded-md p-3">
-      <div class="text-[11px] font-medium text-gray-500 uppercase tracking-wider">FLWs</div>
-      <div class="text-xl font-bold text-gray-800 mt-1 tabular-nums">{{ summary.total_flws }}</div>
+  {# ─────────── LLO Tabs ─────────── #}
+  <div class="flex items-center gap-4 border-b border-gray-200 mb-4">
+    <div class="flex">
+      <button @click="filters.llo = ''"
+              class="px-4 py-2 text-sm font-medium border-b-2 transition-colors"
+              :class="filters.llo === '' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'">
+        All
+      </button>
+      {% for llo in llo_choices %}
+      <button @click="filters.llo = '{{ llo }}'"
+              class="px-4 py-2 text-sm font-medium border-b-2 transition-colors"
+              :class="filters.llo === '{{ llo }}' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'">
+        {{ llo }}
+      </button>
+      {% endfor %}
     </div>
-    <div class="bg-white border border-gray-200 rounded-md p-3">
-      <div class="text-[11px] font-medium text-gray-500 uppercase tracking-wider">Priority flagged</div>
-      <div class="text-xl font-bold text-red-600 mt-1 tabular-nums">{{ summary.flws_with_priority_flag }}</div>
-    </div>
-    <div class="bg-white border border-gray-200 rounded-md p-3">
-      <div class="text-[11px] font-medium text-gray-500 uppercase tracking-wider">Excluded</div>
-      <div class="text-xl font-bold text-gray-500 mt-1 tabular-nums">{{ summary.flws_excluded }}</div>
-    </div>
-    <div class="bg-white border border-gray-200 rounded-md p-3">
-      <div class="text-[11px] font-medium text-gray-500 uppercase tracking-wider">Selected</div>
-      <div class="text-xl font-bold text-blue-600 mt-1 tabular-nums" x-text="selected.length"></div>
+    <div class="ml-auto flex items-center gap-3 pb-1">
+      <select x-model="filters.opp"
+              class="text-xs border border-gray-300 rounded px-2 py-1 bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-gray-400">
+        <option value="">All opportunities</option>
+        {% for opp in all_kmc_opportunities %}
+        <option value="{{ opp.id }}">{{ opp.name }}</option>
+        {% endfor %}
+      </select>
+      <input type="text" x-model="filters.search"
+             placeholder="Search FLW..."
+             class="text-xs border border-gray-300 rounded px-2 py-1 bg-white text-gray-600 w-36 focus:outline-none focus:ring-1 focus:ring-gray-400">
     </div>
   </div>
 
-  {# ─────────── Filter bar ─────────── #}
-  <div class="bg-white border border-gray-200 rounded-md px-4 py-3 mb-4 flex flex-wrap items-center gap-3">
-    <select x-model="filters.llo"
-            class="text-sm border border-gray-300 rounded px-2.5 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-gray-400">
-      <option value="">All LLOs</option>
-      {% for llo in llo_choices %}
-      <option value="{{ llo }}">{{ llo }}</option>
+  {# ─────────── KPI cards (reactive to filters) ─────────── #}
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+    <div class="bg-white border border-gray-200 rounded-md p-3">
+      <div class="text-[11px] font-medium text-gray-500 uppercase tracking-wider">Total FLWs</div>
+      <div class="text-xl font-bold text-gray-800 mt-1 tabular-nums" x-text="kpiTotalFlws()"></div>
+    </div>
+    <div class="bg-white border border-gray-200 rounded-md p-3">
+      <div class="text-[11px] font-medium text-gray-500 uppercase tracking-wider">FLWs with &ge;1 flag</div>
+      <div class="text-xl font-bold text-red-600 mt-1 tabular-nums" x-text="kpiFlwsWithFlag()"></div>
+    </div>
+    <div class="bg-white border border-gray-200 rounded-md p-3">
+      <div class="text-[11px] font-medium text-gray-500 uppercase tracking-wider">Total Cases</div>
+      <div class="text-xl font-bold text-gray-800 mt-1 tabular-nums" x-text="kpiTotalCases()"></div>
+    </div>
+    <div class="bg-white border border-gray-200 rounded-md p-3">
+      <div class="text-[11px] font-medium text-gray-500 uppercase tracking-wider">Total KMC Visits</div>
+      <div class="text-xl font-bold text-gray-800 mt-1 tabular-nums" x-text="kpiTotalVisits()"></div>
+    </div>
+  </div>
+
+  {# ─────────── Flag Frequency Grid (matches priority columns) ─────────── #}
+  <div class="bg-white border border-gray-200 rounded-md overflow-hidden mb-4">
+    <div class="px-4 py-2.5 border-b border-gray-200 bg-gray-50/60">
+      <h2 class="text-sm font-semibold text-gray-800">Flag Frequency Across All FLWs</h2>
+    </div>
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-px bg-gray-100 p-px">
+      {% for col in priority_columns %}
+      <div class="bg-white px-3 py-2.5 text-center"
+           :title="flagFreqFired('{{ col.key }}') + ' of ' + flagFreqTotal() + ' eligible FLWs flagged for {{ col.label }}'">
+        <div class="text-[11px] font-medium text-gray-500 mb-0.5">{{ col.label }}</div>
+        <div class="text-base font-bold tabular-nums"
+             :class="flagFreqClass('{{ col.key }}')">
+          <span x-text="flagFreqFired('{{ col.key }}')"></span>
+          <span class="text-gray-400 font-normal">/</span>
+          <span x-text="flagFreqTotal()" class="text-gray-400 font-normal"></span>
+        </div>
+      </div>
       {% endfor %}
-    </select>
-
-    <select x-model="filters.opp"
-            class="text-sm border border-gray-300 rounded px-2.5 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-gray-400">
-      <option value="">All opportunities</option>
-      {% for opp in all_kmc_opportunities %}
-      <option value="{{ opp.id }}">{{ opp.name }}</option>
-      {% endfor %}
-    </select>
-
-    <input type="text" x-model="filters.search"
-           placeholder="Search FLW…"
-           class="text-sm border border-gray-300 rounded px-2.5 py-1 bg-white text-gray-700 w-48 focus:outline-none focus:ring-1 focus:ring-gray-400">
-
-    <label class="flex items-center gap-1.5 text-sm text-gray-700">
-      <input type="checkbox" x-model="filters.flaggedOnly"
-             class="rounded border-gray-300 text-red-600 focus:ring-red-500 w-3.5 h-3.5">
-      Only flagged
-    </label>
-
-    <button @click="resetFilters()"
-            class="text-xs text-gray-500 hover:text-gray-900 ml-auto">
-      Clear
-    </button>
+    </div>
+    <div class="px-4 py-1.5 border-t border-gray-100 text-[10px] text-gray-500">
+      Numerator: FLWs whose computed metric crossed the threshold. Denominator: FLWs with enough data to evaluate (≥20 cases).
+    </div>
   </div>
 
   {# ─────────── Priority Tier Table ─────────── #}
   <div class="bg-white border border-gray-200 rounded-md overflow-hidden mb-4">
-    <div class="px-4 py-2.5 border-b border-gray-200 bg-gray-50/60">
-      <h2 class="text-sm font-semibold text-gray-800">Priority flags</h2>
+    <div class="px-4 py-2.5 border-b border-gray-200 bg-gray-50/60 flex items-center justify-between">
+      <h2 class="text-sm font-semibold text-gray-800">Per-FLW Flags</h2>
+      <div class="flex items-center gap-3">
+        <label class="flex items-center gap-1.5 text-xs text-gray-600">
+          <input type="checkbox" x-model="filters.flaggedOnly"
+                 class="rounded border-gray-300 text-red-600 focus:ring-red-500 w-3 h-3">
+          Show flagged only
+        </label>
+      </div>
     </div>
     <div class="overflow-x-auto">
       <table class="min-w-full text-sm">
         <thead>
-          <tr class="text-[11px] font-medium text-gray-500 border-b border-gray-200">
+          <tr class="text-[11px] font-medium text-gray-500 border-b border-gray-200 uppercase tracking-wide">
             <th class="px-3 py-2 w-8">
               <input type="checkbox" @change="toggleAll($event.target.checked)"
                      class="rounded border-gray-300 text-red-600 focus:ring-red-500 w-3.5 h-3.5">
             </th>
-            <th class="px-3 py-2 text-left font-medium">FLW</th>
+            <th class="px-3 py-2 text-left font-medium">Name of User</th>
             <th class="px-3 py-2 text-left font-medium">LLO</th>
-            <th class="px-3 py-2 text-left font-medium">Opportunity</th>
             <th class="px-3 py-2 text-right font-medium">Cases</th>
+            <th class="px-3 py-2 text-right font-medium">KMC Visits</th>
+            <th class="px-3 py-2 text-center font-medium">Flags</th>
             {% for col in priority_columns %}
             <th class="px-2 py-2 text-center font-medium whitespace-nowrap" title="{{ col.description }}">
               {{ col.label }}
               <i class="fa-solid fa-circle-info text-gray-300 text-[9px] ml-0.5 cursor-help" title="{{ col.description }}"></i>
             </th>
             {% endfor %}
-            <th class="px-3 py-2 text-right font-medium">#Flags</th>
           </tr>
         </thead>
-        <template x-for="row in filteredRows" :key="row.opportunity_id + ':' + row.username">
+        <template x-for="row in filteredRows" :key="row.llo + ':' + row.username">
           <tbody class="divide-y divide-gray-100">
             <tr class="hover:bg-gray-50/70 transition-colors cursor-pointer"
                 :class="{ 'opacity-60': row.excluded, 'bg-gray-50': isExpanded(row) }"
@@ -173,77 +204,78 @@
                        :disabled="row.excluded"
                        class="rounded border-gray-300 text-red-600 focus:ring-red-500 w-3.5 h-3.5">
               </td>
-              <td class="px-3 py-2 whitespace-nowrap">
+              <td class="px-3 py-2 whitespace-nowrap flex items-center gap-1.5">
+                <i class="fa-solid fa-chevron-right text-[10px] text-gray-400 transition-transform"
+                   :class="{ 'rotate-90 text-gray-700': isExpanded(row) }"></i>
                 <span class="text-[13px] text-gray-800 hover:text-red-700 hover:underline"
                       :title="row.username"
                       x-text="row.flw_name || row.username"></span>
-                <i class="fa-solid fa-chevron-right text-[10px] text-gray-400 ml-1.5 transition-transform"
-                   :class="{ 'rotate-90 text-gray-700': isExpanded(row) }"></i>
               </td>
               <td class="px-3 py-2 whitespace-nowrap">
                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium"
                       :class="lloBadgeClass(row.llo)"
-                      x-text="row.llo || '—'"></span>
+                      x-text="row.llo"
+                      :title="oppBreakdownTitle(row)"></span>
               </td>
-              <td class="px-3 py-2 text-[13px] text-gray-600 max-w-xs truncate" :title="row.opportunity_name" x-text="row.opportunity_name"></td>
-              <td class="px-3 py-2 text-right tabular-nums text-gray-900" x-text="row.total_cases"></td>
+              <td class="px-3 py-2 text-right tabular-nums text-gray-600"
+                  x-text="row.total_cases"
+                  :title="oppBreakdownTitle(row)"></td>
+              <td class="px-3 py-2 text-right tabular-nums text-gray-600"
+                  x-text="row.total_visits"
+                  :title="oppBreakdownTitle(row)"></td>
+              <td class="px-3 py-2 text-center">
+                <template x-if="row.flag_count > 0">
+                  <span class="inline-flex items-center justify-center w-6 h-6 rounded-full text-[12px] font-bold bg-red-100 text-red-700 tabular-nums"
+                        x-text="row.flag_count"></span>
+                </template>
+                <template x-if="row.flag_count === 0">
+                  <span class="inline-flex items-center justify-center w-6 h-6 rounded-full text-[12px] font-bold bg-green-50 text-green-600 tabular-nums">0</span>
+                </template>
+              </td>
 
-              {# ── Flag cells with numeric values ── #}
+              {# ── Flag cells: full-cell bg shading, no icons ── #}
               {% for col in priority_columns %}
-              <td class="px-2 py-1.5 text-center">
-                {% if col.key == "flag_data_quality" %}
-                {# Composite data quality column — special rendering #}
+              {% if col.key == "flag_data_quality" %}
+              <td class="px-2 py-1.5 text-center text-[11px] tabular-nums"
+                  :class="{
+                    'bg-red-50 text-red-700 font-semibold': row.flags['flag_data_quality'] === true,
+                    'bg-green-50 text-green-700': row.flags['flag_data_quality'] === false,
+                    'text-gray-300': row.flags['flag_data_quality'] == null
+                  }"
+                  :title="row.flags['flag_data_quality'] != null ? dataQualityTooltip(row) : 'Insufficient data'">
                 <template x-if="row.flags['flag_data_quality'] === true">
-                  <span class="inline-flex items-center gap-0.5 text-[11px] tabular-nums px-1.5 py-0.5 rounded bg-red-50 text-red-700 ring-1 ring-red-200 cursor-help"
-                        :title="dataQualityTooltip(row)">
-                    <span x-text="dataQualityFiredCount(row) + '/' + dataQualityTotalCount(row)"></span>
-                    <i class="fa-solid fa-flag text-[9px]"></i>
-                  </span>
+                  <span x-text="dataQualityFiredCount(row) + '/' + dataQualityTotalCount(row)"></span>
                 </template>
                 <template x-if="row.flags['flag_data_quality'] === false">
-                  <span class="inline-flex items-center text-[11px] px-1.5 py-0.5 rounded text-green-600 cursor-help"
-                        :title="dataQualityTooltip(row)">
-                    <i class="fa-solid fa-check text-[10px]"></i>
-                  </span>
+                  <span>0</span>
                 </template>
-                <template x-if="row.flags['flag_data_quality'] === null || row.flags['flag_data_quality'] === undefined">
-                  <span class="text-gray-300 text-[11px]" title="Insufficient data">—</span>
+                <template x-if="row.flags['flag_data_quality'] == null">
+                  <span>&mdash;</span>
                 </template>
-                {% else %}
-                {# Regular flag column with metric value #}
+              </td>
+              {% else %}
+              <td class="px-2 py-1.5 text-center text-[11px] tabular-nums"
+                  :class="{
+                    'bg-red-50 text-red-700 font-semibold': row.flags['{{ col.key }}'] === true,
+                    'bg-green-50 text-green-700': row.flags['{{ col.key }}'] === false,
+                    'text-gray-300': row.flags['{{ col.key }}'] == null
+                  }"
+                  :title="flagCellTooltip(row, '{{ col.key }}', '{{ col.description }}')">
                 <template x-if="row.flags['{{ col.key }}'] === true">
-                  <span class="inline-flex items-center gap-0.5 text-[11px] tabular-nums px-1.5 py-0.5 rounded bg-red-50 text-red-700 ring-1 ring-red-200"
-                        :title="flagCellTooltip(row, '{{ col.key }}', '{{ col.description }}')">
-                    <span x-text="formatMetric(row, '{{ col.key }}')"></span>
-                    <i class="fa-solid fa-flag text-[9px]"></i>
-                  </span>
+                  <span x-text="formatMetric(row, '{{ col.key }}')"></span>
                 </template>
                 <template x-if="row.flags['{{ col.key }}'] === false">
-                  <span class="inline-flex items-center gap-0.5 text-[11px] tabular-nums text-gray-500"
-                        :title="flagCellTooltip(row, '{{ col.key }}', '{{ col.description }}')">
-                    <span x-text="formatMetric(row, '{{ col.key }}')"></span>
-                    <i class="fa-solid fa-check text-green-500 text-[9px]"></i>
-                  </span>
+                  <span x-text="formatMetric(row, '{{ col.key }}')"></span>
                 </template>
-                <template x-if="row.flags['{{ col.key }}'] === null || row.flags['{{ col.key }}'] === undefined">
-                  <span class="text-gray-300 text-[11px]" title="Insufficient data">—</span>
+                <template x-if="row.flags['{{ col.key }}'] == null">
+                  <span>&mdash;</span>
                 </template>
-                {% endif %}
               </td>
+              {% endif %}
               {% endfor %}
-
-              <td class="px-3 py-2 text-right font-semibold tabular-nums"
-                  :class="row.priority_flag_count >= 2 ? 'text-red-700' : (row.priority_flag_count >= 1 ? 'text-red-600' : 'text-green-500')">
-                <template x-if="row.priority_flag_count > 0">
-                  <span x-text="row.priority_flag_count"></span>
-                </template>
-                <template x-if="row.priority_flag_count === 0">
-                  <i class="fa-solid fa-check" title="No priority flags"></i>
-                </template>
-              </td>
             </tr>
             <tr x-show="isExpanded(row)" x-cloak>
-              <td colspan="12" class="bg-gray-50/40 border-t border-gray-100 p-0">
+              <td :colspan="6 + {{ priority_columns|length }}" class="bg-gray-50/40 border-t border-gray-100 p-0">
                 <div :id="'dd-' + row.opportunity_id + '-' + row.username" class="p-1"></div>
               </td>
             </tr>
@@ -252,7 +284,7 @@
         <template x-if="filteredRows.length === 0">
           <tbody>
             <tr>
-              <td colspan="12" class="px-4 py-12 text-center text-sm text-gray-400">
+              <td :colspan="6 + {{ priority_columns|length }}" class="px-4 py-12 text-center text-sm text-gray-400">
                 No FLWs match the current filters.
               </td>
             </tr>
@@ -271,41 +303,42 @@
     <div class="overflow-x-auto">
       <table class="min-w-full text-sm">
         <thead>
-          <tr class="text-[11px] font-medium text-gray-500 border-b border-gray-200">
-            <th class="px-3 py-2 text-left font-medium">FLW</th>
+          <tr class="text-[11px] font-medium text-gray-500 border-b border-gray-200 uppercase tracking-wide">
+            <th class="px-3 py-2 text-left font-medium">Name of User</th>
             <th class="px-3 py-2 text-left font-medium">LLO</th>
             {% for col in secondary_columns %}
-            <th class="px-2 py-2 text-center font-medium whitespace-nowrap" title="{{ col.description }}">{{ col.label }}</th>
+            <th class="px-2 py-2 text-center font-medium whitespace-nowrap" title="{{ col.description }}">
+              {{ col.label }}
+              <i class="fa-solid fa-circle-info text-gray-300 text-[9px] ml-0.5 cursor-help" title="{{ col.description }}"></i>
+            </th>
             {% endfor %}
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
-          <template x-for="row in filteredRows" :key="'sec:' + row.opportunity_id + ':' + row.username">
+          <template x-for="row in filteredRows" :key="'sec:' + row.llo + ':' + row.username">
             <tr class="hover:bg-gray-50/70 transition-colors" :class="{ 'opacity-60': row.excluded }">
               <td class="px-3 py-2 whitespace-nowrap text-[13px] text-gray-800" :title="row.username" x-text="row.flw_name || row.username"></td>
               <td class="px-3 py-2 whitespace-nowrap">
                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium"
                       :class="lloBadgeClass(row.llo)"
-                      x-text="row.llo || '—'"></span>
+                      x-text="row.llo || '&mdash;'"></span>
               </td>
               {% for col in secondary_columns %}
-              <td class="px-2 py-1.5 text-center">
+              <td class="px-2 py-1.5 text-center text-[11px] tabular-nums"
+                  :class="{
+                    'bg-red-50 text-red-700 font-semibold': row.flags['{{ col.key }}'] === true,
+                    'bg-green-50 text-green-700': row.flags['{{ col.key }}'] === false,
+                    'text-gray-300': row.flags['{{ col.key }}'] == null
+                  }"
+                  :title="flagCellTooltip(row, '{{ col.key }}', '{{ col.description }}')">
                 <template x-if="row.flags['{{ col.key }}'] === true">
-                  <span class="inline-flex items-center gap-0.5 text-[11px] tabular-nums px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 ring-1 ring-amber-200"
-                        :title="flagCellTooltip(row, '{{ col.key }}', '{{ col.description }}')">
-                    <span x-text="formatMetric(row, '{{ col.key }}')"></span>
-                    <i class="fa-solid fa-flag text-[9px]"></i>
-                  </span>
+                  <span x-text="formatMetric(row, '{{ col.key }}')"></span>
                 </template>
                 <template x-if="row.flags['{{ col.key }}'] === false">
-                  <span class="inline-flex items-center gap-0.5 text-[11px] tabular-nums text-gray-500"
-                        :title="flagCellTooltip(row, '{{ col.key }}', '{{ col.description }}')">
-                    <span x-text="formatMetric(row, '{{ col.key }}')"></span>
-                    <i class="fa-solid fa-check text-green-500 text-[9px]"></i>
-                  </span>
+                  <span x-text="formatMetric(row, '{{ col.key }}')"></span>
                 </template>
-                <template x-if="row.flags['{{ col.key }}'] === null || row.flags['{{ col.key }}'] === undefined">
-                  <span class="text-gray-300 text-[11px]" title="Insufficient data">—</span>
+                <template x-if="row.flags['{{ col.key }}'] == null">
+                  <span>&mdash;</span>
                 </template>
               </td>
               {% endfor %}
@@ -345,7 +378,7 @@
     <p x-show="!canCreateAudit() && selected.length > 0"
        class="text-xs text-amber-700 mt-1.5 container mx-auto max-w-screen-2xl"
        x-cloak>
-      Audit creation is per-opportunity — pick FLWs from a single opportunity at a time.
+      Audit creation is per-opportunity &mdash; pick FLWs from a single opportunity at a time.
     </p>
   </div>
 
@@ -357,6 +390,7 @@
 
 {# ─────────── Inline data + Alpine component ─────────── #}
 {{ rows|json_script:"kmc-audit-rows" }}
+{{ all_flags|json_script:"kmc-all-flags" }}
 
 <script>
   function kmcAuditDashboard() {
@@ -369,7 +403,10 @@
       'flag_spo2_implausible': 'SpO2 Implausible',
     };
 
-    // Metric formatting config: maps flag key → { metricKey, formatter }
+    // All individual flags for frequency grid
+    const ALL_FLAGS = JSON.parse(document.getElementById("kmc-all-flags").textContent);
+
+    // Metric formatting config: maps flag key -> { metricKey, formatter }
     const METRIC_FMT = {
       'flag_visits':      { key: 'avg_visits',             fmt: v => v.toFixed(1) },
       'flag_mort':        { key: 'mort_rate',              fmt: v => (v * 100).toFixed(1) + '%' },
@@ -409,10 +446,10 @@
       // Format a metric value for display in a flag cell
       formatMetric(row, flagKey) {
         const cfg = METRIC_FMT[flagKey];
-        if (!cfg) return '—';
+        if (!cfg) return '\u2014';
         const m = row.metrics || {};
         const val = m[cfg.key];
-        if (val === null || val === undefined) return '—';
+        if (val === null || val === undefined) return '\u2014';
         let formatted = cfg.fmt(val);
         // For mortality, indicate which direction triggered the flag
         if (flagKey === 'flag_mort' && row.flags['flag_mort'] === true) {
@@ -422,22 +459,22 @@
         return formatted;
       },
 
-      // Dynamic tooltip for flag cells — adds direction context for mortality
+      // Dynamic tooltip for flag cells
       flagCellTooltip(row, flagKey, defaultDesc) {
         if (flagKey === 'flag_mort') {
           const m = row.metrics || {};
           const rate = m.mort_rate;
           const rateStr = (rate !== null && rate !== undefined) ? (rate * 100).toFixed(1) + '%' : '?';
           const deaths = row.deaths ?? '?';
-          const total = row.total_cases ?? '?';
+          const closed = row.closed_cases ?? '?';
           if (row.flags['flag_mort_low'] === true) {
-            return 'Low mortality: ' + rateStr + ' (' + deaths + '/' + total + ' cases) — below 2% is biologically implausible for KMC neonates';
+            return 'Low mortality: ' + rateStr + ' (' + deaths + '/' + closed + ' closed cases) \u2014 below 2% is biologically implausible for KMC neonates';
           }
           if (row.flags['flag_mort_high'] === true) {
-            return 'High mortality: ' + rateStr + ' (' + deaths + '/' + total + ' cases) — above 20% is a quality concern';
+            return 'High mortality: ' + rateStr + ' (' + deaths + '/' + closed + ' closed cases) \u2014 above 20% is a quality concern';
           }
           if (row.flags['flag_mort'] === false) {
-            return 'Mortality: ' + rateStr + ' (' + deaths + '/' + total + ' cases) — within normal range (2%–20%)';
+            return 'Mortality: ' + rateStr + ' (' + deaths + '/' + closed + ' closed cases) \u2014 within normal range (2%\u201320%)';
           }
         }
         return defaultDesc;
@@ -467,6 +504,50 @@
           else parts.push('No data: ' + label);
         }
         return 'Data Quality sub-flags:\n' + parts.join('\n');
+      },
+
+      // KPI card helpers (reactive to filters)
+      kpiTotalFlws() {
+        const usernames = new Set(this.filteredRows.map(r => r.username));
+        return usernames.size;
+      },
+
+      kpiFlwsWithFlag() {
+        const usernames = new Set(this.filteredRows.filter(r => r.flag_count >= 1).map(r => r.username));
+        return usernames.size;
+      },
+
+      kpiTotalVisits() {
+        return this.filteredRows.reduce((sum, r) => sum + (r.total_visits || 0), 0);
+      },
+
+      kpiTotalCases() {
+        return this.filteredRows.reduce((sum, r) => sum + (r.total_cases || 0), 0);
+      },
+
+      // Flag frequency grid helpers — use unique FLWs (by username)
+      // to be consistent with kpiTotalFlws() which also deduplicates.
+      flagFreqFired(flagKey) {
+        const eligible = this.filteredRows.filter(r => !r.excluded);
+        // Unique FLWs where the flag fired in ANY opportunity
+        const fired = new Set();
+        eligible.forEach(r => { if (r.flags[flagKey] === true) fired.add(r.username); });
+        return fired.size;
+      },
+
+      flagFreqTotal() {
+        const eligible = this.filteredRows.filter(r => !r.excluded);
+        return new Set(eligible.map(r => r.username)).size;
+      },
+
+      flagFreqClass(flagKey) {
+        const total = this.flagFreqTotal();
+        const fired = this.flagFreqFired(flagKey);
+        if (fired === 0 || total === 0) return 'text-gray-400';
+        const pct = fired / total;
+        if (pct > 0.25) return 'text-red-600';
+        if (pct > 0.10) return 'text-amber-600';
+        return 'text-blue-600';
       },
 
       get filteredRows() {
@@ -499,11 +580,9 @@
         }
       },
 
-      resetFilters() {
-        this.filters = { llo: "", opp: "", search: "", flaggedOnly: false };
-        this.selected = [];
-      },
-
+      // For audit creation: figure out the primary opp_id of each selected
+      // FLW. Rows are merged across V1+V2, so primary_opp = max(opportunity_ids)
+      // already lives on `row.opportunity_id`. Audits remain per-opp.
       selectedOppIds() {
         const oppIds = new Set();
         for (const r of this.rows) {
@@ -516,8 +595,19 @@
         return this.selected.length > 0 && this.selectedOppIds().length === 1;
       },
 
+      // Tooltip for the LLO / Cases / KMC Visits cells: show the per-opp
+      // breakdown so reviewers can see how V1+V2 combined into the merged row.
+      oppBreakdownTitle(row) {
+        const parts = (row.opportunity_breakdown || []).map(b =>
+          (b.opportunity_name || ('opp ' + b.opportunity_id)) +
+          ': ' + (b.cases || 0) + ' cases, ' + (b.visits || 0) + ' visits'
+        );
+        if (parts.length <= 1) return parts[0] || '';
+        return 'Combined across:\n' + parts.join('\n');
+      },
+
       keyOf(row) {
-        return row.opportunity_id + ":" + row.username;
+        return row.llo + ":" + row.username;
       },
 
       isExpanded(row) {
@@ -546,7 +636,7 @@
         this.$nextTick(() => {
           const target = document.getElementById(targetId);
           if (target) {
-            target.innerHTML = '<div class="text-xs text-gray-400 px-3 py-2"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div>';
+            target.innerHTML = '<div class="text-xs text-gray-400 px-3 py-2"><i class="fa-solid fa-spinner fa-spin"></i> Loading\u2026</div>';
             htmx.ajax("GET", url + "?_=" + Date.now(), { target: "#" + targetId, swap: "innerHTML" });
           }
         });
