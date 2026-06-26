@@ -32,7 +32,6 @@ from .constants import KMC_OPPORTUNITIES, KMC_OPPORTUNITY_IDS, LLO_CHOICES, oppo
 from .data_access import KMCAuditDataAccess
 from .flag_logic import (
     ALL_FLAGS,
-    DATA_QUALITY_FLAGS,
     FLAG_DESCRIPTIONS,
     FLAG_LABELS,
     FLAG_METRIC_KEY,
@@ -127,7 +126,6 @@ class KMCAuditDashboardView(LoginRequiredMixin, TemplateView):
                 "llo_choices": list(LLO_CHOICES),
                 "priority_columns": cols["priority"],
                 "secondary_columns": cols["secondary"],
-                "data_quality_sub_flags": cols["data_quality_sub_flags"],
                 "all_flags": all_flags_for_template,
                 "flag_labels": FLAG_LABELS,
                 "flag_descriptions": FLAG_DESCRIPTIONS,
@@ -389,7 +387,6 @@ class KMCFlagCatalogueView(LoginRequiredMixin, View):
                 "priority": list(PRIORITY_FLAGS),
                 "secondary": list(SECONDARY_FLAGS),
                 "all": list(ALL_FLAGS),
-                "data_quality": list(DATA_QUALITY_FLAGS),
                 "labels": FLAG_LABELS,
                 "descriptions": FLAG_DESCRIPTIONS,
                 "thresholds": FLAG_THRESHOLD_DISPLAY,

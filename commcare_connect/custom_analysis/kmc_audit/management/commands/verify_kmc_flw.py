@@ -474,15 +474,15 @@ class Command(BaseCommand):
             self._kv("Referral rate", f"{ref_pct*100:.2f}%")
         self._flag_result("flag_ds_no_referral", row.get("flags") or {})
 
-        # Pending
-        self._section("Pending Flags (form path not yet wired -- expect insufficient data)")
-        for k in ("flag_hr_copycat", "flag_spo2_implausible", "flag_ga_fullterm", "flag_gps_same_case_far"):
+        # Data quality flags (now individual, no composite)
+        self._section("Data Quality Flags")
+        for k in ("flag_round_weight", "flag_hr_copycat", "flag_temp_copycat", "flag_spo2_implausible"):
             self._flag_result(k, row.get("flags") or {})
 
-        # Composite
-        self._section("Composite -- flag_data_quality")
-        self._kv("Logic", "True if any of round_weight/hr_copycat/temp_copycat/spo2_implausible fires")
-        self._flag_result("flag_data_quality", row.get("flags") or {})
+        # Pending
+        self._section("Pending Flags (form path not yet wired -- expect insufficient data)")
+        for k in ("flag_ga_fullterm",):
+            self._flag_result(k, row.get("flags") or {})
 
         # Sanity checks
         self._section("Internal Sanity Checks")

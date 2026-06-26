@@ -34,7 +34,6 @@ from commcare_connect.labs.analysis import AnalysisPipeline, FLWAnalysisResult, 
 from .constants import KMC_OPPORTUNITIES, KMC_OPPORTUNITY_IDS, llo_for_opportunity, opportunity_name
 from .flag_logic import (
     ALL_FLAGS,
-    DATA_QUALITY_FLAGS,
     FLAG_DESCRIPTIONS,
     FLAG_LABELS,
     FLAG_METRIC_KEY,
@@ -533,5 +532,4 @@ class KMCAuditDataAccess:
             "priority": [_col(k) for k in PRIORITY_FLAGS],
             "secondary": [_col(k) for k in SECONDARY_FLAGS],
             "all": [_col(k) for k in ALL_FLAGS],
-            "data_quality_sub_flags": [_col(k) for k in DATA_QUALITY_FLAGS],
         }

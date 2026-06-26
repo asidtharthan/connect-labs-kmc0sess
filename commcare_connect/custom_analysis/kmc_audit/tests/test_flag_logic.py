@@ -80,15 +80,14 @@ def make_aggregated_row(**kwargs) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def test_priority_tier_has_six_flags():
-    assert len(PRIORITY_FLAGS) == 6
+def test_priority_tier_has_ten_flags():
+    assert len(PRIORITY_FLAGS) == 10
 
 
 def test_secondary_tier_plus_priority_covers_all_real_flags():
-    # Synthetics (flag_mort, flag_data_quality) are NOT in ALL_FLAGS — they're
-    # derived from the base 16 computed flags. Priority + secondary should cover
-    # all base flags once synthetics are excluded.
-    synthetics = {"flag_mort", "flag_data_quality"}
+    # flag_mort is the only synthetic — it's derived from flag_mort_low + flag_mort_high.
+    # Priority + secondary should cover all base flags once the synthetic is excluded.
+    synthetics = {"flag_mort"}
     real_priority = [f for f in PRIORITY_FLAGS if f not in synthetics]
     real_secondary = list(SECONDARY_FLAGS)
     union = set(real_priority) | set(real_secondary)
@@ -398,7 +397,6 @@ def test_derive_flags_excludes_low_volume_flw():
     for f in ALL_FLAGS:
         assert result.flags[f] is None
     assert result.flags["flag_mort"] is None
-    assert result.flags["flag_data_quality"] is None
 
 
 def test_derive_flags_low_visits_fires_with_doc_50_case_window():
@@ -565,7 +563,7 @@ def test_visit_flag_sources_returns_empty_sources_when_no_flag_fires():
     result = FLWFlagResult(
         username="flw1",
         excluded=False,
-        flags={f: False for f in ALL_FLAGS} | {"flag_mort": False, "flag_data_quality": False},
+        flags={f: False for f in ALL_FLAGS} | {"flag_mort": False},
     )
     annotated = visit_flag_sources(visits, result)
     for row in annotated:
@@ -573,50 +571,8 @@ def test_visit_flag_sources_returns_empty_sources_when_no_flag_fires():
 
 
 # ---------------------------------------------------------------------------
-# flag_data_quality — composite synthetic flag
+# Individual data quality flags (no composite)
 # ---------------------------------------------------------------------------
-
-
-def test_data_quality_fires_when_round_weight_fires():
-    """flag_data_quality should be True if flag_round_weight fires (sub-flag).
-    Note: visit_number must be set so weights are counted as follow-up visits per April spec."""
-    aggregated = make_aggregated_row(total_cases=50)
-    visits = [
-        make_visit(f"c{i}", i, weight=1.8, kmc_status="discharged", child_alive="yes", visit_number=1)
-        for i in range(25)
-    ]
-    result = derive_flags(aggregated, visits)
-    assert result.flags["flag_round_weight"] is True
-    assert result.flags["flag_data_quality"] is True
-
-
-def test_data_quality_false_when_all_sub_flags_pass():
-    """flag_data_quality should be False if all sub-flags are False."""
-    aggregated = make_aggregated_row(total_cases=50)
-    # Weights NOT rounded to 100g (e.g. 1502, 1602, 1703, ...). Follow-up visits.
-    visits = [
-        make_visit(f"c{i}", i, weight=1.502 + i * 0.1, kmc_status="discharged", child_alive="yes", visit_number=1)
-        for i in range(25)
-    ]
-    result = derive_flags(aggregated, visits)
-    assert result.flags["flag_round_weight"] is False
-    # HR/temp/spo2 all have no data → None
-    # DQ fires if ANY is True, is False if ALL are False (and at least one is computed),
-    # but here only round_weight is computed (False), rest are None.
-    # Since at least one sub-flag computed False and none are True, result depends on
-    # whether we treat "mix of False and None" as False.
-    # By design: True if any True, None if ALL None, False otherwise.
-    assert result.flags["flag_data_quality"] is False
-
-
-def test_data_quality_none_when_all_sub_flags_none():
-    """flag_data_quality should be None if ALL sub-flags lack data."""
-    aggregated = make_aggregated_row(total_cases=50)
-    # No weight data at all → round_weight gets None. HR/temp/spo2 also None.
-    visits = [make_visit(f"c{i}", i, kmc_status="discharged", child_alive="yes") for i in range(25)]
-    result = derive_flags(aggregated, visits)
-    assert result.flags["flag_round_weight"] is None
-    assert result.flags["flag_data_quality"] is None
 
 
 def test_temp_copycat_returns_value_when_temperature_present():
@@ -710,6 +666,47 @@ def test_late_enroll_7_day_boundary_not_late():
     assert out["pct_late_enroll"] == pytest.approx(0.0)
 
 
+def test_danger_metrics_prefer_visit_level_over_aggregated():
+    """Aggregated ``danger_positive_count`` is bound to the primary form
+    path only; if V1 fallback-path positives exist, the agg under-counts.
+    Visit-level rows resolve via first-non-null across both paths, so we
+    recount from them. This test simulates that scenario: aggregated says
+    rate is 1/40 = 2.5%, but visit-level (which captures fallback positives)
+    says 10/40 = 25% → flag should fire. Without the fix, flag would pass."""
+    aggregated = make_aggregated_row(
+        total_cases=50,
+        # Wrong (under-counted) aggregated values:
+        danger_visit_count=40,
+        danger_positive_count=1,  # only the primary-path 'yes' counted
+    )
+    # Visit-level data: 10 of 40 positives across both paths.
+    visits = []
+    for i in range(10):
+        # These resolve to 'yes' via the visit pipeline's first-non-null rule
+        visits.append(make_visit(f"y{i}", i, danger_sign_positive="yes"))
+    for i in range(30):
+        visits.append(make_visit(f"n{i}", 30 + i, danger_sign_positive="no"))
+    result = derive_flags(aggregated, visits)
+    # Visit-level 10/40 = 25% < 30% — passes danger_high.
+    # But the test below proves we use visit-level values, not the broken agg.
+    assert result.danger_rate == pytest.approx(10 / 40)
+    # Without the fix, derive_flags would have used agg counts: 1/40 = 2.5%.
+    assert result.danger_rate != pytest.approx(1 / 40)
+
+
+def test_danger_metrics_fall_back_to_aggregated_when_visits_empty():
+    """If visit_rows carries no danger data at all (e.g. test fixtures that
+    pre-date the visit-level recount), fall back to aggregated values so
+    those tests still pass."""
+    aggregated = make_aggregated_row(
+        total_cases=50,
+        danger_visit_count=40,
+        danger_positive_count=15,
+    )
+    result = derive_flags(aggregated, [])  # no visit rows
+    assert result.danger_rate == pytest.approx(15 / 40)
+
+
 def test_read_weight_g_auto_detects_grams_vs_kg():
     """Production CommCare V2 forms store weight in grams (e.g. 1345 for a
     1.345 kg baby). Tests historically pass kg (e.g. 1.5). _read_weight_g
@@ -753,32 +750,29 @@ def test_compute_weight_metrics_exposes_gain_pairs():
     assert out["gain_pairs"] == 1
 
 
-def test_flag_wt_gain_returns_none_when_too_few_gain_pairs():
-    """20 total pairs but only 5 are gain pairs → flag_wt_gain returns None
-    (per April canonical: '10 valid weight gain pairs')."""
+def test_flag_wt_gain_evaluates_with_any_gain_pairs():
+    """No minimum data gate — flag evaluates as long as any baby has a gain pair."""
     aggregated = make_aggregated_row(total_cases=50)
     visits = []
-    # 15 loss pairs, all in their own case (so each pair is independent)
+    # 15 loss pairs, all in their own case
     for i in range(15):
         cid = f"loss_{i}"
         visits.append(make_visit(cid, 0, weight=2.0))
         visits.append(make_visit(cid, 5, weight=1.9))  # loss
-    # 5 gain pairs
+    # 5 gain pairs — each baby gains 500g / 5 days = 100 g/day (> 60 threshold)
     for i in range(5):
         cid = f"gain_{i}"
         visits.append(make_visit(cid, 0, weight=1.5))
-        visits.append(make_visit(cid, 5, weight=2.0))  # gain, very high g/day
+        visits.append(make_visit(cid, 5, weight=2.0))
     result = derive_flags(aggregated, visits)
-    # 20 total pairs, but only 5 gain pairs — under the 10-gain-pair threshold
-    assert (
-        result.flags["flag_wt_gain"] is None
-    ), f"Expected None (only 5 gain pairs < 10), got {result.flags['flag_wt_gain']}"
+    # Even with only 5 gain babies, the flag evaluates (no min gate)
+    assert result.flags["flag_wt_gain"] is True
     # Loss flag should still evaluate (15 loss pairs out of 20 = 75% > 15%)
     assert result.flags["flag_wt_loss"] is True
 
 
-def test_flag_wt_gain_fires_when_gain_pairs_meet_minimum():
-    """≥10 valid gain pairs and mean daily gain > 60g/day → fires."""
+def test_flag_wt_gain_fires_when_per_baby_avg_exceeds_threshold():
+    """Per-baby avg daily gain > 60g/day → fires (no minimum pair count)."""
     aggregated = make_aggregated_row(total_cases=50)
     visits = []
     for i in range(12):

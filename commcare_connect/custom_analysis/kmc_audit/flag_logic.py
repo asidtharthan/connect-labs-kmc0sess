@@ -27,6 +27,8 @@ synthetic ``flag_mort`` priority indicator + which flags fired.
 
 from __future__ import annotations
 
+import math
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
@@ -83,14 +85,18 @@ MIN_CASES: dict[str, int] = {
 
 # Priority indicators surfaced in the top-tier UI table.
 # ``flag_mort`` is synthetic — true if either flag_mort_low or flag_mort_high.
-# ``flag_data_quality`` is synthetic — true if any DATA_QUALITY_FLAGS sub-flag fires.
+# The 4 data-quality flags are shown individually (no composite).
 PRIORITY_FLAGS: tuple[str, ...] = (
     "flag_visits",
     "flag_mort",
-    "flag_data_quality",
     "flag_enroll",
     "flag_danger_high",
     "flag_ds_no_referral",
+    "flag_round_weight",
+    "flag_hr_copycat",
+    "flag_temp_copycat",
+    "flag_spo2_implausible",
+    "flag_gps_same_case_far",
 )
 
 # All other flags shown in the collapsible secondary tier.
@@ -101,12 +107,7 @@ SECONDARY_FLAGS: tuple[str, ...] = (
     "flag_wt_loss",
     "flag_wt_gain",
     "flag_wt_zero",
-    "flag_round_weight",
-    "flag_hr_copycat",
-    "flag_temp_copycat",
-    "flag_spo2_implausible",
     "flag_ga_fullterm",
-    "flag_gps_same_case_far",
 )
 
 # Distinct flags actually computed (excludes the synthetic flag_mort).
@@ -147,7 +148,6 @@ FLAG_LABELS: dict[str, str] = {
     "flag_ga_fullterm": "Gestational Age",
     "flag_gps_same_case_far": "GPS Spread",
     "flag_ds_no_referral": "No Referral",
-    "flag_data_quality": "Data Quality",
 }
 
 # Detailed descriptions for info tooltips. Each value is a short sentence
@@ -161,7 +161,8 @@ FLAG_DESCRIPTIONS: dict[str, str] = {
     "flag_danger_high": "> 30% of follow-up visits show danger signs. Min 20 visits.",
     "flag_danger_zero": "Exactly 0% danger signs across 30+ visits — implausible.",
     "flag_wt_loss": "> 15% of successive weight pairs show weight loss. Min 10 pairs.",
-    "flag_wt_gain": "Mean daily weight gain > 60 g/day — indicates fabrication. Min 10 pairs.",
+    "flag_wt_gain": "Avg daily weight gain per baby > 60 g/day — indicates fabrication. "
+    "Per-baby averaging, no minimum.",
     "flag_wt_zero": "> 30% of successive weight pairs show no change. Min 10 pairs.",
     "flag_round_weight": ">= 80% of weights are exact multiples of 100g. Min 20 weights.",
     "flag_hr_copycat": "> 75% of heart rate readings are the same value. Min 20 visits.",
@@ -170,9 +171,6 @@ FLAG_DESCRIPTIONS: dict[str, str] = {
     "flag_ga_fullterm": "> 30% of registrations with gestational age >= 37 weeks. Min 10.",
     "flag_gps_same_case_far": "> 30% of same-case GPS pairs > 1km apart. Min 20 visits.",
     "flag_ds_no_referral": "0% referral rate for danger-sign-positive visits. Min 5 DS+ visits.",
-    "flag_data_quality": (
-        "Composite: fires if any of Rounded Weights, HR Copy-Paste," " Temp Copy-Paste, or SpO2 Implausible fires."
-    ),
 }
 
 # Mapping from flag key to the metric value to display in the cell,
@@ -214,14 +212,6 @@ FLAG_THRESHOLD_DISPLAY: dict[str, str] = {
     "flag_gps_same_case_far": "> 30%",
     "flag_ds_no_referral": "= 0%",
 }
-
-# Sub-flags grouped under the composite "Data Quality" column.
-DATA_QUALITY_FLAGS: tuple[str, ...] = (
-    "flag_round_weight",
-    "flag_hr_copycat",
-    "flag_temp_copycat",
-    "flag_spo2_implausible",
-)
 
 # Closed-case kmc_status values used by ``compute_case_metrics``.
 _CLOSED_STATUSES: frozenset[str] = frozenset({"discharged", "lost_to_followup", "deceased"})
@@ -295,7 +285,7 @@ class FLWFlagResult:
 
     @property
     def priority_flag_count(self) -> int:
-        """Number of priority-tier flags fired (uses synthetics flag_mort + flag_data_quality)."""
+        """Number of priority-tier flags fired (includes synthetic flag_mort)."""
         return sum(1 for k in PRIORITY_FLAGS if self.flags.get(k))
 
 
@@ -402,7 +392,10 @@ def _read_weight_g(row: Any) -> float | None:
 def compute_weight_metrics(visit_rows: list[Any]) -> dict[str, Any]:
     """Pair successive weight readings per child and produce loss/gain/zero rates.
 
-    Mirrors ``computeWeightMetrics`` at kmc_flw_flags.py:284-337.
+    Weight gain uses **per-baby averaging**: each baby's gain pairs are
+    averaged independently, then the baby-level averages are averaged
+    across the FLW. This gives equal weight to each baby regardless of
+    how many visit pairs they have.
     """
     by_child: dict[str, list[Any]] = {}
     for row in visit_rows:
@@ -414,14 +407,16 @@ def compute_weight_metrics(visit_rows: list[Any]) -> dict[str, Any]:
     total_pairs = 0
     loss_pairs = 0
     zero_pairs = 0
-    total_daily_gain = 0.0
     gain_pair_count = 0
+    baby_avg_gains: list[float] = []  # one entry per baby that has gain pairs
 
     for visits in by_child.values():
         eligible = [
             v for v in visits if _read_weight_g(v) is not None and _parse_date(_row_get(v, "visit_date")) is not None
         ]
         eligible.sort(key=lambda v: _parse_date(_row_get(v, "visit_date")))
+
+        child_gains: list[float] = []  # daily gains for this baby
 
         for i in range(1, len(eligible)):
             prev_w = _read_weight_g(eligible[i - 1])
@@ -445,21 +440,19 @@ def compute_weight_metrics(visit_rows: list[Any]) -> dict[str, Any]:
                 loss_pairs += 1
             if abs(diff) < 0.001:
                 zero_pairs += 1
-            # Mean daily gain uses only positive-change pairs per the
-            # April follow-on doc: "gain pairs only".
             if diff > 0 and days_between > 0:
-                total_daily_gain += diff / days_between
+                child_gains.append(diff / days_between)
                 gain_pair_count += 1
+
+        # Per-baby average: this baby contributes one value.
+        if child_gains:
+            baby_avg_gains.append(sum(child_gains) / len(child_gains))
 
     return {
         "pct_wt_loss": (loss_pairs / total_pairs) if total_pairs > 0 else None,
-        "mean_daily_gain": (total_daily_gain / gain_pair_count) if gain_pair_count > 0 else None,
+        "mean_daily_gain": (sum(baby_avg_gains) / len(baby_avg_gains)) if baby_avg_gains else None,
         "pct_wt_zero": (zero_pairs / total_pairs) if total_pairs > 0 else None,
         "weight_pairs": total_pairs,
-        # Gain-only pair count exposed separately so flag_wt_gain can gate
-        # on it directly (April canonical doc Table 0 row 8: "10 valid
-        # weight gain pairs"). flag_wt_loss / flag_wt_zero still use
-        # weight_pairs which is the total (loss + gain + zero) count.
         "gain_pairs": gain_pair_count,
     }
 
@@ -621,10 +614,8 @@ compute_avg_visits_top_50 = compute_avg_visits
 
 # =============================================================================
 # Secondary flag computations
-# 1 implementable from existing visit data (round_weight); the other 6 require
-# new fields that pipeline_config.py will add as form paths are discovered via
-# MCP. Until then they return None (renders as empty cell — same as a
-# non-triggered flag, no special UI labeling per user direction).
+# round_weight, hr_copycat, temp_copycat, spo2_implausible are all wired.
+# ga_fullterm still needs form-path discovery via MCP.
 # =============================================================================
 
 
@@ -661,8 +652,9 @@ def compute_round_weight_pct(visit_rows: list[Any]) -> tuple[float | None, int]:
 def compute_hr_copycat_pct(visit_rows: list[Any]) -> tuple[float | None, int]:
     """Fraction of follow-up visits sharing the single most-frequent HR value.
 
-    NOT-YET-WIRED: returns (None, 0) until pipeline_config exposes
-    ``heart_rate`` and ``visit_type`` per visit (form path TBD via MCP).
+    Wired via dual V1/V2 paths in pipeline_config:
+    ``form.danger_signs_checklist.child_heart_rate`` and
+    ``form.child_details.Danger_Signs_Checklist.child_heart_rate``.
     """
     hrs = [_safe_float(_row_get(r, "heart_rate")) for r in visit_rows]
     hrs = [h for h in hrs if h is not None]
@@ -694,7 +686,9 @@ def compute_temp_copycat_pct(visit_rows: list[Any]) -> tuple[float | None, int]:
 def compute_spo2_implausible_pct(visit_rows: list[Any]) -> tuple[float | None, int]:
     """Fraction of SpO2 readings outside the 70-100% physiological range.
 
-    NOT-YET-WIRED: needs ``spo2_level`` field via MCP discovery.
+    Wired via dual V1/V2 paths in pipeline_config:
+    ``form.danger_signs_checklist.spo2_level`` and
+    ``form.child_details.Danger_Signs_Checklist.spo2_level``.
     """
     vals = [_safe_float(_row_get(r, "spo2_level")) for r in visit_rows]
     vals = [v for v in vals if v is not None]
@@ -721,21 +715,75 @@ def compute_ga_fullterm_pct(visit_rows: list[Any]) -> tuple[float | None, int]:
     return fullterm / len(ga_values), len(ga_values)
 
 
-def compute_gps_same_case_far_pct(visit_rows: list[Any]) -> tuple[float | None, int]:
-    """Fraction of same-case GPS pairs > 1km apart.
+def _parse_gps(raw: Any) -> tuple[float, float] | None:
+    """Parse a GPS string "lat lon [alt] [accuracy]" into (lat, lon) or None."""
+    if not raw or not isinstance(raw, str):
+        return None
+    parts = raw.strip().split()
+    if len(parts) < 2:
+        return None
+    try:
+        lat, lon = float(parts[0]), float(parts[1])
+    except (ValueError, TypeError):
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    if lat == 0.0 and lon == 0.0:
+        return None  # Null island — device default, not a real reading
+    return lat, lon
 
-    NOT-YET-WIRED: needs ``gps_lat``, ``gps_lon``, ``gps_accuracy_m`` per visit.
-    Stub returns None until those fields are added.
+
+_EARTH_RADIUS_KM = 6371.0
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance between two points in kilometres."""
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    return _EARTH_RADIUS_KM * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def compute_gps_same_case_far_pct(visit_rows: list[Any]) -> tuple[float | None, int]:
+    """Fraction of same-case consecutive GPS pairs > 1 km apart.
+
+    Groups visits by ``beneficiary_case_id``, then for each case computes
+    consecutive GPS pairs and checks if distance exceeds 1 km.  Returns
+    (fraction_far, total_pairs).  Returns (None, n) when fewer than
+    MIN_CASES["gps_same_case_far"] pairs are available.
     """
-    # Implementation deferred until form paths are confirmed via MCP.
-    return None, 0
+    # Group (lat, lon) by case, preserving visit order.
+    cases: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    for row in visit_rows:
+        case_id = _row_get(row, "beneficiary_case_id")
+        if not case_id:
+            continue
+        coords = _parse_gps(_row_get(row, "gps"))
+        if coords is None:
+            continue
+        cases[str(case_id)].append(coords)
+
+    # Build consecutive pairs across all cases.
+    total_pairs = 0
+    far_pairs = 0
+    for points in cases.values():
+        if len(points) < 2:
+            continue
+        for i in range(len(points) - 1):
+            total_pairs += 1
+            dist = _haversine_km(points[i][0], points[i][1], points[i + 1][0], points[i + 1][1])
+            if dist > 1.0:
+                far_pairs += 1
+
+    if total_pairs < MIN_CASES["gps_same_case_far"]:
+        return None, total_pairs
+    return far_pairs / total_pairs, total_pairs
 
 
 def compute_ds_no_referral_pct(visit_rows: list[Any]) -> tuple[float | None, int]:
     """Fraction of danger-sign-positive visits that did NOT result in a referral.
 
-    NOT-YET-WIRED: needs ``child_referred`` field per visit. The
-    ``danger_sign_positive`` field already exists in the aggregated pipeline.
+    Wired via ``form.case.update.child_referred`` in pipeline_config.
     """
     ds_positive: list[bool] = []
     for row in visit_rows:
@@ -748,6 +796,44 @@ def compute_ds_no_referral_pct(visit_rows: list[Any]) -> tuple[float | None, int
     referred_rate = sum(1 for r in ds_positive if r) / len(ds_positive)
     # Flag fires when referral rate is exactly 0
     return referred_rate, len(ds_positive)
+
+
+def compute_danger_metrics(visit_rows: list[Any]) -> dict[str, Any]:
+    """Visit-level danger sign counts.
+
+    The aggregated SQL pipeline has a known bug: ``danger_visit_count``
+    counts non-null values across BOTH primary and fallback paths, but
+    ``danger_positive_count``'s ``filter_path=primary, filter_value='yes'``
+    only matches the PRIMARY path. V1 forms that store ``danger_sign_positive``
+    at the fallback path ``form.child_details.Danger_Signs_Checklist.danger_sign_positive``
+    contribute to the denominator but not the numerator, depressing the
+    danger rate by up to ~50% for FLWs with substantial V1 history.
+
+    This function recomputes the counts from visit-level rows, where the
+    ``danger_sign_positive`` field is resolved by the ``aggregation="first"``
+    rule (first non-null across both paths) — so V1 fallback values are
+    captured correctly in both numerator and denominator.
+
+    Returns a dict with the same shape ``derive_flags`` expects from the
+    aggregated row, so the call site can substitute it transparently.
+
+    If ``visit_rows`` contains no danger-sign data at all (e.g. unit-test
+    fixtures that pass aggregated counts directly), returns counts of 0
+    and the caller falls back to the aggregated values.
+    """
+    visits_with_field = 0
+    positive_visits = 0
+    for row in visit_rows:
+        ds = _row_get(row, "danger_sign_positive")
+        if ds in ("yes", True, 1, "1"):
+            visits_with_field += 1
+            positive_visits += 1
+        elif ds in ("no", False, 0, "0"):
+            visits_with_field += 1
+    return {
+        "danger_visit_count": visits_with_field,
+        "danger_positive_count": positive_visits,
+    }
 
 
 # =============================================================================
@@ -772,8 +858,22 @@ def derive_flags(aggregated_row: Any, visit_rows: list[Any]) -> FLWFlagResult:
     username = str(_row_get(aggregated_row, "username") or "")
     total_cases = _safe_int(_row_get(aggregated_row, "total_cases"))
     total_visits = _safe_int(_row_get(aggregated_row, "kmc_visit_count"))
-    danger_visit_count = _safe_int(_row_get(aggregated_row, "danger_visit_count"))
-    danger_positive_count = _safe_int(_row_get(aggregated_row, "danger_positive_count"))
+
+    # Danger sign counts — prefer visit-level over aggregated. The aggregated
+    # ``danger_positive_count`` filter is bound to the primary path only, so
+    # V1 fallback-path positives are silently undercounted (see
+    # ``compute_danger_metrics`` docstring). Visit-level rows resolve the
+    # field across both paths via the visit pipeline's ``aggregation="first"``,
+    # so recounting from them is accurate. If ``visit_rows`` carries no
+    # danger field at all (e.g. unit-test fixtures that only pass aggregated
+    # counts), fall back to the aggregated values to preserve test contracts.
+    danger_v = compute_danger_metrics(visit_rows)
+    if danger_v["danger_visit_count"] > 0:
+        danger_visit_count = danger_v["danger_visit_count"]
+        danger_positive_count = danger_v["danger_positive_count"]
+    else:
+        danger_visit_count = _safe_int(_row_get(aggregated_row, "danger_visit_count"))
+        danger_positive_count = _safe_int(_row_get(aggregated_row, "danger_positive_count"))
 
     # Visit-derived metrics
     weight_metrics = compute_weight_metrics(visit_rows)
@@ -843,13 +943,11 @@ def derive_flags(aggregated_row: Any, visit_rows: list[Any]) -> FLWFlagResult:
             if weight_metrics["weight_pairs"] >= MIN_CASES["weight"] and weight_metrics["pct_wt_loss"] is not None
             else None
         )
-        # April canonical doc Table 0 row 8: gate on "10 valid weight GAIN pairs"
-        # specifically (not total pairs). This makes the flag conservative —
-        # an FLW with 12 total pairs but only 2 gain pairs no longer evaluates.
+        # No minimum data gate — evaluates whenever any baby has a gain pair.
+        # Uses per-baby averaging (each baby contributes equally).
         flags["flag_wt_gain"] = (
             (weight_metrics["mean_daily_gain"] > THRESHOLDS["wt_gain"])
-            if weight_metrics.get("gain_pairs", 0) >= MIN_CASES["weight"]
-            and weight_metrics["mean_daily_gain"] is not None
+            if weight_metrics["mean_daily_gain"] is not None
             else None
         )
         flags["flag_wt_zero"] = (
@@ -897,17 +995,6 @@ def derive_flags(aggregated_row: Any, visit_rows: list[Any]) -> FLWFlagResult:
         flags["flag_mort"] = None
     else:
         flags["flag_mort"] = bool(mort_low) or bool(mort_high)
-
-    # Synthetic data quality flag: True if ANY data-quality sub-flag fires.
-    dq_values = [flags.get(f) for f in DATA_QUALITY_FLAGS]
-    if excluded:
-        flags["flag_data_quality"] = None
-    elif any(v is True for v in dq_values):
-        flags["flag_data_quality"] = True
-    elif all(v is None for v in dq_values):
-        flags["flag_data_quality"] = None
-    else:
-        flags["flag_data_quality"] = False
 
     # Count distinct case IDs from visit rows for mortality denominator cross-check
     visit_case_ids = {

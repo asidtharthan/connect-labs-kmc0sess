@@ -30,9 +30,16 @@ Form-path strategy
   as grams (used as-is). The kg-only assumption in the JS template
   (``workflow/templates/kmc_flw_flags.py``) was a latent bug that
   masked all four weight-based flags on production data.
-- **4 secondary flags** (heart_rate, spo2_level, gestational_age_lmp, gps)
-  still need form-path discovery via ``python manage.py verify_kmc_form_fields``.
-  Until confirmed, flag_logic.py returns None gracefully for those.
+- **heart_rate** is wired — dual paths
+  ``form.danger_signs_checklist.child_heart_rate`` (V2) and
+  ``form.child_details.Danger_Signs_Checklist.child_heart_rate`` (V1).
+- **spo2_level** is wired — dual paths
+  ``form.danger_signs_checklist.spo2_level`` (V2) and
+  ``form.child_details.Danger_Signs_Checklist.spo2_level`` (V1).
+- **1 secondary flag** (gestational_age_lmp) still needs form-path discovery
+  via ``python manage.py verify_kmc_form_fields``.
+  Until confirmed, flag_logic.py returns None gracefully for it.
+- **GPS** is now wired — paths confirmed from kmc_longitudinal.py.
 
 Naming-collision note
 ---------------------
@@ -232,16 +239,46 @@ KMC_AUDIT_VISIT_CONFIG = AnalysisPipelineConfig(
             transform=_to_float,
             description="SVN temperature reading on this visit",
         ),
+        # GPS coordinates — paths confirmed from kmc_longitudinal.py and
+        # timeline_config.py. Format: "lat lon alt accuracy". Drives
+        # flag_gps_same_case_far (same-case GPS pairs > 1km apart).
+        FieldComputation(
+            name="gps",
+            paths=["form.visit_gps_manual", "form.reg_gps", "metadata.location"],
+            aggregation="first",
+            description="GPS coordinates (lat lon alt accuracy) for distance analysis",
+        ),
+        # Heart rate — dual V1/V2 paths (same pattern as danger_sign_positive).
+        # Drives flag_hr_copycat (> 75% same value).
+        FieldComputation(
+            name="heart_rate",
+            paths=[
+                "form.danger_signs_checklist.child_heart_rate",
+                "form.child_details.Danger_Signs_Checklist.child_heart_rate",
+            ],
+            aggregation="first",
+            transform=_to_float,
+            description="Heart rate reading on this visit",
+        ),
+        # SpO2 oxygen saturation — dual V1/V2 paths.
+        # Drives flag_spo2_implausible (> 10% outside 70-100% range).
+        FieldComputation(
+            name="spo2_level",
+            paths=[
+                "form.danger_signs_checklist.spo2_level",
+                "form.child_details.Danger_Signs_Checklist.spo2_level",
+            ],
+            aggregation="first",
+            transform=_to_float,
+            description="SpO2 oxygen saturation reading on this visit",
+        ),
         # ----------------------------------------------------------------
-        # Four flags still need form-path discovery via
+        # One flag still needs form-path discovery via
         # `python manage.py verify_kmc_form_fields`:
-        #   flag_hr_copycat        (heart_rate)
-        #   flag_spo2_implausible  (spo2_level)
         #   flag_ga_fullterm       (gestational_age_lmp)
-        #   flag_gps_same_case_far (gps_lat / gps_lon / gps_accuracy_m)
         #
-        # These flag columns render as "—" until their form paths are
-        # confirmed and FieldComputations are added here.
+        # This flag column renders as "—" until its form path is
+        # confirmed and a FieldComputation is added here.
         # ----------------------------------------------------------------
     ],
     histograms=[],

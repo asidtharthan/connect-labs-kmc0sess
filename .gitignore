@@ -359,3 +359,12 @@ docs/superpowers/plans/
 
 # Debug/screenshot images in root directory
 /*.png
+.kmc_validation/
+
+# KMC audit generated export deliverables + scratch analysis (kept on disk, not versioned)
+dashboard_export_*/
+screenshots/
+*.kmc-backup
+kmc_verify_output.txt
+# KMC source-of-truth docs (binary, external)
+*.docx

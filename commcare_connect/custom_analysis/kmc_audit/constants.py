@@ -11,8 +11,9 @@ Source: opportunity list provided by Sidarth on 2026-05-01.
 LLO_NAMA = "NAMA"
 LLO_PIPN = "PIPN"
 LLO_GHI = "GHI"
+LLO_EHA = "EHA"  # eHealth Africa — Nigeria KMC program (opp 1236), added 2026-06 for the EHA snapshot.
 
-LLO_CHOICES: tuple[str, ...] = (LLO_NAMA, LLO_PIPN, LLO_GHI)
+LLO_CHOICES: tuple[str, ...] = (LLO_NAMA, LLO_PIPN, LLO_GHI, LLO_EHA)
 
 # Each entry: opportunity_id -> {"name": str, "llo": str, "uuid": str}
 KMC_OPPORTUNITIES: dict[int, dict[str, str]] = {
@@ -41,9 +42,23 @@ KMC_OPPORTUNITIES: dict[int, dict[str, str]] = {
         "llo": LLO_NAMA,
         "uuid": "2626a261-1bfc-42ce-bb9b-531f8508e31a",
     },
+    # EHA (eHealth Africa) — Nigeria KMC, org 179 Dimagi-KMC, program 114,
+    # CommCare domain connect-kmc-eha. Added for the one-time EHA data-quality
+    # snapshot. Deliberately NOT in KMC_OPPORTUNITY_IDS below, so the live
+    # 5-opp dashboard's default scope is unchanged; this entry only makes the
+    # opp acceptable to KMCAuditDataAccess(opportunity_ids=[1236]).
+    1236: {
+        "name": "KMC - NG - EHA - P1 - Mar 26",
+        "llo": LLO_EHA,
+        "uuid": "",  # not used on the read-only snapshot path
+    },
 }
 
-KMC_OPPORTUNITY_IDS: tuple[int, ...] = tuple(KMC_OPPORTUNITIES.keys())
+# Default scope for the live KMC Audit Dashboard — the five core KMC opps
+# (NAMA/PIPN/GHI, V1+V2). Kept as an explicit tuple (rather than
+# tuple(KMC_OPPORTUNITIES.keys())) so adding analysis-only opps like EHA (1236)
+# does not silently widen the dashboard's default.
+KMC_OPPORTUNITY_IDS: tuple[int, ...] = (523, 524, 675, 874, 938)
 
 
 def llo_for_opportunity(opportunity_id: int | None) -> str | None:
