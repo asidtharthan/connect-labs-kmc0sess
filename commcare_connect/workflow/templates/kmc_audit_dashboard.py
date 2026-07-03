@@ -230,7 +230,7 @@ PIPELINE_SCHEMAS = [
 DEFINITION = {
     "name": "KMC Audit Dashboard",
     "description": (
-        "18-metric register-faithful KMC FLW audit across merged V1+V2 opportunities (live). "
+        "18-metric register-faithful KMC FLW audit across merged V1/V2/V3 opportunities (live). "
         "3-tier RAG bands, per-FLW drilldown, one-click audit creation."
     ),
     "version": 2,
@@ -406,7 +406,8 @@ function deriveMetrics(aggRow, visitRows, asOf){
 }
 
 // ============================= display metadata =============================
-var OPP_META = {523:{llo:"NAMA",name:"NAMA (V0/V1)"},524:{llo:"PIPN",name:"PIPN (V0/V1)"},675:{llo:"GHI",name:"GHI-UG (V0)"},874:{llo:"PIPN",name:"PIPN (V2)"},938:{llo:"NAMA",name:"NAMA (V2)"},1487:{llo:"PIPN",name:"PIPN (V3)"},1488:{llo:"NAMA",name:"NAMA (V3)"},1234:{llo:"GHI",name:"GHI-KE (V2)"},1739:{llo:"Kikapu",name:"Kikapu (V3)"},1236:{llo:"EHA",name:"EHA (V2+)"},1790:{llo:"BERI",name:"BERI (V3)"}};
+var OPP_META = {523:{llo:"NAMA",ver:"V1",name:"NAMA (V0/V1)"},524:{llo:"PIPN",ver:"V1",name:"PIPN (V0/V1)"},675:{llo:"GHI",ver:"V1",name:"GHI-UG (V0)"},874:{llo:"PIPN",ver:"V2",name:"PIPN (V2)"},938:{llo:"NAMA",ver:"V2",name:"NAMA (V2)"},1487:{llo:"PIPN",ver:"V3",name:"PIPN (V3)"},1488:{llo:"NAMA",ver:"V3",name:"NAMA (V3)"},1234:{llo:"GHI",ver:"V2",name:"GHI-KE (V2)"},1739:{llo:"Kikapu",ver:"V3",name:"Kikapu (V3)"},1236:{llo:"EHA",ver:"V2",name:"EHA (V2+)"},1790:{llo:"BERI",ver:"V3",name:"BERI (V3)"}};
+function verFor(oppId){ var m=OPP_META[oppId]; return m?m.ver:"?"; }
 var P1_ORDER = ["low_avg_visits","mortality","enroll_ontime","zero_danger","no_referral","rounded_weights","gps_within_200m","hr_copycat","temp_copycat","spo2_implausible","flw_early_discharge"];
 var P2_ORDER = ["danger_rate_cases","weight_loss","weight_gain_gkgday","modal_weight","flat_weight","image_missing","kmc_wrap_missing"];
 var META = {
@@ -455,6 +456,7 @@ function buildMasterRows(flwRows, visitRows, nameByUser, asOf){
     var res=deriveMetrics(aggDict,b.visit_rows,asOf);
     res.username=b.username; res.flw_name=b.flw_name||b.username; res.llo=b.llo;
     res.opportunity_ids=b.opportunity_ids.slice(); res.opportunity_breakdown=b.opportunity_breakdown.slice();
+    res.versions=[]; for(var vi=0;vi<b.opportunity_ids.length;vi++){ var vv=verFor(b.opportunity_ids[vi]); if(res.versions.indexOf(vv)<0) res.versions.push(vv); }
     res.primary_opp=b.opportunity_ids.length?Math.max.apply(null,b.opportunity_ids):null;
     res._visit_rows=b.visit_rows; res.total_cases=b.agg_total_cases;
     res.total_visits=b.visit_rows.filter(function(v){return v.visit_number!=null&&v.visit_number!=="";}).length;
@@ -477,6 +479,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
 
   var _filter = React.useState("any_red"); var filter=_filter[0], setFilter=_filter[1];
   var _llo = React.useState("all"); var lloFilter=_llo[0], setLloFilter=_llo[1];
+  var _ver = React.useState("all"); var verFilter=_ver[0], setVerFilter=_ver[1];
   var _search = React.useState(""); var search=_search[0], setSearch=_search[1];
   var _sortKey = React.useState("red"); var sortKey=_sortKey[0], setSortKey=_sortKey[1];
   var _sortAsc = React.useState(false); var sortAsc=_sortAsc[0], setSortAsc=_sortAsc[1];
@@ -503,6 +506,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
   var filtered = React.useMemo(function(){
     var data = analyzed.slice();
     if (lloFilter!=="all") data=data.filter(function(d){return d.llo===lloFilter;});
+    if (verFilter!=="all") data=data.filter(function(d){return d.versions.indexOf(verFilter)>=0;});
     if (search.trim()){ var q=search.toLowerCase(); data=data.filter(function(d){ return (d.username&&d.username.toLowerCase().indexOf(q)>=0)||(d.flw_name&&d.flw_name.toLowerCase().indexOf(q)>=0); }); }
     if (filter==="any_red") data=data.filter(function(d){return d.red_count>=1;});
     else if (filter==="two_red") data=data.filter(function(d){return d.red_count>=2;});
@@ -516,7 +520,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
       return sortAsc?va-vb:vb-va;
     });
     return data;
-  }, [analyzed, filter, lloFilter, search, sortKey, sortAsc]);
+  }, [analyzed, filter, lloFilter, verFilter, search, sortKey, sortAsc]);
 
   var selectedRows = filtered.filter(function(d){ return selected[d.llo+"|"+d.username]; });
   var selectedCount = selectedRows.length;
@@ -598,7 +602,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
 
   var headerEl = h("div",{className:"bg-white rounded-lg shadow-sm p-5"},
     h("h1",{className:"text-2xl font-bold text-gray-900"}, h("i",{className:"fa-solid fa-flag text-red-500 mr-2"}), definition.name),
-    h("p",{className:"text-gray-600 mt-1"}, "18 register FLW-audit metrics across merged V1+V2 opportunities, banded green / yellow / red. Live data."));
+    h("p",{className:"text-gray-600 mt-1"}, "18 register FLW-audit metrics across merged V1/V2/V3 opportunities (11 opps · 6 LLOs · 3 countries), banded green / yellow / red. Live data."));
 
   var kpiDefs=[["FLWs Loaded", kpi.loaded, "blue"],["≥1 Red", kpi.anyRed, "red"],["≥1 Yellow", kpi.anyYellow, "amber"],["Excluded (<20)", kpi.excluded, "gray"],["KMC Visits", kpi.totalVisits.toLocaleString(), "green"],["Total Cases", kpi.totalCases.toLocaleString(), "teal"]];
   var kpiEl = h("div",{className:"grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3"}, kpiDefs.map(function(c){
@@ -611,6 +615,8 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
     })),
     h("select",{value:lloFilter, onChange:function(e){setLloFilter(e.target.value);}, className:"border border-gray-300 rounded-lg px-2 py-1.5 text-sm"},
       h("option",{value:"all"},"All LLOs"), h("option",{value:"PIPN"},"PIPN"), h("option",{value:"NAMA"},"NAMA"), h("option",{value:"GHI"},"GHI"), h("option",{value:"Kikapu"},"Kikapu"), h("option",{value:"EHA"},"EHA"), h("option",{value:"BERI"},"BERI")),
+    h("select",{value:verFilter, onChange:function(e){setVerFilter(e.target.value);}, className:"border border-gray-300 rounded-lg px-2 py-1.5 text-sm", title:"Filter by app version"},
+      h("option",{value:"all"},"All versions"), h("option",{value:"V1"},"V1 (V0/V1)"), h("option",{value:"V2"},"V2"), h("option",{value:"V3"},"V3")),
     h("input",{type:"text", placeholder:"Search FLW...", value:search, onChange:function(e){setSearch(e.target.value);}, className:"flex-1 min-w-40 border border-gray-300 rounded-lg px-3 py-1.5 text-sm"}),
     h("label",{className:"flex items-center gap-2 text-sm text-gray-700"}, h("input",{type:"checkbox", checked:showP2, onChange:function(e){setShowP2(e.target.checked);}}), "Show Priority-2 metrics"));
 
@@ -630,7 +636,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
       h("td",{key:"_name", className:"px-2 py-2 text-sm cursor-pointer", onClick:function(){setExpanded(expanded===kk?null:kk);}},
         h("div",{className:"font-medium text-gray-900 flex items-center gap-1"}, h("i",{className:"fa-solid "+(expanded===kk?"fa-caret-down":"fa-caret-right")+" text-gray-400"}), d.flw_name),
         (d.flw_name!==d.username)?h("div",{className:"text-xs text-gray-400 font-mono"}, d.username):null),
-      h("td",{key:"_llo", className:"px-2 py-2 text-sm"}, h("span",{className:"px-2 py-0.5 rounded text-xs bg-indigo-50 text-indigo-700"}, d.llo)),
+      h("td",{key:"_llo", className:"px-2 py-2 text-sm whitespace-nowrap"}, h("span",{className:"px-2 py-0.5 rounded text-xs bg-indigo-50 text-indigo-700"}, d.llo), h("span",{className:"ml-1 text-xs text-gray-400", title:"App versions this FLW spans"}, (d.versions||[]).join("/"))),
       h("td",{key:"_cases", className:"px-2 py-2 text-sm text-center", title:d.opportunity_breakdown.map(function(b){return b.name+": "+b.total_cases+" cases";}).join(" | ")}, d.total_cases) ];
     cols.forEach(function(f){ cells.push(metricCell(d,f)); });
     cells.push(h("td",{key:"_red", className:"px-2 py-2 text-center"},
@@ -648,7 +654,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
     h("table",{className:"min-w-full divide-y divide-gray-200"},
       h("thead",{className:"bg-gray-50"}, h("tr",null, headerCells)),
       h("tbody",{className:"bg-white divide-y divide-gray-200"}, bodyRows)),
-    h("div",{className:"px-4 py-2 text-xs text-gray-500"}, filtered.length+" FLW"+(filtered.length!==1?"s":"")+" shown · bands per KMC Audit & Metrics Flag Register"));
+    h("div",{className:"px-4 py-2 text-xs text-gray-500"}, filtered.length+" FLW"+(filtered.length!==1?"s":"")+" shown · bands per KMC Audit & Metrics Flag Register · NE = not eligible (below the register's minimum data for that metric, or the field is not captured by that opp's app)"));
 
   var progressEl = progress ? h("span",{className:"text-sm "+(progress.status==="failed"?"text-red-600":progress.status==="completed"?"text-green-600":"text-blue-600")},
     progress.status==="completed"?("✓ "+progress.message):progress.status==="failed"?("⚠ "+(progress.error||"Failed")):h("span",null, h("i",{className:"fa-solid fa-spinner fa-spin mr-1"}), progress.message)) : null;
@@ -680,7 +686,7 @@ TEMPLATE = {
     "key": "kmc_audit_dashboard",
     "name": "KMC Audit Dashboard",
     "description": (
-        "18-metric register-faithful KMC FLW audit across merged V1+V2 opportunities. "
+        "18-metric register-faithful KMC FLW audit across merged V1/V2/V3 opportunities. "
         "3-tier RAG bands, drilldown, one-click audit creation."
     ),
     "icon": "fa-flag",
