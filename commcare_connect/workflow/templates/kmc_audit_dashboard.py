@@ -1,30 +1,36 @@
 """
 KMC Audit Dashboard workflow template (multi-opportunity, action-shaped).
 
-Ports the local ``custom_analysis/kmc_audit`` dashboard to a live Labs workflow
-template. Computes the full 16-flag-per-FLW audit over MERGED V1+V2 opportunity
-data (multi-opp: rows are tagged with opportunity_id and concatenated by the
-engine; the render merges them per (LLO, username)).
+Register-faithful rewrite: computes the 18 FLW-Audit metrics from the
+"KMC Audit & Metrics Flag Register (all)" spec, each rendered as a 3-tier RAG
+band (GREEN / YELLOW / RED / NE) with its value and numerator/denominator, over
+MERGED V1+V2 opportunity data (rows tagged with opportunity_id; the render merges
+them per (LLO, username)).
 
 Two pipelines (connect_csv):
-- ``flw_flags``     AGGREGATED — per-FLW case/visit/danger counts.
-- ``weight_series`` VISIT_LEVEL — per-visit rows for weight pairs, mortality,
-  enrollment, vitals, GPS, referral.
+- ``flw_flags``     AGGREGATED — per-FLW total_cases (exclusion gate).
+- ``weight_series`` VISIT_LEVEL — per-visit rows for the 18 metrics (weight pairs,
+  mortality, enrollment incl. home births, danger/referral, vitals, GPS,
+  equipment image, KMC wrap, early discharge).
 
-The render code's compute core (deriveFlags + buildMasterRows) is a byte-exact
-JS port of ``flag_logic.py`` / ``data_access.py``, validated against a golden
-reference (see .kmc_validation/: 612 flag + 792 metric assertions, PASS).
+The render's compute core (deriveMetrics + groupCases + helpers) is BYTE-IDENTICAL
+to ``.kmc_validation/register/kmc_flags.js`` and proven equal to the Python
+reference engine (``engine.py``) by ``parity.js`` — 730 assertions (bands exact,
+values 1e-9, num/den exact), PASS. Do NOT edit the compute core without re-running
+that parity harness.
 
-Field paths verified live against PIPN V1 (524) + V2 (874): all resolve,
-weight is grams (JS auto-detects kg<50 vs grams), kmc_status closure code is
-"discharged", mortality via child_alive="no".
+Field paths resolved live from the V3 deliver app (opp 1487):
+kmc_status_entered=form.kmc_status_entered; birth_location=form.hosp_lbl.birth_location;
+child_dob=form.mothers_details.child_DOB; relocation=form.address_change_grp.relocation_followup_check;
+equipment_image=form.danger_signs_checklist.equipment_image_capture_checklist.equipments_image_capture;
+kmc_wrap=form.commodities_delivered.kmc_wrap_provided_check.
 """
 
 PIPELINE_SCHEMAS = [
     {
         "alias": "flw_flags",
-        "name": "KMC Audit \u2014 FLW Aggregated",
-        "description": "Per-FLW aggregated counts: distinct cases, KMC visits, danger-sign visits/positives",
+        "name": "KMC Audit — FLW Aggregated",
+        "description": "Per-FLW aggregated counts: distinct cases (exclusion gate) + visit/danger counts",
         "schema": {
             "data_source": {"type": "connect_csv"},
             "grouping_key": "username",
@@ -33,7 +39,7 @@ PIPELINE_SCHEMAS = [
             "fields": [
                 {
                     "name": "total_cases",
-                    "paths": ["form.kmc_beneficiary_case_id", "form.case.@case_id"],
+                    "paths": ["form.child_case_id", "form.kmc_beneficiary_case_id", "form.case.@case_id"],
                     "aggregation": "count_distinct",
                     "description": "Distinct beneficiary case IDs",
                 },
@@ -70,8 +76,8 @@ PIPELINE_SCHEMAS = [
     },
     {
         "alias": "weight_series",
-        "name": "KMC Audit \u2014 Visit Level",
-        "description": "Per-visit rows for weight pairs, mortality, enrollment, danger/referral, vitals, GPS",
+        "name": "KMC Audit — Visit Level",
+        "description": "Per-visit rows for the 18 register FLW-audit metrics",
         "schema": {
             "data_source": {"type": "connect_csv"},
             "grouping_key": "username",
@@ -80,7 +86,7 @@ PIPELINE_SCHEMAS = [
             "fields": [
                 {
                     "name": "beneficiary_case_id",
-                    "paths": ["form.kmc_beneficiary_case_id", "form.case.@case_id"],
+                    "paths": ["form.child_case_id", "form.kmc_beneficiary_case_id", "form.case.@case_id"],
                     "aggregation": "first",
                 },
                 {
@@ -118,7 +124,11 @@ PIPELINE_SCHEMAS = [
                 },
                 {
                     "name": "kmc_status",
-                    "paths": ["form.grp_kmc_beneficiary.kmc_status", "form.kmc_status"],
+                    "paths": [
+                        "form.grp_kmc_beneficiary.kmc_status",
+                        "form.child_eligibility.kmc_status",
+                        "form.kmc_status",
+                    ],
                     "aggregation": "first",
                 },
                 {
@@ -130,10 +140,23 @@ PIPELINE_SCHEMAS = [
                     "aggregation": "first",
                 },
                 {"name": "child_alive", "path": "form.child_alive", "aggregation": "first"},
-                {"name": "child_referred", "path": "form.case.update.child_referred", "aggregation": "first"},
+                {
+                    "name": "child_referred",
+                    "paths": [
+                        "form.danger_signs_checklist.child_referred",
+                        "form.child_details.Danger_Signs_Checklist.child_referred",
+                        "form.case.update.child_referred",
+                    ],
+                    "aggregation": "first",
+                },
                 {
                     "name": "temperature",
-                    "path": "form.danger_signs_checklist.svn_temperature",
+                    "paths": [
+                        "form.danger_signs_checklist.temp_grp.svn_temperature",
+                        "form.child_details.Danger_Signs_Checklist.temp_grp.svn_temperature",
+                        "form.danger_signs_checklist.svn_temperature",
+                        "form.child_details.Danger_Signs_Checklist.svn_temperature",
+                    ],
                     "aggregation": "first",
                     "transform": "float",
                 },
@@ -160,6 +183,43 @@ PIPELINE_SCHEMAS = [
                     "aggregation": "first",
                     "transform": "float",
                 },
+                # ---- register-metric fields (added for the banded rewrite) ----
+                {
+                    "name": "kmc_status_entered",
+                    "path": "form.kmc_status_entered",
+                    "aggregation": "first",
+                },
+                {
+                    "name": "birth_location",
+                    "path": "form.hosp_lbl.birth_location",
+                    "aggregation": "first",
+                },
+                {
+                    "name": "child_dob",
+                    "paths": ["form.mothers_details.child_DOB", "form.child_DOB"],
+                    "aggregation": "first",
+                    "transform": "date",
+                },
+                {
+                    "name": "relocation_followup_check",
+                    "path": "form.address_change_grp.relocation_followup_check",
+                    "aggregation": "first",
+                },
+                {
+                    "name": "location_change",
+                    "path": "form.address_change_grp.location_change_proceed_check",
+                    "aggregation": "first",
+                },
+                {
+                    "name": "equipment_image",
+                    "path": "form.danger_signs_checklist.equipment_image_capture_checklist.equipments_image_capture",
+                    "aggregation": "first",
+                },
+                {
+                    "name": "kmc_wrap_check",
+                    "path": "form.commodities_delivered.kmc_wrap_provided_check",
+                    "aggregation": "first",
+                },
             ],
             "histograms": [],
             "filters": {},
@@ -170,10 +230,10 @@ PIPELINE_SCHEMAS = [
 DEFINITION = {
     "name": "KMC Audit Dashboard",
     "description": (
-        "16-flag KMC FLW audit across merged V1+V2 opportunities (live). "
-        "Priority + secondary flag tiers, per-FLW drilldown, one-click audit creation."
+        "18-metric register-faithful KMC FLW audit across merged V1+V2 opportunities (live). "
+        "3-tier RAG bands, per-FLW drilldown, one-click audit creation."
     ),
-    "version": 1,
+    "version": 2,
     "templateType": "kmc_audit_dashboard",
     "statuses": [
         {"id": "pending", "label": "Pending Review", "color": "gray"},
@@ -183,213 +243,244 @@ DEFINITION = {
     "pipeline_sources": [],
 }
 
-RENDER_CODE = r"""/* KMC Audit Dashboard — workflow RENDER_CODE (multi-opp, action-shaped, live).
- * Compute core (deriveFlags, buildMasterRows + helpers) is byte-exact to
- * flag_logic.py / data_access.py and validated by .kmc_validation parity tests.
+RENDER_CODE = r"""/* KMC Audit Dashboard — RENDER_CODE (register-faithful banded RAG, multi-opp, live).
+ * Compute core (deriveMetrics + groupCases + helpers) is byte-identical to
+ * .kmc_validation/register/kmc_flags.js and proven == engine.py by parity.js
+ * (730 assertions: bands exact, values 1e-9, num/den exact). Re-run parity before editing it.
+ * 18 FLW-Audit metrics per "KMC Audit & Metrics Flag Register (all)".
  */
 
-// ====================== constants ======================
-var THRESHOLDS = {
-  visits: 3.0, mort_low: 0.02, mort_high: 0.20, enroll: 0.35,
-  danger_high: 0.30, danger_zero: 0.0, wt_loss: 0.15, wt_gain: 60.0,
-  wt_zero: 0.30, round_weight: 0.80, hr_copycat: 0.75, temp_copycat: 0.75,
-  spo2_implausible: 0.10, ga_fullterm: 0.30, gps_same_case_far: 0.30, ds_no_referral: 0.0
-};
-var MIN_CASES = {
-  visits: 10, mort: 20, enroll: 10, danger_high: 20, danger_zero: 30,
-  weight: 10, exclude: 20, round_weight: 20, hr_copycat: 20, temp_copycat: 20,
-  spo2_implausible: 20, ga_fullterm: 10, gps_same_case_far: 20, ds_no_referral: 5
-};
-var ALL_FLAGS = ["flag_visits","flag_mort_low","flag_mort_high","flag_enroll","flag_danger_high","flag_danger_zero","flag_wt_loss","flag_wt_gain","flag_wt_zero","flag_round_weight","flag_hr_copycat","flag_temp_copycat","flag_spo2_implausible","flag_ga_fullterm","flag_gps_same_case_far","flag_ds_no_referral"];
-var PRIORITY_FLAGS = ["flag_visits","flag_mort","flag_enroll","flag_danger_high","flag_ds_no_referral","flag_round_weight","flag_hr_copycat","flag_temp_copycat","flag_spo2_implausible","flag_gps_same_case_far"];
-var SECONDARY_FLAGS = ["flag_mort_low","flag_mort_high","flag_danger_zero","flag_wt_loss","flag_wt_gain","flag_wt_zero","flag_ga_fullterm"];
-var FLAG_LABELS = {flag_visits:"Visits/Case",flag_mort:"Mortality",flag_mort_low:"Low Mortality",flag_mort_high:"High Mortality",flag_enroll:"Late Enrollment",flag_danger_high:"Danger Signs",flag_danger_zero:"No Danger Signs",flag_wt_loss:"Weight Loss",flag_wt_gain:"Weight Gain",flag_wt_zero:"Weight Stagnant",flag_round_weight:"Rounded Weights",flag_hr_copycat:"HR Copy-Paste",flag_temp_copycat:"Temp Copy-Paste",flag_spo2_implausible:"SpO2 Implausible",flag_ga_fullterm:"Gestational Age",flag_gps_same_case_far:"GPS Spread",flag_ds_no_referral:"No Referral"};
-var FLAG_THRESHOLD_DISPLAY = {flag_visits:"< 3.0",flag_mort:"< 2% or > 20%",flag_mort_low:"< 2%",flag_mort_high:"> 20%",flag_enroll:"> 35%",flag_danger_high:"> 30%",flag_danger_zero:"= 0%",flag_wt_loss:"> 15%",flag_wt_gain:"> 60 g/d",flag_wt_zero:"> 30%",flag_round_weight:">= 80%",flag_hr_copycat:"> 75%",flag_temp_copycat:"> 75%",flag_spo2_implausible:"> 10%",flag_ga_fullterm:"> 30%",flag_gps_same_case_far:"> 30%",flag_ds_no_referral:"= 0%"};
-var FLAG_METRIC_KEY = {flag_visits:"avg_visits",flag_mort:"mort_rate",flag_mort_low:"mort_rate",flag_mort_high:"mort_rate",flag_enroll:"pct_late_enroll",flag_danger_high:"danger_rate",flag_danger_zero:"danger_rate",flag_wt_loss:"pct_wt_loss",flag_wt_gain:"mean_daily_gain",flag_wt_zero:"pct_wt_zero",flag_round_weight:"round_weight_pct",flag_hr_copycat:"hr_copycat_pct",flag_temp_copycat:"temp_copycat_pct",flag_spo2_implausible:"spo2_implausible_pct",flag_ga_fullterm:"ga_fullterm_pct",flag_gps_same_case_far:"gps_same_case_far_pct",flag_ds_no_referral:"ds_no_referral_pct"};
-var FLAG_FMT = {flag_visits:"dec",flag_mort:"pct",flag_mort_low:"pct",flag_mort_high:"pct",flag_enroll:"pct",flag_danger_high:"pct",flag_danger_zero:"pct",flag_wt_loss:"pct",flag_wt_gain:"gain",flag_wt_zero:"pct",flag_round_weight:"pct",flag_hr_copycat:"pct",flag_temp_copycat:"pct",flag_spo2_implausible:"pct",flag_ga_fullterm:"pct",flag_gps_same_case_far:"pct",flag_ds_no_referral:"pct"};
-var FLAG_DESCRIPTIONS = {flag_visits:"Avg follow-up visits per closed non-mortality case < 3.0 (min 10 cases).",flag_mort:"Mortality < 2% (implausible) or > 20% (concern). Min 20 closed cases.",flag_enroll:"> 35% of cases enrolled 8+ days after discharge. Min 10 cases w/ dates.",flag_danger_high:"> 30% of follow-up visits show danger signs. Min 20 visits.",flag_danger_zero:"Exactly 0% danger signs across 30+ visits.",flag_wt_loss:"> 15% of successive weight pairs show loss. Min 10 pairs.",flag_wt_gain:"Avg daily weight gain per baby > 60 g/day. Per-baby averaging.",flag_wt_zero:"> 30% of successive weight pairs show no change. Min 10 pairs.",flag_round_weight:">= 80% of follow-up weights are exact multiples of 100g. Min 20.",flag_hr_copycat:"> 75% of heart-rate readings are the same value. Min 20.",flag_temp_copycat:"> 75% of temperature readings are the same value. Min 20.",flag_spo2_implausible:"> 10% of SpO2 readings outside 70-100%. Min 20.",flag_ga_fullterm:"> 30% of registrations with gestational age >= 37 weeks. Min 10.",flag_gps_same_case_far:"> 30% of same-case GPS pairs > 1km apart. Min 20.",flag_ds_no_referral:"0% referral rate for danger-sign-positive visits. Min 5 DS+ visits.",flag_mort_low:"Mortality < 2% — implausible. Min 20.",flag_mort_high:"Mortality > 20% — concern. Min 20."};
-var OPP_META = {523:{llo:"NAMA",name:"Nama Wellness- KMC"},524:{llo:"PIPN",name:"PIPN (V1)"},675:{llo:"GHI",name:"GHI"},874:{llo:"PIPN",name:"KMC PIPN - New Opportunity (V2)"},938:{llo:"NAMA",name:"KMC Nama - New Opportunity (V2)"}};
+// ============================= compute core (PARITY-LOCKED) =============================
+var WMIN = 500.0, WMAX = 5000.0, PAIR_MIN = 1, PAIR_MAX = 30, KG_TO_G = 1000.0;
+var DAY_MS = 86400000, EARTH_R_M = 6371000.0, EXCLUDE_MIN_CASES = 20;
 
-// ====================== compute core (validated; re-run parity before editing) ======================
-var CLOSED_STATUSES = {discharged:1,lost_to_followup:1,deceased:1};
-var DECEASED_STATUS = "deceased";
-var WEIGHT_MIN_G = 500, WEIGHT_MAX_G = 5000, KG_TO_G = 1000;
-var PAIR_MIN_DAYS = 1, PAIR_MAX_DAYS = 30, LATE_ENROLL_DAYS = 8;
-var SPO2_MIN = 70, SPO2_MAX = 100, GA_FULLTERM_WEEKS = 37, EARTH_RADIUS_KM = 6371.0;
-var YES_SET = {"yes":1,"true":1,"1":1};
+var METRIC_KEYS = ["low_avg_visits","mortality","enroll_ontime","zero_danger","danger_rate_cases",
+  "no_referral","weight_loss","weight_gain_gkgday","rounded_weights","modal_weight","flat_weight",
+  "gps_within_200m","hr_copycat","temp_copycat","spo2_implausible","image_missing","flw_early_discharge","kmc_wrap_missing"];
+var PRIORITY = {low_avg_visits:1,mortality:1,enroll_ontime:1,zero_danger:1,no_referral:1,rounded_weights:1,
+  gps_within_200m:1,hr_copycat:1,temp_copycat:1,spo2_implausible:1,flw_early_discharge:1,
+  danger_rate_cases:2,weight_loss:2,weight_gain_gkgday:2,modal_weight:2,flat_weight:2,image_missing:2,kmc_wrap_missing:2};
 
-function rget(row, key) { if (row == null) return null; var v = row[key]; return v === undefined ? null : v; }
-function parseDate(value) {
-  if (value === null || value === undefined || value === "") return null;
-  if (typeof value !== "string") { if (value instanceof Date) return Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()); return null; }
-  var s = value.slice(0,10); var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-  if (!m) return null; return Date.UTC(parseInt(m[1],10), parseInt(m[2],10)-1, parseInt(m[3],10));
+function rget(row, key){ if(row==null) return null; var v=row[key]; return v===undefined?null:v; }
+function pf(v){ if(v===null||v===undefined||v===""||typeof v==="boolean") return null; var f=Number(v); return isNaN(f)?null:f; }
+function pint(v){ if(v===null||v===undefined||v==="") return null; var f=Number(v); return isNaN(f)?null:Math.trunc(f); }
+function low(v){ return (v===null||v===undefined||v==="")?null:String(v).trim().toLowerCase(); }
+function rnd(x){ return Math.floor(x+0.5); }
+function parseDate(v){
+  if(v===null||v===undefined||v==="") return null;
+  var s=String(v).slice(0,10);
+  var m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if(!m) return null;
+  return Date.UTC(parseInt(m[1],10),parseInt(m[2],10)-1,parseInt(m[3],10));
 }
-function daysBetween(a, b) { return Math.round((b - a) / 86400000); }
-function safeFloat(value) { if (value === null || value === undefined || value === "" || typeof value === "boolean") return null; var f = Number(value); return isNaN(f) ? null : f; }
-function safeInt(value) { if (value === null || value === undefined || value === "") return 0; var f = Number(value); return isNaN(f) ? 0 : Math.trunc(f); }
-function readWeightG(row) { var w = safeFloat(rget(row,"weight")); if (w === null || w <= 0) return null; if (w < 50) return w*KG_TO_G; if (w >= 100 && w <= 10000) return w; return null; }
-function stableSort(arr, keyFn) { return arr.map(function(v,i){return {v:v,i:i,k:keyFn(v)};}).sort(function(a,b){return a.k<b.k?-1:a.k>b.k?1:a.i-b.i;}).map(function(x){return x.v;}); }
-function inYes(v){ if (v===true||v===1) return true; if (typeof v==="string") return !!YES_SET[v.toLowerCase()]; return false; }
-function inNo(v){ if (v===false||v===0) return true; if (typeof v==="string"){var s=v.toLowerCase(); return s==="no"||s==="false"||s==="0";} return false; }
+function daysBetween(a,b){ return Math.round((b-a)/DAY_MS); }
+function readWeightG(row){ var w=pf(rget(row,"weight")); if(w===null||w<=0) return null; if(w<50) return w*KG_TO_G; if(w>=100&&w<=10000) return w; return null; }
+function parseGps(raw){
+  if(raw===null||raw===undefined||typeof raw!=="string") return null;
+  var p=raw.trim().split(/\s+/); if(p.length<2) return null;
+  var lat=pf(p[0]), lon=pf(p[1]); var acc=p.length>3?pf(p[3]):null;
+  if(lat===null||lon===null) return null;
+  if(!(lat>=-90&&lat<=90&&lon>=-180&&lon<=180)) return null;
+  if(lat===0.0&&lon===0.0) return null;
+  return [lat,lon,acc];
+}
+function haversineM(a,b){
+  var toR=Math.PI/180, la1=a[0]*toR, lo1=a[1]*toR, la2=b[0]*toR, lo2=b[1]*toR;
+  var hh=Math.sin((la2-la1)/2)*Math.sin((la2-la1)/2)+Math.cos(la1)*Math.cos(la2)*Math.sin((lo2-lo1)/2)*Math.sin((lo2-lo1)/2);
+  return 2*EARTH_R_M*Math.asin(Math.sqrt(hh));
+}
+function median(arr){ var a=arr.slice().sort(function(x,y){return x-y;}); var n=a.length; if(n===0) return null; var mid=Math.floor(n/2); return n%2?a[mid]:(a[mid-1]+a[mid])/2; }
+function modalCount(vals){ var c={}, top=0; for(var i=0;i<vals.length;i++){ var k=String(vals[i]); c[k]=(c[k]||0)+1; if(c[k]>top) top=c[k]; } return top; }
+function ragLowBad(v,g,y){ if(v===null) return "N/A"; if(v>=g) return "GREEN"; if(v>=y) return "YELLOW"; return "RED"; }
+function ragHighBad(v,g,y){ if(v===null) return "N/A"; if(v<g) return "GREEN"; if(v<=y) return "YELLOW"; return "RED"; }
+function M(value,rag,num,den){ return {value:value,rag:rag,num:(num===undefined?null:num),den:(den===undefined?null:den)}; }
+function NA(){ return {value:null,rag:"N/A",num:null,den:null}; }
 
-function computeWeightMetrics(visitRows) {
-  var byChild = {}, i, row, cid;
-  for (i=0;i<visitRows.length;i++){ row=visitRows[i]; cid=rget(row,"beneficiary_case_id"); if(!cid)continue; cid=String(cid); (byChild[cid]=byChild[cid]||[]).push(row); }
-  var totalPairs=0, lossPairs=0, zeroPairs=0, gainPairCount=0, babyAvgGains=[];
-  Object.keys(byChild).forEach(function(k){
-    var visits=byChild[k], eligible=[];
-    for (var j=0;j<visits.length;j++){ if (readWeightG(visits[j])!==null && parseDate(rget(visits[j],"visit_date"))!==null) eligible.push(visits[j]); }
-    eligible = stableSort(eligible, function(v){ return parseDate(rget(v,"visit_date")); });
-    var childGains=[];
-    for (var p=1;p<eligible.length;p++){
-      var prevW=readWeightG(eligible[p-1]), currW=readWeightG(eligible[p]);
-      if (prevW===null||currW===null) continue;
-      if (!(prevW>=WEIGHT_MIN_G && prevW<=WEIGHT_MAX_G)) continue;
-      if (!(currW>=WEIGHT_MIN_G && currW<=WEIGHT_MAX_G)) continue;
-      var db=daysBetween(parseDate(rget(eligible[p-1],"visit_date")), parseDate(rget(eligible[p],"visit_date")));
-      if (db<PAIR_MIN_DAYS||db>PAIR_MAX_DAYS) continue;
-      totalPairs++; var diff=currW-prevW;
-      if (diff<0) lossPairs++;
-      if (Math.abs(diff)<0.001) zeroPairs++;
-      if (diff>0 && db>0){ childGains.push(diff/db); gainPairCount++; }
-    }
-    if (childGains.length){ var s=0; for(var g=0;g<childGains.length;g++) s+=childGains[g]; babyAvgGains.push(s/childGains.length); }
+function groupCases(visitRows){
+  var by={}, i, r, cid;
+  for(i=0;i<visitRows.length;i++){ r=visitRows[i]; cid=rget(r,"beneficiary_case_id"); if(!cid) continue; cid=String(cid); (by[cid]=by[cid]||[]).push(r); }
+  var cases=[];
+  Object.keys(by).forEach(function(cid){
+    var rows=by[cid];
+    var regDates=[]; for(i=0;i<rows.length;i++){ var d=parseDate(rget(rows[i],"reg_date")); if(d!==null) regDates.push(d); }
+    var regDate=regDates.length?Math.min.apply(null,regDates):null;
+    function first(field,tf){ for(var j=0;j<rows.length;j++){ var v=rget(rows[j],field); if(v!==null&&v!==""){ return tf?tf(v):v; } } return null; }
+    var dischargeDate=first("discharge_date",parseDate);
+    var dob=first("child_dob",parseDate);
+    var birthLocation=first("birth_location",low);
+    var fus=[];
+    for(i=0;i<rows.length;i++){ if(pint(rget(rows[i],"visit_number"))===null) continue; var vd=parseDate(rget(rows[i],"visit_date")); if(vd===null) continue; fus.push([vd,rows[i]]); }
+    fus.sort(function(a,b){ return a[0]-b[0]; });
+    var followups=fus.map(function(t){return t[1];});
+    var followupDates=fus.map(function(t){return t[0];});
+    var regRows=[]; for(i=0;i<rows.length;i++){ if(pint(rget(rows[i],"visit_number"))===null) regRows.push(rows[i]); }
+    var lastVisitDate=null;
+    for(i=0;i<rows.length;i++){ var dd=parseDate(rget(rows[i],"visit_date")); if(dd!==null&&(lastVisitDate===null||dd>lastVisitDate)) lastVisitDate=dd; }
+    var isDeath=false; for(i=0;i<rows.length;i++){ if(low(rget(rows[i],"child_alive"))==="no"){ isDeath=true; break; } }
+    var statusEntered={}; for(i=0;i<rows.length;i++){ var se=low(rget(rows[i],"kmc_status_entered")); if(se) statusEntered[se]=1; }
+    var locChangeNo=false; for(i=0;i<rows.length;i++){ if(low(rget(rows[i],"location_change"))==="no"||low(rget(rows[i],"relocation_followup_check"))==="no"){ locChangeNo=true; break; } }
+    var ws=[];
+    for(i=0;i<rows.length;i++){ var vd2=parseDate(rget(rows[i],"visit_date")); var w=readWeightG(rows[i]); if(vd2!==null&&w!==null&&w>=WMIN&&w<=WMAX) ws.push([vd2,w]); }
+    ws.sort(function(a,b){ return a[0]-b[0]; });
+    cases.push({case_id:cid,reg_date:regDate,discharge_date:dischargeDate,dob:dob,birth_location:birthLocation,
+      followups:followups,followup_dates:followupDates,n_followup:followups.length,reg_rows:regRows,
+      last_visit_date:lastVisitDate,is_death:isDeath,status_entered:statusEntered,loc_change_no:locChangeNo,weights:ws});
   });
-  var meanGain=null; if (babyAvgGains.length){ var ss=0; for(var b=0;b<babyAvgGains.length;b++) ss+=babyAvgGains[b]; meanGain=ss/babyAvgGains.length; }
-  return { pct_wt_loss: totalPairs>0?lossPairs/totalPairs:null, mean_daily_gain: meanGain, pct_wt_zero: totalPairs>0?zeroPairs/totalPairs:null, weight_pairs: totalPairs, gain_pairs: gainPairCount };
+  return cases;
 }
-function computeEnrollmentMetrics(visitRows) {
-  var byCase={}, i, row, cid;
-  for (i=0;i<visitRows.length;i++){ row=visitRows[i]; cid=rget(row,"beneficiary_case_id"); if(!cid)continue; cid=String(cid);
-    var slot=byCase[cid]||(byCase[cid]={reg_date:null,discharge_date:null});
-    var rd=parseDate(rget(row,"reg_date")), dd=parseDate(rget(row,"discharge_date"));
-    if (rd!==null && slot.reg_date===null) slot.reg_date=rd;
-    if (dd!==null && slot.discharge_date===null) slot.discharge_date=dd;
-  }
-  var casesWithDates=0, lateCases=0;
-  Object.keys(byCase).forEach(function(k){ var s=byCase[k]; if (s.reg_date!==null && s.discharge_date!==null){ casesWithDates++; if (daysBetween(s.discharge_date,s.reg_date)>=LATE_ENROLL_DAYS) lateCases++; } });
-  return { pct_late_enroll: casesWithDates>=MIN_CASES.enroll?lateCases/casesWithDates:null, cases_with_dates: casesWithDates };
-}
-function computeCaseMetrics(visitRows) {
-  var byCase={}, i, row, cid;
-  for (i=0;i<visitRows.length;i++){ row=visitRows[i]; cid=rget(row,"beneficiary_case_id"); if(!cid)continue; cid=String(cid);
-    var slot=byCase[cid]||(byCase[cid]={case_id:cid,latest_visit_date:null,latest_status:null,latest_child_alive:null,visit_count:0});
-    if (rget(row,"visit_number")!==null && rget(row,"visit_number")!==undefined) slot.visit_count++;
-    var vdate=parseDate(rget(row,"visit_date")); if (vdate===null) continue;
-    if (slot.latest_visit_date===null || vdate>slot.latest_visit_date){
-      slot.latest_visit_date=vdate;
-      var status=rget(row,"kmc_status"); if (status){ var st=String(status).trim().toLowerCase(); slot.latest_status=st||null; }
-      var ca=rget(row,"child_alive"); if (ca!==null&&ca!==undefined){ var cl=String(ca).trim().toLowerCase(); slot.latest_child_alive=cl||null; }
-    }
-  }
-  var cases=Object.keys(byCase).map(function(k){return byCase[k];});
-  function isClosed(c){ return !!CLOSED_STATUSES[c.latest_status] || c.latest_child_alive==="no"; }
-  function isMortality(c){ if (c.latest_child_alive==="no") return true; if (c.latest_child_alive==="yes") return false; return c.latest_status===DECEASED_STATUS; }
-  var closed=cases.filter(isClosed), closedCases=closed.length, nonMortClosed=0;
-  for (i=0;i<closed.length;i++) if (!isMortality(closed[i])) nonMortClosed++;
-  var deaths=0; for (i=0;i<cases.length;i++) if (isMortality(cases[i])) deaths++;
-  return { cases:cases, closed_cases:closedCases, non_mort_closed:nonMortClosed, deaths:deaths, is_closed:isClosed, is_mortality:isMortality };
-}
-function computeAvgVisits(cm){ var nmc=cm.cases.filter(function(c){return cm.is_closed(c)&&!cm.is_mortality(c);}); if (nmc.length<MIN_CASES.visits) return [null,nmc.length]; var t=0; for(var i=0;i<nmc.length;i++) t+=nmc[i].visit_count; return [t/nmc.length, nmc.length]; }
-function computeRoundWeightPct(visitRows){ var valid=[]; for(var i=0;i<visitRows.length;i++){ if (rget(visitRows[i],"visit_number")===null||rget(visitRows[i],"visit_number")===undefined) continue; var w=readWeightG(visitRows[i]); if (w===null) continue; if (!(w>=WEIGHT_MIN_G&&w<=WEIGHT_MAX_G)) continue; valid.push(w);} if (valid.length<MIN_CASES.round_weight) return [null,valid.length]; var r=0; for(var j=0;j<valid.length;j++) if (Math.abs(valid[j]-Math.round(valid[j]/100)*100)<0.001) r++; return [r/valid.length, valid.length]; }
-function copycatPct(visitRows, field, minKey){ var vals=[]; for(var i=0;i<visitRows.length;i++){ var x=safeFloat(rget(visitRows[i],field)); if (x!==null) vals.push(x);} if (vals.length<MIN_CASES[minKey]) return [null,vals.length]; var counts={}, top=0; for(var j=0;j<vals.length;j++){ var key=String(vals[j]); counts[key]=(counts[key]||0)+1; if (counts[key]>top) top=counts[key];} return [top/vals.length, vals.length]; }
-function computeSpo2ImplausiblePct(visitRows){ var vals=[]; for(var i=0;i<visitRows.length;i++){ var v=safeFloat(rget(visitRows[i],"spo2_level")); if (v!==null) vals.push(v);} if (vals.length<MIN_CASES.spo2_implausible) return [null,vals.length]; var bad=0; for(var j=0;j<vals.length;j++) if (vals[j]<SPO2_MIN||vals[j]>SPO2_MAX) bad++; return [bad/vals.length, vals.length]; }
-function computeGaFulltermPct(visitRows){ var vals=[]; for(var i=0;i<visitRows.length;i++){ var ga=safeFloat(rget(visitRows[i],"gestational_age_lmp")); if (ga!==null) vals.push(ga);} if (vals.length<MIN_CASES.ga_fullterm) return [null,vals.length]; var ft=0; for(var j=0;j<vals.length;j++) if (vals[j]>=GA_FULLTERM_WEEKS) ft++; return [ft/vals.length, vals.length]; }
-function parseGps(raw){ if (!raw||typeof raw!=="string") return null; var p=raw.trim().split(/\s+/); if (p.length<2) return null; var lat=Number(p[0]), lon=Number(p[1]); if (isNaN(lat)||isNaN(lon)) return null; if (!(lat>=-90&&lat<=90&&lon>=-180&&lon<=180)) return null; if (lat===0.0&&lon===0.0) return null; return [lat,lon]; }
-function haversineKm(la1,lo1,la2,lo2){ var dlat=(la2-la1)*Math.PI/180, dlon=(lo2-lo1)*Math.PI/180; var a=Math.sin(dlat/2)*Math.sin(dlat/2)+Math.cos(la1*Math.PI/180)*Math.cos(la2*Math.PI/180)*Math.sin(dlon/2)*Math.sin(dlon/2); return EARTH_RADIUS_KM*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)); }
-function computeGpsSameCaseFarPct(visitRows){ var cases={}; for(var i=0;i<visitRows.length;i++){ var cid=rget(visitRows[i],"beneficiary_case_id"); if(!cid)continue; var c=parseGps(rget(visitRows[i],"gps")); if (c===null) continue; (cases[String(cid)]=cases[String(cid)]||[]).push(c);} var total=0, far=0; Object.keys(cases).forEach(function(k){ var pts=cases[k]; if (pts.length<2) return; for(var j=0;j<pts.length-1;j++){ total++; if (haversineKm(pts[j][0],pts[j][1],pts[j+1][0],pts[j+1][1])>1.0) far++; } }); if (total<MIN_CASES.gps_same_case_far) return [null,total]; return [far/total,total]; }
-function computeDsNoReferralPct(visitRows){ var ds=[]; for(var i=0;i<visitRows.length;i++){ var d=rget(visitRows[i],"danger_sign_positive"); if (inYes(d)){ ds.push(inYes(rget(visitRows[i],"child_referred"))); } } if (ds.length<MIN_CASES.ds_no_referral) return [null,ds.length]; var ref=0; for(var j=0;j<ds.length;j++) if (ds[j]) ref++; return [ref/ds.length, ds.length]; }
-function computeDangerMetrics(visitRows){ var vf=0, pv=0; for(var i=0;i<visitRows.length;i++){ var d=rget(visitRows[i],"danger_sign_positive"); if (inYes(d)){ vf++; pv++; } else if (inNo(d)){ vf++; } } return { danger_visit_count: vf, danger_positive_count: pv }; }
 
-function deriveFlags(aggRow, visitRows) {
-  var username=String(rget(aggRow,"username")||"");
-  var totalCases=safeInt(rget(aggRow,"total_cases"));
-  var totalVisits=safeInt(rget(aggRow,"kmc_visit_count"));
-  var dvm=computeDangerMetrics(visitRows), dangerVisitCount, dangerPositiveCount;
-  if (dvm.danger_visit_count>0){ dangerVisitCount=dvm.danger_visit_count; dangerPositiveCount=dvm.danger_positive_count; }
-  else { dangerVisitCount=safeInt(rget(aggRow,"danger_visit_count")); dangerPositiveCount=safeInt(rget(aggRow,"danger_positive_count")); }
-  var wm=computeWeightMetrics(visitRows), em=computeEnrollmentMetrics(visitRows), cm=computeCaseMetrics(visitRows);
-  var closedCases=cm.closed_cases, nonMortClosed=cm.non_mort_closed, deaths=cm.deaths;
-  var avgVisits=computeAvgVisits(cm)[0];
-  var mortRate=closedCases>0?deaths/closedCases:null;
-  var dangerRate=dangerVisitCount>0?dangerPositiveCount/dangerVisitCount:null;
-  var roundPct=computeRoundWeightPct(visitRows)[0];
-  var hrPct=copycatPct(visitRows,"heart_rate","hr_copycat")[0];
-  var tempPct=copycatPct(visitRows,"temperature","temp_copycat")[0];
-  var spo2Pct=computeSpo2ImplausiblePct(visitRows)[0];
-  var gaPct=computeGaFulltermPct(visitRows)[0];
-  var gpsPct=computeGpsSameCaseFarPct(visitRows)[0];
-  var referralPct=computeDsNoReferralPct(visitRows)[0];
-  var excluded=totalCases<MIN_CASES.exclude;
-  var flags={}; for (var fi=0;fi<ALL_FLAGS.length;fi++) flags[ALL_FLAGS[fi]]=null;
-  if (!excluded){
-    flags.flag_visits = avgVisits!==null ? (avgVisits<THRESHOLDS.visits) : null;
-    flags.flag_mort_high = (closedCases>=MIN_CASES.mort && mortRate!==null) ? (mortRate>THRESHOLDS.mort_high) : null;
-    flags.flag_mort_low = (closedCases>=MIN_CASES.mort && mortRate!==null) ? (mortRate<THRESHOLDS.mort_low) : null;
-    flags.flag_enroll = (em.cases_with_dates>=MIN_CASES.enroll && em.pct_late_enroll!==null) ? (em.pct_late_enroll>THRESHOLDS.enroll) : null;
-    flags.flag_danger_high = (dangerVisitCount>=MIN_CASES.danger_high && dangerRate!==null) ? (dangerRate>THRESHOLDS.danger_high) : null;
-    flags.flag_danger_zero = (dangerVisitCount>=MIN_CASES.danger_zero && dangerRate!==null) ? (dangerRate===THRESHOLDS.danger_zero) : null;
-    flags.flag_wt_loss = (wm.weight_pairs>=MIN_CASES.weight && wm.pct_wt_loss!==null) ? (wm.pct_wt_loss>THRESHOLDS.wt_loss) : null;
-    flags.flag_wt_gain = wm.mean_daily_gain!==null ? (wm.mean_daily_gain>THRESHOLDS.wt_gain) : null;
-    flags.flag_wt_zero = (wm.weight_pairs>=MIN_CASES.weight && wm.pct_wt_zero!==null) ? (wm.pct_wt_zero>THRESHOLDS.wt_zero) : null;
-    flags.flag_round_weight = roundPct!==null ? (roundPct>=THRESHOLDS.round_weight) : null;
-    flags.flag_hr_copycat = hrPct!==null ? (hrPct>THRESHOLDS.hr_copycat) : null;
-    flags.flag_temp_copycat = tempPct!==null ? (tempPct>THRESHOLDS.temp_copycat) : null;
-    flags.flag_spo2_implausible = spo2Pct!==null ? (spo2Pct>THRESHOLDS.spo2_implausible) : null;
-    flags.flag_ga_fullterm = gaPct!==null ? (gaPct>THRESHOLDS.ga_fullterm) : null;
-    flags.flag_gps_same_case_far = gpsPct!==null ? (gpsPct>THRESHOLDS.gps_same_case_far) : null;
-    flags.flag_ds_no_referral = referralPct!==null ? (referralPct===THRESHOLDS.ds_no_referral) : null;
+function deriveMetrics(aggRow, visitRows, asOf){
+  var totalCases=pint(rget(aggRow,"total_cases"))||0;
+  var excluded=totalCases<EXCLUDE_MIN_CASES;
+  var out={}, k, i;
+  if(excluded){
+    for(i=0;i<METRIC_KEYS.length;i++) out[METRIC_KEYS[i]]={value:null,rag:"N/A",num:null,den:null,excluded:true};
+    out._excluded=true; out._total_cases=totalCases; return out;
   }
-  var ml=flags.flag_mort_low, mh=flags.flag_mort_high;
-  if (excluded || (ml===null && mh===null)) flags.flag_mort=null; else flags.flag_mort=(!!ml)||(!!mh);
-  return { username:username, total_cases:totalCases, total_visits:totalVisits, deaths:deaths, closed_cases:closedCases, non_mort_closed:nonMortClosed, avg_visits:avgVisits, mort_rate:mortRate, danger_rate:dangerRate, pct_late_enroll:em.pct_late_enroll, cases_with_dates:em.cases_with_dates, pct_wt_loss:wm.pct_wt_loss, mean_daily_gain:wm.mean_daily_gain, pct_wt_zero:wm.pct_wt_zero, weight_pairs:wm.weight_pairs, round_weight_pct:roundPct, hr_copycat_pct:hrPct, temp_copycat_pct:tempPct, spo2_implausible_pct:spo2Pct, ga_fullterm_pct:gaPct, gps_same_case_far_pct:gpsPct, ds_no_referral_pct:referralPct, excluded:excluded, flags:flags };
+  var cs=groupCases(visitRows);
+  var fus=[]; for(i=0;i<cs.length;i++) for(var j=0;j<cs[i].followups.length;j++) fus.push(cs[i].followups[j]);
+  function ageDays(regMs){ return (asOf-regMs)/DAY_MS; }
+
+  var elig=cs.filter(function(c){ return c.reg_date!==null && ageDays(c.reg_date)>=60 && !c.is_death; });
+  if(elig.length>=10){ var num=0; for(i=0;i<elig.length;i++) num+=elig[i].n_followup; var avg=num/elig.length; out.low_avg_visits=M(avg,ragLowBad(avg,5,3.0001),num,elig.length); }
+  else out.low_avg_visits=NA();
+
+  var pool=cs.filter(function(c){ if(c.reg_date===null||ageDays(c.reg_date)<28) return false; for(var q=0;q<c.followup_dates.length;q++){ if((c.followup_dates[q]-c.reg_date)/DAY_MS>=28) return true; } return false; });
+  if(pool.length>=20){ var deaths=0; for(i=0;i<pool.length;i++) if(pool[i].is_death) deaths++; var rate=100.0*deaths/pool.length; out.mortality=M(rate,ragLowBad(rate,5,3),deaths,pool.length); }
+  else out.mortality=NA();
+
+  var usable=0, ontime=0;
+  for(i=0;i<cs.length;i++){ var c=cs[i]; if(c.reg_date===null) continue;
+    if(c.birth_location==="hospitalhealth_facility"&&c.discharge_date!==null){ usable++; if(daysBetween(c.discharge_date,c.reg_date)<=3) ontime++; }
+    else if((c.birth_location==="home"||c.birth_location==="other")&&c.dob!==null){ usable++; if(daysBetween(c.dob,c.reg_date)<=7) ontime++; }
+  }
+  if(usable>=10){ var pe=100.0*ontime/usable; out.enroll_ontime=M(pe,ragLowBad(pe,50,30),ontime,usable); } else out.enroll_ontime=NA();
+
+  var cwf=cs.filter(function(c){ return c.n_followup>=1; });
+  var fuVisitTotal=0; for(i=0;i<cs.length;i++) fuVisitTotal+=cs[i].n_followup;
+
+  if(fuVisitTotal>=20&&cwf.length>0){ var zero=0; for(i=0;i<cwf.length;i++){ var anyd=false; for(j=0;j<cwf[i].followups.length;j++){ if(low(rget(cwf[i].followups[j],"danger_sign_positive"))==="yes"){ anyd=true; break; } } if(!anyd) zero++; } var pz=100.0*zero/cwf.length; out.zero_danger=M(pz,ragHighBad(pz,50,75),zero,cwf.length); }
+  else out.zero_danger=NA();
+
+  if(fuVisitTotal>=30&&cwf.length>0){ var anyds=0; for(i=0;i<cwf.length;i++){ var hit=false; for(j=0;j<cwf[i].followups.length;j++){ if(low(rget(cwf[i].followups[j],"danger_sign_positive"))==="yes"){ hit=true; break; } } if(hit) anyds++; } var pd=100.0*anyds/cwf.length; var rg; if(pd<=5||pd>=90) rg="RED"; else if(pd<=10||pd>=60) rg="YELLOW"; else rg="GREEN"; out.danger_rate_cases=M(pd,rg,anyds,cwf.length); }
+  else out.danger_rate_cases=NA();
+
+  var dsv=fus.filter(function(v){ return low(rget(v,"danger_sign_positive"))==="yes"; });
+  if(dsv.length>=5){ var noref=0; for(i=0;i<dsv.length;i++) if(low(rget(dsv[i],"child_referred"))!=="yes") noref++; var pn=100.0*noref/dsv.length; out.no_referral=M(pn,ragHighBad(pn,30,60),noref,dsv.length); }
+  else out.no_referral=NA();
+
+  var lossPairs=0,totalPairs=0,gkg=[];
+  for(i=0;i<cs.length;i++){ var ws=cs[i].weights; for(var p=1;p<ws.length;p++){ var w1=ws[p-1][1], w2=ws[p][1]; var days=daysBetween(ws[p-1][0],ws[p][0]); if(days<PAIR_MIN||days>PAIR_MAX) continue; totalPairs++; if(w2<w1*0.95) lossPairs++; if(w2>w1&&days>0) gkg.push((w2-w1)/days/(w1/1000.0)); } }
+  if(totalPairs>=10){ var pl=100.0*lossPairs/totalPairs; out.weight_loss=M(pl,ragHighBad(pl,5,15),lossPairs,totalPairs); } else out.weight_loss=NA();
+  if(gkg.length>=10){ var s=0; for(i=0;i<gkg.length;i++) s+=gkg[i]; var mean=s/gkg.length; out.weight_gain_gkgday=M(mean,ragHighBad(mean,25,40),null,gkg.length); } else out.weight_gain_gkgday=NA();
+
+  var fw=[]; for(i=0;i<fus.length;i++){ var wg=readWeightG(fus[i]); if(wg!==null&&wg>=WMIN&&wg<=WMAX) fw.push(wg); }
+  if(fw.length>=20){ var rr=0; for(i=0;i<fw.length;i++) if(rnd(fw[i])%100===0) rr++; var pr=100.0*rr/fw.length; out.rounded_weights=M(pr,ragHighBad(pr,20,60),rr,fw.length); } else out.rounded_weights=NA();
+  if(fw.length>=20){ var modal=modalCount(fw.map(function(w){return rnd(w);})); var pm=100.0*modal/fw.length; out.modal_weight=M(pm,ragHighBad(pm,20,35.0001),modal,fw.length); } else out.modal_weight=NA();
+
+  var c3=cs.filter(function(c){ return c.weights.length>=3; });
+  if(c3.length>=20){ var flat=0; for(i=0;i<c3.length;i++){ var wv=c3[i].weights.map(function(t){return t[1];}); var mx=Math.max.apply(null,wv), mn=Math.min.apply(null,wv); if((mx-mn)/wv[0]<=0.02) flat++; } var pfl=100.0*flat/c3.length; out.flat_weight=M(pfl,ragHighBad(pfl,2,5),flat,c3.length); } else out.flat_weight=NA();
+
+  var gcases=0, within=0;
+  for(i=0;i<cs.length;i++){ var pts=[]; for(j=0;j<cs[i].followups.length;j++){ var gp=parseGps(rget(cs[i].followups[j],"gps")); if(gp!==null&&(gp[2]===null||gp[2]<=100)) pts.push(gp); } if(pts.length>=2){ gcases++; var dists=[]; for(var a=0;a<pts.length;a++) for(var b=a+1;b<pts.length;b++) dists.push(haversineM(pts[a],pts[b])); if(median(dists)<200) within++; } }
+  if(gcases>=20){ var pg=100.0*within/gcases; out.gps_within_200m=M(pg,ragLowBad(pg,50,25),within,gcases); } else out.gps_within_200m=NA();
+
+  var hrs=[]; for(i=0;i<fus.length;i++){ var hv=pf(rget(fus[i],"heart_rate")); if(hv!==null) hrs.push(hv); }
+  if(hrs.length>=10){ var ht=modalCount(hrs); var ph=100.0*ht/hrs.length; out.hr_copycat=M(ph,ragHighBad(ph,20,74.9999),ht,hrs.length); } else out.hr_copycat=NA();
+  var temps=[]; for(i=0;i<fus.length;i++){ var tv=pf(rget(fus[i],"temperature")); if(tv!==null) temps.push(tv); }
+  if(temps.length>=10){ var tt=modalCount(temps); var pt=100.0*tt/temps.length; out.temp_copycat=M(pt,ragHighBad(pt,50,84.9999),tt,temps.length); } else out.temp_copycat=NA();
+
+  var sp=[]; for(i=0;i<fus.length;i++){ var sv=pf(rget(fus[i],"spo2_level")); if(sv!==null) sp.push(sv); }
+  if(sp.length>=20){ var bad=0; for(i=0;i<sp.length;i++) if(sp[i]<70||sp[i]>100) bad++; var ps=100.0*bad/sp.length; out.spo2_implausible=M(ps,ragHighBad(ps,3,5),bad,sp.length); } else out.spo2_implausible=NA();
+
+  if(fus.length>=20){ var miss=0,present=0; for(i=0;i<fus.length;i++){ var ei=rget(fus[i],"equipment_image"); if(ei===null||ei==="") miss++; else present++; } if(present===0){ out.image_missing=NA(); } else { var pimg=100.0*miss/fus.length; out.image_missing=M(pimg,ragHighBad(pimg,5,20),miss,fus.length); } } else out.image_missing=NA();
+
+  var e60=cs.filter(function(c){ return c.reg_date!==null&&ageDays(c.reg_date)>=60; });
+  if(e60.length>=10){ var early=0; for(i=0;i<e60.length;i++){ var cc=e60[i]; var reason=(cc.status_entered["flw_program_concluded"]||cc.status_entered["parents_discontinued"]||cc.loc_change_no); if(reason&&cc.n_followup<4&&!cc.is_death) early++; } var ped=100.0*early/e60.length; out.flw_early_discharge=M(ped,ragHighBad(ped,5,15),early,e60.length); } else out.flw_early_discharge=NA();
+
+  var regCases=cs.filter(function(c){ return c.reg_rows.length>0; });
+  if(regCases.length>=20){ var bd=0,presentW=0; for(i=0;i<regCases.length;i++){ var wrap=null; for(j=0;j<regCases[i].reg_rows.length;j++){ var wv=low(rget(regCases[i].reg_rows[j],"kmc_wrap_check")); if(wv!==null){ wrap=wv; break; } } if(wrap!==null) presentW++; if(wrap!=="yes") bd++; } if(presentW===0){ out.kmc_wrap_missing=NA(); } else { var pw=100.0*bd/regCases.length; out.kmc_wrap_missing=M(pw,ragHighBad(pw,15,40),bd,regCases.length); } } else out.kmc_wrap_missing=NA();
+
+  out._excluded=false; out._total_cases=totalCases;
+  return out;
 }
+
+// ============================= display metadata =============================
+var OPP_META = {523:{llo:"NAMA",name:"NAMA (V0/V1)"},524:{llo:"PIPN",name:"PIPN (V0/V1)"},675:{llo:"GHI",name:"GHI-UG (V0)"},874:{llo:"PIPN",name:"PIPN (V2)"},938:{llo:"NAMA",name:"NAMA (V2)"},1487:{llo:"PIPN",name:"PIPN (V3)"},1488:{llo:"NAMA",name:"NAMA (V3)"},1234:{llo:"GHI",name:"GHI-KE (V2)"},1739:{llo:"Kikapu",name:"Kikapu (V3)"},1236:{llo:"EHA",name:"EHA (V2+)"},1790:{llo:"BERI",name:"BERI (V3)"}};
+var P1_ORDER = ["low_avg_visits","mortality","enroll_ontime","zero_danger","no_referral","rounded_weights","gps_within_200m","hr_copycat","temp_copycat","spo2_implausible","flw_early_discharge"];
+var P2_ORDER = ["danger_rate_cases","weight_loss","weight_gain_gkgday","modal_weight","flat_weight","image_missing","kmc_wrap_missing"];
+var META = {
+  low_avg_visits:{label:"Visits/case",unit:"dec",bands:"G>=5  Y 3-5  R<=3",desc:"Avg follow-up visits per non-mortality case enrolled >=60 days ago. Min 10 cases."},
+  mortality:{label:"Mortality",unit:"pct",bands:"R<=3%  Y 3-5%  G>=5%",desc:"Deaths / cases reg>=28d w/ a visit after day 28. LOW = under-reporting concern. Min 20 cases."},
+  enroll_ontime:{label:"Enroll on-time",unit:"pct",bands:"G>=50  Y 30-49  R<30",desc:"% enrolled on time: hospital reg<=discharge+3d; home reg<=DOB+7d. Min 10 cases."},
+  zero_danger:{label:"Zero danger",unit:"pct",bands:"G<50  Y 50-75  R>75",desc:"% cases with NO danger sign ever recorded. Min 20 follow-up visits."},
+  no_referral:{label:"No referral",unit:"pct",bands:"G<30  Y 30-60  R>60",desc:"% danger-sign-positive visits with no referral. Min 5 DS+ visits."},
+  rounded_weights:{label:"Rounded wt",unit:"pct",bands:"G<20  Y 20-59  R>60",desc:"% follow-up weights that are exact 100g multiples. Min 20 weights."},
+  gps_within_200m:{label:"GPS <200m",unit:"pct",bands:"G>50  Y 25-50  R<25",desc:"% cases whose same-case follow-up GPS points are within a 200m median. Higher is better. Min 20 cases."},
+  hr_copycat:{label:"HR copycat",unit:"pct",bands:"G<20  Y 20-74  R>=75",desc:"% of heart-rate readings that are the single modal value. Min 10 readings."},
+  temp_copycat:{label:"Temp copycat",unit:"pct",bands:"G<50  Y 50-84  R>=85",desc:"% of temperature readings that are the single modal value. Min 10 readings."},
+  spo2_implausible:{label:"SpO2 impl.",unit:"pct",bands:"G<3  Y 3-5  R>5",desc:"% SpO2 readings outside 70-100. Min 20 readings."},
+  flw_early_discharge:{label:"Early discharge",unit:"pct",bands:"G<5  Y 5-15  R>15",desc:"% cases reg>=60d early-discharged for FLW reasons with <4 visits. Min 10 cases."},
+  danger_rate_cases:{label:"Danger rate",unit:"pct",bands:"G 10-60  R 0-5 or 90-100",desc:"% cases with any danger sign. Two-sided: implausibly low OR high. Min 30 follow-up visits."},
+  weight_loss:{label:"Weight loss",unit:"pct",bands:"G<5  Y 5-15  R>15",desc:"% consecutive weight pairs with a >5% drop. Min 10 pairs."},
+  weight_gain_gkgday:{label:"Weight gain",unit:"gkg",bands:"G<25  Y 25-40  R>40",desc:"Avg daily weight gain (g/kg/day) over increasing pairs. Min 10 pairs."},
+  modal_weight:{label:"Modal wt",unit:"pct",bands:"G<20  Y 20-35  R>35",desc:"% of weights that are the single most-frequent value (across cases). Min 20 weights."},
+  flat_weight:{label:"Flat wt",unit:"pct",bands:"G<2  Y 2-5  R>5",desc:"% cases (>=3 weights) whose weight range is <=2% of the first weight. Min 20 cases."},
+  image_missing:{label:"Equip image",unit:"pct",bands:"G<5  Y 5-20  R>20",desc:"% follow-up visits with no equipment image captured. Min 20 visits."},
+  kmc_wrap_missing:{label:"KMC wrap",unit:"pct",bands:"G<15  Y 15-40  R>40",desc:"% cases where the KMC wrap was not provided at registration. Min 20 cases."}
+};
+
+function fmtVal(v, unit){ if(v===null||v===undefined) return null; if(unit==="pct") return v.toFixed(1)+"%"; if(unit==="dec") return v.toFixed(1); if(unit==="gkg") return v.toFixed(1); return String(v); }
+function fmtSub(m){ if(m.den===null||m.den===undefined) return null; if(m.num===null||m.num===undefined) return "n="+m.den; return m.num+" / "+m.den; }
+
 function lloFor(oppId){ var m=OPP_META[oppId]; return m?m.llo:("opp_"+oppId); }
-function buildMasterRows(flwRows, visitRows, nameByUser) {
+function buildMasterRows(flwRows, visitRows, nameByUser, asOf){
   nameByUser=nameByUser||{};
   var visitsByOppUser={}, i, r, k;
-  for (i=0;i<visitRows.length;i++){ r=visitRows[i]; k=r.opportunity_id+"|"+r.username; (visitsByOppUser[k]=visitsByOppUser[k]||[]).push(r); }
+  for(i=0;i<visitRows.length;i++){ r=visitRows[i]; k=r.opportunity_id+"|"+r.username; (visitsByOppUser[k]=visitsByOppUser[k]||[]).push(r); }
   var buckets={};
   var sorted=flwRows.slice().sort(function(a,b){return (a.opportunity_id||0)-(b.opportunity_id||0);});
-  for (i=0;i<sorted.length;i++){ r=sorted[i]; var uname=r.username; if(!uname)continue; var llo=lloFor(r.opportunity_id); var bkey=llo+"|"+uname;
-    var b=buckets[bkey]; if(!b){ b=buckets[bkey]={username:uname,llo:llo,flw_name:null,agg_total_cases:0,agg_kmc_visit_count:0,agg_danger_visit_count:0,agg_danger_positive_count:0,visit_rows:[],opportunity_ids:[],opportunity_breakdown:[]}; }
-    if (!b.flw_name) b.flw_name=nameByUser[uname]||r.flw_name||null;
-    var oc=parseInt(r.total_cases,10)||0, ov=parseInt(r.kmc_visit_count,10)||0, odv=parseInt(r.danger_visit_count,10)||0, odp=parseInt(r.danger_positive_count,10)||0;
-    b.agg_total_cases+=oc; b.agg_kmc_visit_count+=ov; b.agg_danger_visit_count+=odv; b.agg_danger_positive_count+=odp;
-    var vs=visitsByOppUser[r.opportunity_id+"|"+uname]||[]; for (var j=0;j<vs.length;j++) b.visit_rows.push(vs[j]);
+  for(i=0;i<sorted.length;i++){ r=sorted[i]; var uname=r.username; if(!uname) continue; var llo=lloFor(r.opportunity_id); var bkey=llo+"|"+uname;
+    var b=buckets[bkey]; if(!b){ b=buckets[bkey]={username:uname,llo:llo,flw_name:null,agg_total_cases:0,visit_rows:[],opportunity_ids:[],opportunity_breakdown:[]}; }
+    if(!b.flw_name) b.flw_name=nameByUser[uname]||r.flw_name||null;
+    var oc=parseInt(r.total_cases,10)||0, ov=parseInt(r.kmc_visit_count,10)||0;
+    b.agg_total_cases+=oc;
+    var vs=visitsByOppUser[r.opportunity_id+"|"+uname]||[]; for(var j=0;j<vs.length;j++) b.visit_rows.push(vs[j]);
     b.opportunity_ids.push(r.opportunity_id);
     b.opportunity_breakdown.push({opportunity_id:r.opportunity_id,name:(OPP_META[r.opportunity_id]||{}).name||("Opp "+r.opportunity_id),total_cases:oc,kmc_visit_count:ov});
   }
   var out=[];
   Object.keys(buckets).forEach(function(bk){ var b=buckets[bk];
-    var aggDict={username:b.username,flw_name:b.flw_name,total_cases:b.agg_total_cases,kmc_visit_count:b.agg_kmc_visit_count,danger_visit_count:b.agg_danger_visit_count,danger_positive_count:b.agg_danger_positive_count};
-    var res=deriveFlags(aggDict,b.visit_rows);
-    res.flw_name=b.flw_name||b.username; res.llo=b.llo; res.opportunity_ids=b.opportunity_ids.slice(); res.opportunity_breakdown=b.opportunity_breakdown.slice();
-    res.primary_opp=b.opportunity_ids.length?Math.max.apply(null,b.opportunity_ids):null; res._visit_rows=b.visit_rows;
-    res.priority_flag_count=PRIORITY_FLAGS.filter(function(f){return res.flags[f]===true;}).length;
-    res.flag_count=ALL_FLAGS.filter(function(f){return res.flags[f]===true;}).length;
+    var aggDict={username:b.username,total_cases:b.agg_total_cases};
+    var res=deriveMetrics(aggDict,b.visit_rows,asOf);
+    res.username=b.username; res.flw_name=b.flw_name||b.username; res.llo=b.llo;
+    res.opportunity_ids=b.opportunity_ids.slice(); res.opportunity_breakdown=b.opportunity_breakdown.slice();
+    res.primary_opp=b.opportunity_ids.length?Math.max.apply(null,b.opportunity_ids):null;
+    res._visit_rows=b.visit_rows; res.total_cases=b.agg_total_cases;
+    res.total_visits=b.visit_rows.filter(function(v){return v.visit_number!=null&&v.visit_number!=="";}).length;
+    var red=0,yellow=0,p1red=0;
+    for(var mi=0;mi<METRIC_KEYS.length;mi++){ var mk=METRIC_KEYS[mi]; var bnd=res[mk].rag; if(bnd==="RED"){ red++; if(PRIORITY[mk]===1) p1red++; } else if(bnd==="YELLOW") yellow++; }
+    res.red_count=red; res.yellow_count=yellow; res.p1_red_count=p1red;
     out.push(res);
   });
   return out;
 }
-function fmtVal(val, type){ if (val===null||val===undefined) return null; if (type==="pct") return (val*100).toFixed(1)+"%"; if (type==="dec") return val.toFixed(1); if (type==="gain") return val.toFixed(1)+" g/d"; return String(val); }
 
-// ====================== UI ======================
+// ============================= UI =============================
 function WorkflowUI({ definition, instance, workers, pipelines, links, actions, onUpdateState }) {
   var h = React.createElement;
   var flwRows = (pipelines && pipelines.flw_flags && pipelines.flw_flags.rows) || [];
   var visitRows = (pipelines && pipelines.weight_series && pipelines.weight_series.rows) || [];
-
+  var asOf = React.useMemo(function(){ return Date.now(); }, []);
   var nameByUser = React.useMemo(function(){ var m={}; (workers||[]).forEach(function(w){ if (w && w.username && w.name) m[w.username]=w.name; }); return m; }, [workers]);
-  var masterRows = React.useMemo(function(){ return buildMasterRows(flwRows, visitRows, nameByUser); }, [flwRows, visitRows, nameByUser]);
+  var masterRows = React.useMemo(function(){ return buildMasterRows(flwRows, visitRows, nameByUser, asOf); }, [flwRows, visitRows, nameByUser, asOf]);
 
-  var _filter = React.useState("all"); var filter=_filter[0], setFilter=_filter[1];
+  var _filter = React.useState("any_red"); var filter=_filter[0], setFilter=_filter[1];
   var _llo = React.useState("all"); var lloFilter=_llo[0], setLloFilter=_llo[1];
   var _search = React.useState(""); var search=_search[0], setSearch=_search[1];
-  var _sortKey = React.useState("priority"); var sortKey=_sortKey[0], setSortKey=_sortKey[1];
+  var _sortKey = React.useState("red"); var sortKey=_sortKey[0], setSortKey=_sortKey[1];
   var _sortAsc = React.useState(false); var sortAsc=_sortAsc[0], setSortAsc=_sortAsc[1];
-  var _showSec = React.useState(false); var showSecondary=_showSec[0], setShowSecondary=_showSec[1];
+  var _showP2 = React.useState(false); var showP2=_showP2[0], setShowP2=_showP2[1];
   var _expanded = React.useState(null); var expanded=_expanded[0], setExpanded=_expanded[1];
   var _sel = React.useState({}); var selected=_sel[0], setSelected=_sel[1];
   var _modal = React.useState(false); var showModal=_modal[0], setShowModal=_modal[1];
@@ -403,26 +494,25 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
   React.useEffect(function(){ if (!startDate){ var now=new Date(); var fmt=function(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}; var start=new Date(now); start.setDate(now.getDate()-14); setStartDate(fmt(start)); setEndDate(fmt(now)); } }, []);
 
   var kpi = React.useMemo(function(){
-    var loaded=masterRows.length, excluded=0, priority=0, anyf=0, totalVisits=0, totalCases=0;
-    masterRows.forEach(function(r){ if (r.excluded) excluded++; if (r.priority_flag_count>=1) priority++; if (r.flag_count>=1) anyf++; totalVisits+=r.total_visits||0; totalCases+=r.total_cases||0; });
-    return { loaded:loaded, excluded:excluded, priority:priority, anyf:anyf, totalVisits:totalVisits, totalCases:totalCases };
+    var loaded=masterRows.length, excluded=0, anyRed=0, anyYellow=0, totalVisits=0, totalCases=0;
+    masterRows.forEach(function(r){ if (r._excluded) excluded++; if (r.red_count>=1) anyRed++; if (r.yellow_count>=1) anyYellow++; totalVisits+=r.total_visits||0; totalCases+=r.total_cases||0; });
+    return { loaded:loaded, excluded:excluded, anyRed:anyRed, anyYellow:anyYellow, totalVisits:totalVisits, totalCases:totalCases };
   }, [masterRows]);
 
-  var analyzed = masterRows.filter(function(r){ return !r.excluded; });
+  var analyzed = masterRows.filter(function(r){ return !r._excluded; });
   var filtered = React.useMemo(function(){
     var data = analyzed.slice();
     if (lloFilter!=="all") data=data.filter(function(d){return d.llo===lloFilter;});
     if (search.trim()){ var q=search.toLowerCase(); data=data.filter(function(d){ return (d.username&&d.username.toLowerCase().indexOf(q)>=0)||(d.flw_name&&d.flw_name.toLowerCase().indexOf(q)>=0); }); }
-    if (filter==="priority") data=data.filter(function(d){return d.priority_flag_count>=1;});
-    else if (filter==="any") data=data.filter(function(d){return d.flag_count>=1;});
-    else if (filter==="two_plus") data=data.filter(function(d){return d.flag_count>=2;});
+    if (filter==="any_red") data=data.filter(function(d){return d.red_count>=1;});
+    else if (filter==="two_red") data=data.filter(function(d){return d.red_count>=2;});
+    else if (filter==="any_yellow") data=data.filter(function(d){return d.yellow_count>=1;});
     data.sort(function(a,b){
       var va, vb;
       if (sortKey==="name"){ va=a.flw_name||a.username||""; vb=b.flw_name||b.username||""; var c=va.localeCompare(vb); return sortAsc?c:-c; }
       if (sortKey==="cases"){ va=a.total_cases; vb=b.total_cases; }
-      else if (sortKey==="priority"){ va=a.priority_flag_count; vb=b.priority_flag_count; }
-      else if (sortKey==="flags"){ va=a.flag_count; vb=b.flag_count; }
-      else { var mk=FLAG_METRIC_KEY[sortKey]; va=(a[mk]==null?-1:a[mk]); vb=(b[mk]==null?-1:b[mk]); }
+      else if (sortKey==="red"){ va=a.red_count*100+a.yellow_count; vb=b.red_count*100+b.yellow_count; }
+      else { var m=META[sortKey]; var ma=a[sortKey], mb=b[sortKey]; va=(ma&&ma.value!=null?ma.value:-1); vb=(mb&&mb.value!=null?mb.value:-1); }
       return sortAsc?va-vb:vb-va;
     });
     return data;
@@ -436,28 +526,34 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
   function SortArrow(kk){ if (sortKey!==kk) return null; return h("span",{className:"ml-1 text-xs"}, sortAsc?"▲":"▼"); }
   var thBase="px-2 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none whitespace-nowrap";
 
-  function metricCell(d, flag){
-    var val=d[FLAG_METRIC_KEY[flag]]; var state=d.flags[flag]; var formatted=fmtVal(val, FLAG_FMT[flag]);
-    var flagged=state===true; var amber=(flag==="flag_danger_zero"||flag==="flag_ds_no_referral")&&flagged;
-    var cls="px-2 py-2 text-sm text-center whitespace-nowrap "+(flagged?(amber?"bg-amber-50 text-amber-800 font-semibold":"bg-red-50 text-red-800 font-semibold"):"");
-    if (state===null || formatted===null) return h("td",{className:cls,key:flag,title:"Not eligible — insufficient data"}, h("span",{className:"text-gray-400 italic"},"NE"));
-    if (flagged) return h("td",{className:cls,key:flag,title:FLAG_LABELS[flag]+" "+FLAG_THRESHOLD_DISPLAY[flag]}, formatted);
-    return h("td",{className:cls,key:flag}, formatted, h("span",{className:"ml-1 text-green-500 text-xs"},"✓"));
+  function bandColor(band){ return band==="RED"?"bg-red-50 text-red-800 font-semibold":band==="YELLOW"?"bg-amber-50 text-amber-800 font-medium":band==="GREEN"?"bg-green-50 text-green-700":"text-gray-400"; }
+  function metricCell(d, key){
+    var m=d[key], meta=META[key]; var band=m.rag; var val=fmtVal(m.value, meta.unit); var sub=fmtSub(m);
+    var cls="px-2 py-2 text-center whitespace-nowrap ";
+    if (band==="N/A" || val===null) return h("td",{className:cls+"text-gray-400",key:key,title:meta.label+" — not eligible (insufficient data)"}, h("span",{className:"italic text-xs"},"NE"));
+    return h("td",{className:cls+bandColor(band),key:key,title:meta.label+"  ["+meta.bands+"]  "+meta.desc},
+      h("div",{className:"text-sm"}, val),
+      sub?h("div",{className:"text-xs text-gray-400 mt-0.5"}, sub):null);
+  }
+
+  function bandChip(d, key){
+    var m=d[key], meta=META[key]; var band=m.rag; var val=fmtVal(m.value, meta.unit); var sub=fmtSub(m);
+    var col=band==="RED"?"bg-red-100 text-red-800 border-red-200":band==="YELLOW"?"bg-amber-100 text-amber-800 border-amber-200":band==="GREEN"?"bg-green-50 text-green-700 border-green-200":"bg-gray-50 text-gray-400 border-gray-200";
+    return h("div",{key:key, className:"rounded border px-2 py-1 "+col, title:meta.desc},
+      h("div",{className:"text-xs font-medium"}, meta.label),
+      h("div",{className:"text-sm"}, val===null?"NE":val),
+      h("div",{className:"text-xs opacity-70"}, sub||meta.bands));
   }
 
   function detailPanel(d){
-    var metrics=[["Total cases",d.total_cases],["Closed",d.closed_cases],["Deaths",d.deaths],["Non-mort closed",d.non_mort_closed],["Avg visits/case",fmtVal(d.avg_visits,"dec")],["Mortality",fmtVal(d.mort_rate,"pct")],["Danger rate",fmtVal(d.danger_rate,"pct")],["Late enroll",fmtVal(d.pct_late_enroll,"pct")],["Weight pairs",d.weight_pairs],["Wt loss",fmtVal(d.pct_wt_loss,"pct")],["Daily gain",fmtVal(d.mean_daily_gain,"gain")],["Wt zero",fmtVal(d.pct_wt_zero,"pct")]];
     var visits=(d._visit_rows||[]).slice().sort(function(a,b){var x=parseDate(rget(a,"visit_date"))||0, y=parseDate(rget(b,"visit_date"))||0; return y-x;}).slice(0,20);
     return h("div",{className:"space-y-4"},
       h("div",null,
         h("div",{className:"text-sm font-semibold text-gray-700 mb-2"}, "Opportunity breakdown"),
         h("div",{className:"flex flex-wrap gap-2"}, d.opportunity_breakdown.map(function(b){ return h("span",{key:b.opportunity_id, className:"text-xs bg-white border border-gray-200 rounded px-2 py-1"}, b.name+" — "+b.total_cases+" cases / "+b.kmc_visit_count+" visits"); }))),
       h("div",null,
-        h("div",{className:"text-sm font-semibold text-gray-700 mb-2"}, "Metrics"),
-        h("div",{className:"grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2"}, metrics.map(function(m){ return h("div",{key:m[0], className:"bg-white rounded border border-gray-200 p-2"}, h("div",{className:"text-xs text-gray-500"}, m[0]), h("div",{className:"text-sm font-medium text-gray-900"}, m[1]===null?"NE":m[1])); }))),
-      h("div",null,
-        h("div",{className:"text-sm font-semibold text-gray-700 mb-2"}, "All 16 flags"),
-        h("div",{className:"flex flex-wrap gap-1"}, ALL_FLAGS.map(function(f){ var s=d.flags[f]; var cls=s===true?"bg-red-100 text-red-700":s===false?"bg-green-50 text-green-700":"bg-gray-100 text-gray-400"; return h("span",{key:f, className:"text-xs rounded px-2 py-0.5 "+cls, title:FLAG_DESCRIPTIONS[f]}, FLAG_LABELS[f]+(s===true?" ⚑":s===false?" ✓":" —")); }))),
+        h("div",{className:"text-sm font-semibold text-gray-700 mb-2"}, "All 18 register metrics (value · band · n/d)"),
+        h("div",{className:"grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2"}, METRIC_KEYS.map(function(kk){ return bandChip(d, kk); }))),
       h("div",null,
         h("div",{className:"text-sm font-semibold text-gray-700 mb-2"}, "Recent visits ("+(d._visit_rows||[]).length+" total)"),
         h("div",{className:"overflow-x-auto"},
@@ -497,57 +593,53 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
   if (flwRows.length===0){
     return h("div",{className:"space-y-6"},
       h("div",{className:"bg-white rounded-lg shadow-sm p-6"}, h("h1",{className:"text-2xl font-bold text-gray-900"}, definition.name), h("p",{className:"text-gray-600 mt-1"}, definition.description)),
-      h("div",{className:"bg-gray-50 border border-gray-200 rounded-lg p-8 text-center text-gray-500"}, "No pipeline data yet — run the pipeline to load FLW flag metrics."));
+      h("div",{className:"bg-gray-50 border border-gray-200 rounded-lg p-8 text-center text-gray-500"}, "No pipeline data yet — run the pipeline to load FLW audit metrics."));
   }
 
-  // ---- header ----
   var headerEl = h("div",{className:"bg-white rounded-lg shadow-sm p-5"},
     h("h1",{className:"text-2xl font-bold text-gray-900"}, h("i",{className:"fa-solid fa-flag text-red-500 mr-2"}), definition.name),
-    h("p",{className:"text-gray-600 mt-1"}, "16-flag KMC audit across merged V1+V2 opportunities. Live data."));
+    h("p",{className:"text-gray-600 mt-1"}, "18 register FLW-audit metrics across merged V1+V2 opportunities, banded green / yellow / red. Live data."));
 
-  // ---- KPIs ----
-  var kpiDefs=[["FLWs Loaded", kpi.loaded, "blue"],["Priority Flags", kpi.priority, "red"],["Any Flags", kpi.anyf, "orange"],["Excluded (<20)", kpi.excluded, "gray"],["KMC Visits", kpi.totalVisits.toLocaleString(), "green"],["Total Cases", kpi.totalCases.toLocaleString(), "teal"]];
+  var kpiDefs=[["FLWs Loaded", kpi.loaded, "blue"],["≥1 Red", kpi.anyRed, "red"],["≥1 Yellow", kpi.anyYellow, "amber"],["Excluded (<20)", kpi.excluded, "gray"],["KMC Visits", kpi.totalVisits.toLocaleString(), "green"],["Total Cases", kpi.totalCases.toLocaleString(), "teal"]];
   var kpiEl = h("div",{className:"grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3"}, kpiDefs.map(function(c){
     return h("div",{key:c[0], className:"bg-white rounded-lg shadow-sm p-4 border-l-4 border-"+c[2]+"-500"}, h("div",{className:"text-2xl font-bold text-gray-900"}, c[1]), h("div",{className:"text-xs text-gray-600 mt-1"}, c[0]));
   }));
 
-  // ---- filter bar ----
   var filterEl = h("div",{className:"bg-white rounded-lg shadow-sm p-3 flex flex-wrap items-center gap-3"},
-    h("div",{className:"flex gap-2"}, [["all","All"],["priority","Priority"],["any","Any Flag"],["two_plus","2+ Flags"]].map(function(f){
+    h("div",{className:"flex gap-2"}, [["all","All"],["any_red","Any Red"],["two_red","2+ Red"],["any_yellow","Any Yellow"]].map(function(f){
       return h("button",{key:f[0], onClick:function(){setFilter(f[0]);}, className:"px-3 py-1.5 text-sm rounded-full border "+(filter===f[0]?"bg-blue-600 text-white border-blue-600":"bg-white text-gray-700 border-gray-300 hover:border-blue-400")}, f[1]);
     })),
     h("select",{value:lloFilter, onChange:function(e){setLloFilter(e.target.value);}, className:"border border-gray-300 rounded-lg px-2 py-1.5 text-sm"},
-      h("option",{value:"all"},"All LLOs"), h("option",{value:"PIPN"},"PIPN"), h("option",{value:"NAMA"},"NAMA"), h("option",{value:"GHI"},"GHI")),
+      h("option",{value:"all"},"All LLOs"), h("option",{value:"PIPN"},"PIPN"), h("option",{value:"NAMA"},"NAMA"), h("option",{value:"GHI"},"GHI"), h("option",{value:"Kikapu"},"Kikapu"), h("option",{value:"EHA"},"EHA"), h("option",{value:"BERI"},"BERI")),
     h("input",{type:"text", placeholder:"Search FLW...", value:search, onChange:function(e){setSearch(e.target.value);}, className:"flex-1 min-w-40 border border-gray-300 rounded-lg px-3 py-1.5 text-sm"}),
-    h("label",{className:"flex items-center gap-2 text-sm text-gray-700"}, h("input",{type:"checkbox", checked:showSecondary, onChange:function(e){setShowSecondary(e.target.checked);}}), "Show secondary flags"));
+    h("label",{className:"flex items-center gap-2 text-sm text-gray-700"}, h("input",{type:"checkbox", checked:showP2, onChange:function(e){setShowP2(e.target.checked);}}), "Show Priority-2 metrics"));
 
-  // ---- table ----
+  var cols = P1_ORDER.concat(showP2?P2_ORDER:[]);
   var headerCells=[ h("th",{key:"_chk", className:"px-2 py-3 w-8"}),
     h("th",{key:"_name", className:thBase+" text-left", onClick:function(){toggleSort("name");}}, "FLW", SortArrow("name")),
     h("th",{key:"_llo", className:thBase+" text-left"}, "LLO"),
     h("th",{key:"_cases", className:thBase+" text-center", onClick:function(){toggleSort("cases");}}, "Cases", SortArrow("cases")) ];
-  PRIORITY_FLAGS.forEach(function(f){ headerCells.push(h("th",{key:f, className:thBase+" text-center", onClick:function(){toggleSort(f);}, title:FLAG_DESCRIPTIONS[f]}, FLAG_LABELS[f], SortArrow(f))); });
-  if (showSecondary) SECONDARY_FLAGS.forEach(function(f){ headerCells.push(h("th",{key:f, className:thBase+" text-center bg-gray-100", onClick:function(){toggleSort(f);}, title:FLAG_DESCRIPTIONS[f]}, FLAG_LABELS[f], SortArrow(f))); });
-  headerCells.push(h("th",{key:"_flags", className:thBase+" text-center", onClick:function(){toggleSort("flags");}}, "Flags", SortArrow("flags")));
+  cols.forEach(function(f){ headerCells.push(h("th",{key:f, className:thBase+" text-center"+(PRIORITY[f]===2?" bg-gray-100":""), onClick:function(){toggleSort(f);}, title:META[f].label+" ["+META[f].bands+"]"}, META[f].label, SortArrow(f))); });
+  headerCells.push(h("th",{key:"_red", className:thBase+" text-center", onClick:function(){toggleSort("red");}}, "R/Y", SortArrow("red")));
 
   var bodyRows=[];
   filtered.forEach(function(d){
     var kk=rowKey(d);
-    var border=d.priority_flag_count>=2?"border-l-4 border-red-500":d.priority_flag_count===1?"border-l-4 border-orange-400":"";
+    var border=d.red_count>=2?"border-l-4 border-red-500":d.red_count===1?"border-l-4 border-orange-400":d.yellow_count>=1?"border-l-4 border-amber-300":"";
     var cells=[ h("td",{key:"_chk", className:"px-2 py-2 text-center"}, h("input",{type:"checkbox", checked:!!selected[kk], onChange:function(){toggleSelect(d);}, disabled:isRunning})),
       h("td",{key:"_name", className:"px-2 py-2 text-sm cursor-pointer", onClick:function(){setExpanded(expanded===kk?null:kk);}},
         h("div",{className:"font-medium text-gray-900 flex items-center gap-1"}, h("i",{className:"fa-solid "+(expanded===kk?"fa-caret-down":"fa-caret-right")+" text-gray-400"}), d.flw_name),
         (d.flw_name!==d.username)?h("div",{className:"text-xs text-gray-400 font-mono"}, d.username):null),
       h("td",{key:"_llo", className:"px-2 py-2 text-sm"}, h("span",{className:"px-2 py-0.5 rounded text-xs bg-indigo-50 text-indigo-700"}, d.llo)),
       h("td",{key:"_cases", className:"px-2 py-2 text-sm text-center", title:d.opportunity_breakdown.map(function(b){return b.name+": "+b.total_cases+" cases";}).join(" | ")}, d.total_cases) ];
-    PRIORITY_FLAGS.forEach(function(f){ cells.push(metricCell(d,f)); });
-    if (showSecondary) SECONDARY_FLAGS.forEach(function(f){ cells.push(metricCell(d,f)); });
-    cells.push(h("td",{key:"_flags", className:"px-2 py-2 text-center"},
-      d.flag_count>0 ? h("span",{className:"inline-flex items-center justify-center w-7 h-7 rounded-full text-white text-xs font-bold "+(d.priority_flag_count>=2?"bg-red-500":d.priority_flag_count===1?"bg-orange-400":"bg-gray-400"), title:ALL_FLAGS.filter(function(x){return d.flags[x]===true;}).map(function(x){return FLAG_LABELS[x];}).join(", ")}, d.flag_count)
-        : h("span",{className:"inline-flex items-center justify-center w-7 h-7 rounded-full bg-green-100 text-green-600 text-xs"}, "✓")));
+    cols.forEach(function(f){ cells.push(metricCell(d,f)); });
+    cells.push(h("td",{key:"_red", className:"px-2 py-2 text-center"},
+      h("span",{className:"inline-flex items-center gap-1 justify-center"},
+        h("span",{className:"inline-flex items-center justify-center w-6 h-6 rounded-full text-white text-xs font-bold "+(d.red_count>=2?"bg-red-500":d.red_count===1?"bg-orange-400":"bg-gray-300"), title:d.red_count+" red"}, d.red_count),
+        d.yellow_count>0?h("span",{className:"inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold", title:d.yellow_count+" yellow"}, d.yellow_count):null)));
     bodyRows.push(h("tr",{key:kk, className:(selected[kk]?"bg-blue-50 ":"hover:bg-gray-50 ")+border}, cells));
     if (expanded===kk){
-      var colSpan=4+PRIORITY_FLAGS.length+(showSecondary?SECONDARY_FLAGS.length:0)+1;
+      var colSpan=4+cols.length+1;
       bodyRows.push(h("tr",{key:kk+"_d", className:"bg-gray-50"}, h("td",{colSpan:colSpan, className:"px-6 py-4"}, detailPanel(d))));
     }
   });
@@ -556,9 +648,8 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
     h("table",{className:"min-w-full divide-y divide-gray-200"},
       h("thead",{className:"bg-gray-50"}, h("tr",null, headerCells)),
       h("tbody",{className:"bg-white divide-y divide-gray-200"}, bodyRows)),
-    h("div",{className:"px-4 py-2 text-xs text-gray-500"}, filtered.length+" FLW"+(filtered.length!==1?"s":"")+" shown"));
+    h("div",{className:"px-4 py-2 text-xs text-gray-500"}, filtered.length+" FLW"+(filtered.length!==1?"s":"")+" shown · bands per KMC Audit & Metrics Flag Register"));
 
-  // ---- sticky action bar ----
   var progressEl = progress ? h("span",{className:"text-sm "+(progress.status==="failed"?"text-red-600":progress.status==="completed"?"text-green-600":"text-blue-600")},
     progress.status==="completed"?("✓ "+progress.message):progress.status==="failed"?("⚠ "+(progress.error||"Failed")):h("span",null, h("i",{className:"fa-solid fa-spinner fa-spin mr-1"}), progress.message)) : null;
   var actionBar = h("div",{className:"sticky bottom-0 bg-white border-t border-gray-200 shadow-lg p-3 -mx-4 sm:-mx-6 lg:-mx-8"},
@@ -567,7 +658,6 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
       h("button",{onClick:function(){setShowModal(true);}, disabled:selectedCount===0||isRunning, className:"px-5 py-2.5 rounded-lg text-sm font-medium "+((selectedCount===0||isRunning)?"bg-gray-300 text-gray-500 cursor-not-allowed":"bg-red-600 text-white hover:bg-red-700")},
         isRunning?h("span",null,h("i",{className:"fa-solid fa-spinner fa-spin mr-2"}),"Creating..."):h("span",null,h("i",{className:"fa-solid fa-plus mr-2"}),"Create Audits ("+selectedCount+")"))));
 
-  // ---- modal ----
   var modal = showModal ? h("div",{className:"fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50", onClick:function(e){ if (e.target===e.currentTarget) setShowModal(false); }},
     h("div",{className:"bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden"},
       h("div",{className:"px-6 py-4 bg-gray-50 border-b border-gray-200"}, h("h3",{className:"text-lg font-semibold text-gray-900"}, "Configure Audit"), h("p",{className:"text-sm text-gray-500 mt-1"}, "Creating audits for "+selectedCount+" selected FLW"+(selectedCount!==1?"s":"")+" (routed per opportunity)")),
@@ -590,8 +680,8 @@ TEMPLATE = {
     "key": "kmc_audit_dashboard",
     "name": "KMC Audit Dashboard",
     "description": (
-        "16-flag KMC FLW audit across merged V1+V2 opportunities. "
-        "Priority/secondary flag tiers, drilldown, one-click audit creation."
+        "18-metric register-faithful KMC FLW audit across merged V1+V2 opportunities. "
+        "3-tier RAG bands, drilldown, one-click audit creation."
     ),
     "icon": "fa-flag",
     "color": "red",
