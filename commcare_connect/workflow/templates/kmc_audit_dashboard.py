@@ -408,6 +408,8 @@ function deriveMetrics(aggRow, visitRows, asOf){
 // ============================= display metadata =============================
 var OPP_META = {523:{llo:"NAMA",ver:"V1",name:"NAMA (V0/V1)"},524:{llo:"PIPN",ver:"V1",name:"PIPN (V0/V1)"},675:{llo:"GHI",ver:"V1",name:"GHI-UG (V0)"},874:{llo:"PIPN",ver:"V2",name:"PIPN (V2)"},938:{llo:"NAMA",ver:"V2",name:"NAMA (V2)"},1487:{llo:"PIPN",ver:"V3",name:"PIPN (V3)"},1488:{llo:"NAMA",ver:"V3",name:"NAMA (V3)"},1234:{llo:"GHI",ver:"V2",name:"GHI-KE (V2)"},1739:{llo:"Kikapu",ver:"V3",name:"Kikapu (V3)"},1236:{llo:"EHA",ver:"V2",name:"EHA (V2+)"},1790:{llo:"BERI",ver:"V3",name:"BERI (V3)"}};
 function verFor(oppId){ var m=OPP_META[oppId]; return m?m.ver:"?"; }
+var COUNTRY = {523:"Uganda",524:"Uganda",675:"Uganda",874:"Uganda",938:"Uganda",1487:"Uganda",1488:"Uganda",1234:"Kenya",1739:"Kenya",1236:"Nigeria",1790:"Nigeria"};
+function countryFor(oppId){ return COUNTRY[oppId]||"Other"; }
 var P1_ORDER = ["low_avg_visits","mortality","enroll_ontime","zero_danger","no_referral","rounded_weights","gps_within_200m","hr_copycat","temp_copycat","spo2_implausible","flw_early_discharge"];
 var P2_ORDER = ["danger_rate_cases","weight_loss","weight_gain_gkgday","modal_weight","flat_weight","image_missing","kmc_wrap_missing"];
 var META = {
@@ -458,6 +460,7 @@ function buildMasterRows(flwRows, visitRows, nameByUser, asOf){
     res.opportunity_ids=b.opportunity_ids.slice(); res.opportunity_breakdown=b.opportunity_breakdown.slice();
     res.versions=[]; for(var vi=0;vi<b.opportunity_ids.length;vi++){ var vv=verFor(b.opportunity_ids[vi]); if(res.versions.indexOf(vv)<0) res.versions.push(vv); }
     res.primary_opp=b.opportunity_ids.length?Math.max.apply(null,b.opportunity_ids):null;
+    res.country=countryFor(res.primary_opp);
     res._visit_rows=b.visit_rows; res.total_cases=b.agg_total_cases;
     res.total_visits=b.visit_rows.filter(function(v){return v.visit_number!=null&&v.visit_number!=="";}).length;
     var red=0,yellow=0,p1red=0;
@@ -476,6 +479,10 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
   var asOf = React.useMemo(function(){ return Date.now(); }, []);
   var nameByUser = React.useMemo(function(){ var m={}; (workers||[]).forEach(function(w){ if (w && w.username && w.name) m[w.username]=w.name; }); return m; }, [workers]);
   var masterRows = React.useMemo(function(){ return buildMasterRows(flwRows, visitRows, nameByUser, asOf); }, [flwRows, visitRows, nameByUser, asOf]);
+
+  var _tab = React.useState("overview"); var activeTab=_tab[0], setActiveTab=_tab[1];
+  var byLloRef = React.useRef(null), byLloInst = React.useRef(null);
+  var topFlagRef = React.useRef(null), topFlagInst = React.useRef(null);
 
   var _filter = React.useState("any_red"); var filter=_filter[0], setFilter=_filter[1];
   var _llo = React.useState("all"); var lloFilter=_llo[0], setLloFilter=_llo[1];
@@ -501,6 +508,46 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
     masterRows.forEach(function(r){ if (r._excluded) excluded++; if (r.red_count>=1) anyRed++; if (r.yellow_count>=1) anyYellow++; totalVisits+=r.total_visits||0; totalCases+=r.total_cases||0; });
     return { loaded:loaded, excluded:excluded, anyRed:anyRed, anyYellow:anyYellow, totalVisits:totalVisits, totalCases:totalCases };
   }, [masterRows]);
+
+  var overview = React.useMemo(function(){
+    var byC={}, lloTotals={};
+    masterRows.forEach(function(r){
+      var c=r.country||"Other", l=r.llo;
+      byC[c]=byC[c]||{}; var s=byC[c][l]=byC[c][l]||{flws:0,red:0,yellow:0,clean:0,excluded:0};
+      var t=lloTotals[l]=lloTotals[l]||{red:0,yellow:0,clean:0,excluded:0};
+      s.flws++;
+      if (r._excluded){ s.excluded++; t.excluded++; }
+      else if (r.red_count>=1){ s.red++; t.red++; }
+      else if (r.yellow_count>=1){ s.yellow++; t.yellow++; }
+      else { s.clean++; t.clean++; }
+    });
+    var flagRed={}; for (var mi=0;mi<METRIC_KEYS.length;mi++) flagRed[METRIC_KEYS[mi]]=0;
+    masterRows.forEach(function(r){ if (r._excluded) return; for (var mj=0;mj<METRIC_KEYS.length;mj++){ var k=METRIC_KEYS[mj]; if (r[k]&&r[k].rag==="RED") flagRed[k]++; } });
+    var topFlags=METRIC_KEYS.map(function(k){ return {k:k,label:META[k].label,red:flagRed[k]}; }).sort(function(a,b){ return b.red-a.red; });
+    return { byC:byC, lloTotals:lloTotals, topFlags:topFlags };
+  }, [masterRows]);
+
+  React.useEffect(function(){
+    if (activeTab!=="overview" || !byLloRef.current || !window.Chart) return;
+    if (byLloInst.current) byLloInst.current.destroy();
+    var llos=Object.keys(overview.lloTotals);
+    byLloInst.current=new window.Chart(byLloRef.current.getContext("2d"),{type:"bar",data:{labels:llos,datasets:[
+      {label:"Red",data:llos.map(function(l){return overview.lloTotals[l].red;}),backgroundColor:"#ef4444"},
+      {label:"Yellow",data:llos.map(function(l){return overview.lloTotals[l].yellow;}),backgroundColor:"#f59e0b"},
+      {label:"Clean",data:llos.map(function(l){return overview.lloTotals[l].clean;}),backgroundColor:"#22c55e"},
+      {label:"Excluded",data:llos.map(function(l){return overview.lloTotals[l].excluded;}),backgroundColor:"#d1d5db"}]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom",labels:{font:{size:10}}}},scales:{x:{stacked:true,ticks:{font:{size:10}}},y:{stacked:true,beginAtZero:true,ticks:{font:{size:10}}}}}});
+    return function(){ if (byLloInst.current){ byLloInst.current.destroy(); byLloInst.current=null; } };
+  }, [activeTab, overview]);
+
+  React.useEffect(function(){
+    if (activeTab!=="overview" || !topFlagRef.current || !window.Chart) return;
+    if (topFlagInst.current) topFlagInst.current.destroy();
+    var tf=overview.topFlags.slice(0,10);
+    topFlagInst.current=new window.Chart(topFlagRef.current.getContext("2d"),{type:"bar",data:{labels:tf.map(function(x){return x.label;}),datasets:[{label:"FLWs flagged RED",data:tf.map(function(x){return x.red;}),backgroundColor:"#ef4444"}]},
+      options:{indexAxis:"y",responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{beginAtZero:true,ticks:{font:{size:10}}},y:{ticks:{font:{size:10}}}}}});
+    return function(){ if (topFlagInst.current){ topFlagInst.current.destroy(); topFlagInst.current=null; } };
+  }, [activeTab, overview]);
 
   var analyzed = masterRows.filter(function(r){ return !r._excluded; });
   var filtered = React.useMemo(function(){
@@ -625,7 +672,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
     h("th",{key:"_name", className:thBase+" text-left", onClick:function(){toggleSort("name");}}, "FLW", SortArrow("name")),
     h("th",{key:"_llo", className:thBase+" text-left"}, "LLO"),
     h("th",{key:"_cases", className:thBase+" text-center", onClick:function(){toggleSort("cases");}}, "Cases", SortArrow("cases")) ];
-  cols.forEach(function(f){ headerCells.push(h("th",{key:f, className:thBase+" text-center"+(PRIORITY[f]===2?" bg-gray-100":""), onClick:function(){toggleSort(f);}, title:META[f].label+" ["+META[f].bands+"]"}, META[f].label, SortArrow(f))); });
+  cols.forEach(function(f){ headerCells.push(h("th",{key:f, className:thBase+" text-center"+(PRIORITY[f]===2?" bg-gray-100":""), onClick:function(){toggleSort(f);}, title:META[f].label+"  ["+META[f].bands+"]\n"+META[f].desc}, META[f].label, h("span",{className:"ml-1 text-gray-300"},"ⓘ"), SortArrow(f))); });
   headerCells.push(h("th",{key:"_red", className:thBase+" text-center", onClick:function(){toggleSort("red");}}, "R/Y", SortArrow("red")));
 
   var bodyRows=[];
@@ -677,7 +724,35 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
         h("button",{onClick:function(){setShowModal(false);}, className:"px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"},"Cancel"),
         h("button",{onClick:handleCreateAudits, disabled:!startDate||!endDate, className:"px-5 py-2 text-sm font-medium rounded-lg "+((!startDate||!endDate)?"bg-gray-300 text-gray-500 cursor-not-allowed":"bg-red-600 text-white hover:bg-red-700")}, "Create Audits ("+selectedCount+")")))) : null;
 
-  return h("div",{className:"space-y-5 pb-28"}, headerEl, kpiEl, filterEl, tableEl, actionBar, modal);
+  var tabBar = h("div",{className:"flex gap-1 bg-gray-100 p-1 rounded-lg"}, [["overview","Overview"],["detail","FLW Detail"]].map(function(t){
+    var active=activeTab===t[0];
+    return h("button",{key:t[0], onClick:function(){setActiveTab(t[0]);}, className:"flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors "+(active?"bg-white text-gray-900 shadow-sm":"text-gray-600 hover:text-gray-800")}, t[1]);
+  }));
+
+  var COUNTRY_ORDER=["Uganda","Kenya","Nigeria","Other"];
+  var overviewEl = h("div",{className:"space-y-5"},
+    h("div",{className:"grid grid-cols-1 lg:grid-cols-2 gap-4"},
+      h("div",{className:"bg-white rounded-lg shadow-sm p-4"}, h("div",{className:"text-sm font-semibold text-gray-700 mb-2"}, "FLW status by LLO"), h("div",{style:{height:"260px"}}, h("canvas",{ref:byLloRef}))),
+      h("div",{className:"bg-white rounded-lg shadow-sm p-4"}, h("div",{className:"text-sm font-semibold text-gray-700 mb-2"}, "Top red-firing flags (across analyzed FLWs)"), h("div",{style:{height:"260px"}}, h("canvas",{ref:topFlagRef})))),
+    COUNTRY_ORDER.filter(function(c){ return overview.byC[c]; }).map(function(c){
+      var llos=overview.byC[c];
+      return h("div",{key:c, className:"bg-white rounded-lg shadow-sm p-4"},
+        h("div",{className:"text-sm font-bold text-gray-800 mb-3"}, c),
+        h("div",{className:"grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3"},
+          Object.keys(llos).map(function(l){ var s=llos[l];
+            return h("div",{key:l, className:"border border-gray-200 rounded-lg p-3"},
+              h("div",{className:"flex items-center justify-between mb-2"}, h("span",{className:"font-semibold text-gray-800"}, l), h("span",{className:"text-xs text-gray-400"}, s.flws+" FLWs")),
+              h("div",{className:"flex flex-wrap gap-1"},
+                h("span",{className:"px-2 py-0.5 rounded text-xs bg-red-100 text-red-700"}, s.red+" red"),
+                h("span",{className:"px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700"}, s.yellow+" yellow"),
+                h("span",{className:"px-2 py-0.5 rounded text-xs bg-green-100 text-green-700"}, s.clean+" clean"),
+                h("span",{className:"px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500"}, s.excluded+" excl")));
+          })));
+    }));
+
+  return h("div",{className:"space-y-5 pb-28"}, headerEl, kpiEl, tabBar,
+    (activeTab==="overview") ? overviewEl : h("div",{className:"space-y-5"}, filterEl, tableEl),
+    (activeTab==="detail") ? actionBar : null, modal);
 }
 """
 
