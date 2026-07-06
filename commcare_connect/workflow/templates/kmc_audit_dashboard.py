@@ -230,10 +230,10 @@ PIPELINE_SCHEMAS = [
 DEFINITION = {
     "name": "KMC Audit Dashboard",
     "description": (
-        "18-metric register-faithful KMC FLW audit across merged V1/V2/V3 opportunities (live). "
-        "3-tier RAG bands, per-FLW drilldown, one-click audit creation."
+        "18-metric register-faithful KMC FLW audit across 11 opportunities / 6 LLOs / 3 countries "
+        "(V0–V3, live). 3-tier RAG bands, exec Overview + per-FLW drilldown, one-click audit creation."
     ),
-    "version": 2,
+    "version": 3,
     "templateType": "kmc_audit_dashboard",
     "statuses": [
         {"id": "pending", "label": "Pending Review", "color": "gray"},
@@ -246,7 +246,7 @@ DEFINITION = {
 RENDER_CODE = r"""/* KMC Audit Dashboard — RENDER_CODE (register-faithful banded RAG, multi-opp, live).
  * Compute core (deriveMetrics + groupCases + helpers) is byte-identical to
  * .kmc_validation/register/kmc_flags.js and proven == engine.py by parity.js
- * (730 assertions: bands exact, values 1e-9, num/den exact). Re-run parity before editing it.
+ * (bands exact, values 1e-9, num/den exact). Re-run parity before editing it.
  * 18 FLW-Audit metrics per "KMC Audit & Metrics Flag Register (all)".
  */
 
@@ -429,9 +429,24 @@ var META = {
   weight_gain_gkgday:{label:"Weight gain",unit:"gkg",bands:"G<25  Y 25-40  R>40",desc:"Avg daily weight gain (g/kg/day) over increasing pairs. Min 10 pairs."},
   modal_weight:{label:"Modal wt",unit:"pct",bands:"G<20  Y 20-35  R>35",desc:"% of weights that are the single most-frequent value (across cases). Min 20 weights."},
   flat_weight:{label:"Flat wt",unit:"pct",bands:"G<2  Y 2-5  R>5",desc:"% cases (>=3 weights) whose weight range is <=2% of the first weight. Min 20 cases."},
-  image_missing:{label:"Equip image",unit:"pct",bands:"G<5  Y 5-20  R>20",desc:"% follow-up visits with no equipment image captured. Min 20 visits."},
-  kmc_wrap_missing:{label:"KMC wrap",unit:"pct",bands:"G<15  Y 15-40  R>40",desc:"% cases where the KMC wrap was not provided at registration. Min 20 cases."}
+  image_missing:{label:"Equip image",unit:"pct",bands:"G<5  Y 5-20  R>20",desc:"% follow-up visits with no equipment image captured. N/A where the app lacks the field. Min 20 visits."},
+  kmc_wrap_missing:{label:"KMC wrap",unit:"pct",bands:"G<15  Y 15-40  R>40",desc:"% cases where the KMC wrap was not provided at registration. N/A where the app lacks the field. Min 20 cases."}
 };
+
+// register "Tier / Category" grouping — tells a program head WHAT KIND of problem a red is.
+var CAT = {
+  mortality:"Fraud / data integrity", rounded_weights:"Fraud / data integrity", modal_weight:"Fraud / data integrity",
+  flat_weight:"Fraud / data integrity", gps_within_200m:"Fraud / data integrity", hr_copycat:"Fraud / data integrity",
+  temp_copycat:"Fraud / data integrity", spo2_implausible:"Fraud / data integrity",
+  zero_danger:"Clinical quality & skill", danger_rate_cases:"Clinical quality & skill", no_referral:"Clinical quality & skill",
+  weight_loss:"Clinical quality & skill", weight_gain_gkgday:"Clinical quality & skill", image_missing:"Clinical quality & skill",
+  kmc_wrap_missing:"Clinical quality & skill",
+  low_avg_visits:"Model adherence", enroll_ontime:"Model adherence", flw_early_discharge:"Model adherence"
+};
+var CAT_ORDER = ["Fraud / data integrity","Clinical quality & skill","Model adherence"];
+var CAT_DESC = {"Fraud / data integrity":"Fabricated / copy-pasted data (weights, vitals, GPS) or implausibly low mortality.",
+  "Clinical quality & skill":"Danger-sign detection, referrals, weight trends, equipment & wrap compliance.",
+  "Model adherence":"Visit frequency, timely enrollment, FLW-driven early discharge."};
 
 function fmtVal(v, unit){ if(v===null||v===undefined) return null; if(unit==="pct") return v.toFixed(1)+"%"; if(unit==="dec") return v.toFixed(1); if(unit==="gkg") return v.toFixed(1); return String(v); }
 function fmtSub(m){ if(m.den===null||m.den===undefined) return null; if(m.num===null||m.num===undefined) return "n="+m.den; return m.num+" / "+m.den; }
@@ -524,7 +539,19 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
     var flagRed={}; for (var mi=0;mi<METRIC_KEYS.length;mi++) flagRed[METRIC_KEYS[mi]]=0;
     masterRows.forEach(function(r){ if (r._excluded) return; for (var mj=0;mj<METRIC_KEYS.length;mj++){ var k=METRIC_KEYS[mj]; if (r[k]&&r[k].rag==="RED") flagRed[k]++; } });
     var topFlags=METRIC_KEYS.map(function(k){ return {k:k,label:META[k].label,red:flagRed[k]}; }).sort(function(a,b){ return b.red-a.red; });
-    return { byC:byC, lloTotals:lloTotals, topFlags:topFlags };
+    var catRed={}; for (var ci=0;ci<CAT_ORDER.length;ci++) catRed[CAT_ORDER[ci]]=0;
+    var risk=[], analyzedN=0, flaggedRedN=0, cleanN=0;
+    masterRows.forEach(function(r){
+      if (r._excluded) return;
+      analyzedN++;
+      var catHit={}, reds=[];
+      for (var mi=0;mi<METRIC_KEYS.length;mi++){ var k=METRIC_KEYS[mi]; if (r[k]&&r[k].rag==="RED"){ reds.push(META[k].label); catHit[CAT[k]]=1; } }
+      for (var cj=0;cj<CAT_ORDER.length;cj++){ if (catHit[CAT_ORDER[cj]]) catRed[CAT_ORDER[cj]]++; }
+      if (r.red_count>=1) { flaggedRedN++; risk.push({name:r.flw_name||r.username, username:r.username, llo:r.llo, country:r.country, cases:r.total_cases, red:r.red_count, yellow:r.yellow_count, flags:reds}); }
+      else if (r.yellow_count<1) cleanN++;
+    });
+    risk.sort(function(a,b){ return (b.red-a.red)||(b.cases-a.cases); });
+    return { byC:byC, lloTotals:lloTotals, topFlags:topFlags, catRed:catRed, risk:risk, analyzedN:analyzedN, flaggedRedN:flaggedRedN, cleanN:cleanN };
   }, [masterRows]);
 
   React.useEffect(function(){
@@ -581,7 +608,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
   function metricCell(d, key){
     var m=d[key], meta=META[key]; var band=m.rag; var val=fmtVal(m.value, meta.unit); var sub=fmtSub(m);
     var cls="px-2 py-2 text-center whitespace-nowrap ";
-    if (band==="N/A" || val===null) return h("td",{className:cls+"text-gray-400",key:key,title:meta.label+" — not eligible (insufficient data)"}, h("span",{className:"italic text-xs"},"NE"));
+    if (band==="N/A" || val===null) return h("td",{className:cls+"text-gray-400",key:key,title:meta.label+" — not eligible (insufficient data / field absent)"}, h("span",{className:"italic text-xs"},"NE"));
     return h("td",{className:cls+bandColor(band),key:key,title:meta.label+"  ["+meta.bands+"]  "+meta.desc},
       h("div",{className:"text-sm"}, val),
       sub?h("div",{className:"text-xs text-gray-400 mt-0.5"}, sub):null);
@@ -670,7 +697,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
   var cols = P1_ORDER.concat(showP2?P2_ORDER:[]);
   var headerCells=[ h("th",{key:"_chk", className:"px-2 py-3 w-8"}),
     h("th",{key:"_name", className:thBase+" text-left", onClick:function(){toggleSort("name");}}, "FLW", SortArrow("name")),
-    h("th",{key:"_llo", className:thBase+" text-left"}, "LLO"),
+    h("th",{key:"_llo", className:thBase+" text-left"}, "LLO · Ver"),
     h("th",{key:"_cases", className:thBase+" text-center", onClick:function(){toggleSort("cases");}}, "Cases", SortArrow("cases")) ];
   cols.forEach(function(f){ headerCells.push(h("th",{key:f, className:thBase+" text-center"+(PRIORITY[f]===2?" bg-gray-100":""), onClick:function(){toggleSort(f);}, title:META[f].label+"  ["+META[f].bands+"]\n"+META[f].desc}, META[f].label, h("span",{className:"ml-1 text-gray-300"},"ⓘ"), SortArrow(f))); });
   headerCells.push(h("th",{key:"_red", className:thBase+" text-center", onClick:function(){toggleSort("red");}}, "R/Y", SortArrow("red")));
@@ -730,11 +757,61 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
   }));
 
   var COUNTRY_ORDER=["Uganda","Kenya","Nigeria","Other"];
-  var overviewEl = h("div",{className:"space-y-5"},
-    h("div",{className:"grid grid-cols-1 lg:grid-cols-2 gap-4"},
-      h("div",{className:"bg-white rounded-lg shadow-sm p-4"}, h("div",{className:"text-sm font-semibold text-gray-700 mb-2"}, "FLW status by LLO"), h("div",{style:{height:"260px"}}, h("canvas",{ref:byLloRef}))),
-      h("div",{className:"bg-white rounded-lg shadow-sm p-4"}, h("div",{className:"text-sm font-semibold text-gray-700 mb-2"}, "Top red-firing flags (across analyzed FLWs)"), h("div",{style:{height:"260px"}}, h("canvas",{ref:topFlagRef})))),
-    COUNTRY_ORDER.filter(function(c){ return overview.byC[c]; }).map(function(c){
+  var pctRed = overview.analyzedN>0 ? Math.round(100*overview.flaggedRedN/overview.analyzedN) : 0;
+
+  // 1. Program-at-a-glance banner
+  var glanceEl = h("div",{className:"bg-white rounded-lg shadow-sm p-5 border-l-4 border-slate-700"},
+    h("div",{className:"text-xs uppercase tracking-wide text-gray-400 mb-1"}, "Program at a glance"),
+    h("div",{className:"text-lg md:text-xl font-bold text-gray-900"}, kpi.loaded+" FLWs · "+kpi.totalCases.toLocaleString()+" SVN cases · "+kpi.totalVisits.toLocaleString()+" KMC visits"),
+    h("div",{className:"text-sm text-gray-500 mt-0.5"}, "11 opportunities · 6 LLO partners · 3 countries (Uganda, Kenya, Nigeria) · app versions V0–V3"),
+    h("div",{className:"text-sm text-gray-700 mt-3 flex flex-wrap gap-x-2 gap-y-1 items-center"},
+      h("span",{className:"font-bold text-red-600"}, overview.flaggedRedN),
+      h("span",null, "of "+overview.analyzedN+" analyzed FLWs ("+pctRed+"%) carry ≥1 red flag"),
+      h("span",{className:"text-gray-300"}, "•"),
+      h("span",{className:"font-bold text-green-700"}, overview.cleanN), h("span",null,"clean (no red/yellow)"),
+      h("span",{className:"text-gray-300"}, "•"),
+      h("span",{className:"font-bold text-gray-500"}, kpi.excluded), h("span",null,"too new to assess (<20 cases)")));
+
+  // 2. Concern-category cards — what KIND of problem
+  var catColors={"Fraud / data integrity":"border-red-400","Clinical quality & skill":"border-amber-400","Model adherence":"border-blue-400"};
+  var catCardsEl = h("div",{className:"grid grid-cols-1 md:grid-cols-3 gap-3"},
+    CAT_ORDER.map(function(cat){
+      return h("div",{key:cat, className:"bg-white rounded-lg shadow-sm p-4 border-t-4 "+(catColors[cat]||"border-gray-300")},
+        h("div",{className:"flex items-baseline gap-2"},
+          h("span",{className:"text-3xl font-bold text-gray-900"}, overview.catRed[cat]||0),
+          h("span",{className:"text-xs text-gray-400"}, "FLWs ≥1 red")),
+        h("div",{className:"text-sm font-semibold text-gray-800 mt-1"}, cat),
+        h("div",{className:"text-xs text-gray-500 mt-1 leading-snug"}, CAT_DESC[cat]));
+    }));
+
+  // 3. Charts
+  var chartsEl = h("div",{className:"grid grid-cols-1 lg:grid-cols-2 gap-4"},
+    h("div",{className:"bg-white rounded-lg shadow-sm p-4"}, h("div",{className:"text-sm font-semibold text-gray-700 mb-2"}, "FLW status by LLO"), h("div",{style:{height:"260px"}}, h("canvas",{ref:byLloRef}))),
+    h("div",{className:"bg-white rounded-lg shadow-sm p-4"}, h("div",{className:"text-sm font-semibold text-gray-700 mb-2"}, "Top red-firing flags (across analyzed FLWs)"), h("div",{style:{height:"260px"}}, h("canvas",{ref:topFlagRef}))));
+
+  // 4. Highest-risk FLWs — audit-first worklist
+  var riskRows = overview.risk.slice(0,12);
+  var riskEl = h("div",{className:"bg-white rounded-lg shadow-sm overflow-hidden"},
+    h("div",{className:"px-4 py-3 border-b border-gray-100 flex items-center justify-between"},
+      h("span",{className:"text-sm font-semibold text-gray-800"}, "Highest-risk FLWs — audit these first"),
+      h("span",{className:"text-xs text-gray-400"}, overview.flaggedRedN+" red-flagged in current filter")),
+    h("div",{className:"overflow-x-auto"},
+      h("table",{className:"min-w-full text-sm"},
+        h("thead",{className:"bg-gray-50 text-xs text-gray-500 uppercase"},
+          h("tr",null, ["FLW","LLO · Country","Cases","Red","Yellow","Top red flags"].map(function(hd){ return h("th",{key:hd, className:"px-3 py-2 text-left font-medium whitespace-nowrap"}, hd); }))),
+        h("tbody",null,
+          riskRows.length ? riskRows.map(function(x,i){
+            return h("tr",{key:i, className:"border-t border-gray-100 hover:bg-gray-50"},
+              h("td",{className:"px-3 py-2 font-medium text-gray-900 whitespace-nowrap"}, x.name),
+              h("td",{className:"px-3 py-2 text-gray-600 whitespace-nowrap"}, x.llo+" · "+x.country),
+              h("td",{className:"px-3 py-2 text-gray-700"}, x.cases),
+              h("td",{className:"px-3 py-2"}, h("span",{className:"inline-flex items-center justify-center h-6 px-2 rounded-full bg-red-500 text-white text-xs font-bold"}, x.red)),
+              h("td",{className:"px-3 py-2"}, x.yellow>0 ? h("span",{className:"inline-flex items-center justify-center h-6 px-2 rounded-full bg-amber-400 text-white text-xs font-bold"}, x.yellow) : h("span",{className:"text-gray-300"},"–")),
+              h("td",{className:"px-3 py-2 text-xs text-gray-600"}, x.flags.slice(0,6).join(", ")+(x.flags.length>6?"  +"+(x.flags.length-6)+" more":"")));
+          }) : h("tr",null, h("td",{colSpan:6, className:"px-3 py-6 text-center text-gray-400"}, "No red-flagged FLWs in the current filter"))))));
+
+  // 5. Country -> LLO rollup
+  var rollupEl = COUNTRY_ORDER.filter(function(c){ return overview.byC[c]; }).map(function(c){
       var llos=overview.byC[c];
       return h("div",{key:c, className:"bg-white rounded-lg shadow-sm p-4"},
         h("div",{className:"text-sm font-bold text-gray-800 mb-3"}, c),
@@ -748,7 +825,10 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
                 h("span",{className:"px-2 py-0.5 rounded text-xs bg-green-100 text-green-700"}, s.clean+" clean"),
                 h("span",{className:"px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500"}, s.excluded+" excl")));
           })));
-    }));
+    });
+
+  var overviewEl = h("div",{className:"space-y-5"}, glanceEl, catCardsEl, chartsEl, riskEl,
+    h("div",{className:"space-y-4"}, h("div",{className:"text-sm font-bold text-gray-700"}, "Coverage by country → LLO"), rollupEl));
 
   return h("div",{className:"space-y-5 pb-28"}, headerEl, kpiEl, tabBar,
     (activeTab==="overview") ? overviewEl : h("div",{className:"space-y-5"}, filterEl, tableEl),
