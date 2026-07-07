@@ -524,6 +524,14 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
     return { loaded:loaded, excluded:excluded, anyRed:anyRed, anyYellow:anyYellow, totalVisits:totalVisits, totalCases:totalCases };
   }, [masterRows]);
 
+  var freshness = React.useMemo(function(){
+    var latest=null;
+    for (var i=0;i<visitRows.length;i++){ var d=parseDate(visitRows[i].visit_date); if (d!==null && (latest===null || d>latest)) latest=d; }
+    function fmtDT(ms){ return new Date(ms).toLocaleString(undefined,{year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}); }
+    function fmtD(ms){ return new Date(ms).toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}); }
+    return { loaded:fmtDT(asOf), latestVisit:(latest!==null?fmtD(latest):null) };
+  }, [visitRows, asOf]);
+
   var overview = React.useMemo(function(){
     var byC={}, lloTotals={};
     masterRows.forEach(function(r){
@@ -674,9 +682,13 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
       h("div",{className:"bg-gray-50 border border-gray-200 rounded-lg p-8 text-center text-gray-500"}, "No pipeline data yet — run the pipeline to load FLW audit metrics."));
   }
 
-  var headerEl = h("div",{className:"bg-white rounded-lg shadow-sm p-5"},
-    h("h1",{className:"text-2xl font-bold text-gray-900"}, h("i",{className:"fa-solid fa-flag text-red-500 mr-2"}), definition.name),
-    h("p",{className:"text-gray-600 mt-1"}, "18 register FLW-audit metrics across merged V1/V2/V3 opportunities (11 opps · 6 LLOs · 3 countries), banded green / yellow / red. Live data."));
+  var headerEl = h("div",{className:"bg-white rounded-lg shadow-sm p-5 flex items-start justify-between gap-4 flex-wrap"},
+    h("div",null,
+      h("h1",{className:"text-2xl font-bold text-gray-900"}, h("i",{className:"fa-solid fa-flag text-red-500 mr-2"}), definition.name),
+      h("p",{className:"text-gray-600 mt-1"}, "18 register FLW-audit metrics across merged V1/V2/V3 opportunities (11 opps · 6 LLOs · 3 countries), banded green / yellow / red. Live data.")),
+    h("div",{className:"text-right text-xs text-gray-500 shrink-0", title:"Live data, cached up to ~1 hour. Reload for a refresh, or add ?refresh=1 to the URL to force the very latest."},
+      h("div",null, h("i",{className:"fa-regular fa-clock mr-1"}), "Last loaded: ", h("span",{className:"font-semibold text-gray-700"}, freshness.loaded)),
+      freshness.latestVisit ? h("div",{className:"mt-0.5"}, "Latest visit in data: ", h("span",{className:"font-semibold text-gray-700"}, freshness.latestVisit)) : null));
 
   var kpiDefs=[["FLWs Loaded", kpi.loaded, "blue"],["≥1 Red", kpi.anyRed, "red"],["≥1 Yellow", kpi.anyYellow, "amber"],["Excluded (<20)", kpi.excluded, "gray"],["KMC Visits", kpi.totalVisits.toLocaleString(), "green"],["Total Cases", kpi.totalCases.toLocaleString(), "teal"]];
   var kpiEl = h("div",{className:"grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3"}, kpiDefs.map(function(c){
