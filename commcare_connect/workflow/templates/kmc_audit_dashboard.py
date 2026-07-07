@@ -346,7 +346,7 @@ function deriveMetrics(aggRow, visitRows, asOf){
   else out.low_avg_visits=NA();
 
   var pool=cs.filter(function(c){ if(c.reg_date===null||ageDays(c.reg_date)<28) return false; for(var q=0;q<c.followup_dates.length;q++){ if((c.followup_dates[q]-c.reg_date)/DAY_MS>=28) return true; } return false; });
-  if(pool.length>=20){ var deaths=0; for(i=0;i<pool.length;i++) if(pool[i].is_death) deaths++; var rate=100.0*deaths/pool.length; out.mortality=M(rate,ragLowBad(rate,5,3),deaths,pool.length); }
+  if(pool.length>=20){ var deaths=0; for(i=0;i<pool.length;i++) if(pool[i].is_death) deaths++; var rate=100.0*deaths/pool.length; out.mortality=M(rate,ragLowBad(rate,5,3.0001),deaths,pool.length); }
   else out.mortality=NA();
 
   var usable=0, ontime=0;
@@ -383,7 +383,7 @@ function deriveMetrics(aggRow, visitRows, asOf){
 
   var gcases=0, within=0;
   for(i=0;i<cs.length;i++){ var pts=[]; for(j=0;j<cs[i].followups.length;j++){ var gp=parseGps(rget(cs[i].followups[j],"gps")); if(gp!==null&&(gp[2]===null||gp[2]<=100)) pts.push(gp); } if(pts.length>=2){ gcases++; var dists=[]; for(var a=0;a<pts.length;a++) for(var b=a+1;b<pts.length;b++) dists.push(haversineM(pts[a],pts[b])); if(median(dists)<200) within++; } }
-  if(gcases>=20){ var pg=100.0*within/gcases; out.gps_within_200m=M(pg,ragLowBad(pg,50,25),within,gcases); } else out.gps_within_200m=NA();
+  if(gcases>=20){ var pg=100.0*within/gcases; out.gps_within_200m=M(pg,ragLowBad(pg,50.0001,25),within,gcases); } else out.gps_within_200m=NA();
 
   var hrs=[]; for(i=0;i<fus.length;i++){ var hv=pf(rget(fus[i],"heart_rate")); if(hv!==null) hrs.push(hv); }
   if(hrs.length>=10){ var ht=modalCount(hrs); var ph=100.0*ht/hrs.length; out.hr_copycat=M(ph,ragHighBad(ph,20,74.9999),ht,hrs.length); } else out.hr_copycat=NA();
