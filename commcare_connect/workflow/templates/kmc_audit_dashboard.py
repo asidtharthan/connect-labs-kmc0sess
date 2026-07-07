@@ -190,6 +190,14 @@ PIPELINE_SCHEMAS = [
                     "aggregation": "first",
                 },
                 {
+                    "name": "flw_program_conclusion_reason",
+                    "paths": [
+                        "form.flw_program_conclusion_reason",
+                        "form.case.update.flw_program_conclusion_reason",
+                    ],
+                    "aggregation": "first",
+                },
+                {
                     "name": "birth_location",
                     "path": "form.hosp_lbl.birth_location",
                     "aggregation": "first",
@@ -318,13 +326,13 @@ function groupCases(visitRows){
     for(i=0;i<rows.length;i++){ var dd=parseDate(rget(rows[i],"visit_date")); if(dd!==null&&(lastVisitDate===null||dd>lastVisitDate)) lastVisitDate=dd; }
     var isDeath=false; for(i=0;i<rows.length;i++){ if(low(rget(rows[i],"child_alive"))==="no"){ isDeath=true; break; } }
     var statusEntered={}; for(i=0;i<rows.length;i++){ var se=low(rget(rows[i],"kmc_status_entered")); if(se) statusEntered[se]=1; }
-    var locChangeNo=false; for(i=0;i<rows.length;i++){ if(low(rget(rows[i],"location_change"))==="no"||low(rget(rows[i],"relocation_followup_check"))==="no"){ locChangeNo=true; break; } }
+    var conclusionReason=null; for(i=0;i<rows.length;i++){ var cr0=low(rget(rows[i],"flw_program_conclusion_reason")); if(cr0){ conclusionReason=cr0; break; } }
     var ws=[];
     for(i=0;i<rows.length;i++){ var vd2=parseDate(rget(rows[i],"visit_date")); var w=readWeightG(rows[i]); if(vd2!==null&&w!==null&&w>=WMIN&&w<=WMAX) ws.push([vd2,w]); }
     ws.sort(function(a,b){ return a[0]-b[0]; });
     cases.push({case_id:cid,reg_date:regDate,discharge_date:dischargeDate,dob:dob,birth_location:birthLocation,
       followups:followups,followup_dates:followupDates,n_followup:followups.length,reg_rows:regRows,
-      last_visit_date:lastVisitDate,is_death:isDeath,status_entered:statusEntered,loc_change_no:locChangeNo,weights:ws});
+      last_visit_date:lastVisitDate,is_death:isDeath,status_entered:statusEntered,conclusion_reason:conclusionReason,weights:ws});
   });
   return cases;
 }
@@ -349,12 +357,19 @@ function deriveMetrics(aggRow, visitRows, asOf){
   if(pool.length>=20){ var deaths=0; for(i=0;i<pool.length;i++) if(pool[i].is_death) deaths++; var rate=100.0*deaths/pool.length; out.mortality=M(rate,ragLowBad(rate,5,3.0001),deaths,pool.length); }
   else out.mortality=NA();
 
-  var usable=0, ontime=0;
+  var hUse=0,hOn=0,mUse=0,mOn=0;
   for(i=0;i<cs.length;i++){ var c=cs[i]; if(c.reg_date===null) continue;
-    if(c.birth_location==="hospitalhealth_facility"&&c.discharge_date!==null){ usable++; if(daysBetween(c.discharge_date,c.reg_date)<=3) ontime++; }
-    else if((c.birth_location==="home"||c.birth_location==="other")&&c.dob!==null){ usable++; if(daysBetween(c.dob,c.reg_date)<=7) ontime++; }
+    if(c.birth_location==="hospitalhealth_facility"&&c.discharge_date!==null){ hUse++; if(daysBetween(c.discharge_date,c.reg_date)<=3) hOn++; }
+    else if((c.birth_location==="home"||c.birth_location==="other")&&c.dob!==null){ mUse++; if(daysBetween(c.dob,c.reg_date)<=7) mOn++; }
   }
-  if(usable>=10){ var pe=100.0*ontime/usable; out.enroll_ontime=M(pe,ragLowBad(pe,50,30),ontime,usable); } else out.enroll_ontime=NA();
+  var _rank={GREEN:0,YELLOW:1,RED:2};
+  var hPct=hUse>=10?100.0*hOn/hUse:null, mPct=mUse>=10?100.0*mOn/mUse:null;
+  var cohorts=[];
+  if(hPct!==null) cohorts.push([ragLowBad(hPct,50,30),hPct,hOn,hUse]);
+  if(mPct!==null) cohorts.push([ragLowBad(mPct,50,30),mPct,mOn,mUse]);
+  if(cohorts.length){ var worst=cohorts[0]; for(i=1;i<cohorts.length;i++){ var t=cohorts[i]; if(_rank[t[0]]>_rank[worst[0]]||(_rank[t[0]]===_rank[worst[0]]&&t[1]<worst[1])) worst=t; }
+    var em=M(worst[1],worst[0],worst[2],worst[3]); em.hosp_pct=hPct; em.home_pct=mPct; out.enroll_ontime=em; }
+  else out.enroll_ontime=NA();
 
   var cwf=cs.filter(function(c){ return c.n_followup>=1; });
   var fuVisitTotal=0; for(i=0;i<cs.length;i++) fuVisitTotal+=cs[i].n_followup;
@@ -396,7 +411,7 @@ function deriveMetrics(aggRow, visitRows, asOf){
   if(fus.length>=20){ var miss=0,present=0; for(i=0;i<fus.length;i++){ var ei=rget(fus[i],"equipment_image"); if(ei===null||ei==="") miss++; else present++; } if(present===0){ out.image_missing=NA(); } else { var pimg=100.0*miss/fus.length; out.image_missing=M(pimg,ragHighBad(pimg,5,20),miss,fus.length); } } else out.image_missing=NA();
 
   var e60=cs.filter(function(c){ return c.reg_date!==null&&ageDays(c.reg_date)>=60; });
-  if(e60.length>=10){ var early=0; for(i=0;i<e60.length;i++){ var cc=e60[i]; var reason=(cc.status_entered["flw_program_concluded"]||cc.status_entered["parents_discontinued"]||cc.loc_change_no); if(reason&&cc.n_followup<4&&!cc.is_death) early++; } var ped=100.0*early/e60.length; out.flw_early_discharge=M(ped,ragHighBad(ped,5,15),early,e60.length); } else out.flw_early_discharge=NA();
+  if(e60.length>=10){ var early=0; for(i=0;i<e60.length;i++){ var cc=e60[i]; var cr=cc.conclusion_reason; if(cc.status_entered["parents_discontinued"]||cr==="caregiver_unavailable"||cr==="family_relocated"||(cr==="svn_recovered_or_met_discharge_criteria"&&cc.n_followup<4)) early++; } var ped=100.0*early/e60.length; out.flw_early_discharge=M(ped,ragHighBad(ped,5,15),early,e60.length); } else out.flw_early_discharge=NA();
 
   var regCases=cs.filter(function(c){ return c.reg_rows.length>0; });
   if(regCases.length>=20){ var bd=0,presentW=0; for(i=0;i<regCases.length;i++){ var wrap=null; for(j=0;j<regCases[i].reg_rows.length;j++){ var wv=low(rget(regCases[i].reg_rows[j],"kmc_wrap_check")); if(wv!==null){ wrap=wv; break; } } if(wrap!==null) presentW++; if(wrap!=="yes") bd++; } if(presentW===0){ out.kmc_wrap_missing=NA(); } else { var pw=100.0*bd/regCases.length; out.kmc_wrap_missing=M(pw,ragHighBad(pw,15,40),bd,regCases.length); } } else out.kmc_wrap_missing=NA();
@@ -449,7 +464,7 @@ var CAT_DESC = {"Fraud / data integrity":"Fabricated / copy-pasted data (weights
   "Model adherence":"Visit frequency, timely enrollment, FLW-driven early discharge."};
 
 function fmtVal(v, unit){ if(v===null||v===undefined) return null; if(unit==="pct") return v.toFixed(1)+"%"; if(unit==="dec") return v.toFixed(1); if(unit==="gkg") return v.toFixed(1); return String(v); }
-function fmtSub(m){ if(m.den===null||m.den===undefined) return null; if(m.num===null||m.num===undefined) return "n="+m.den; return m.num+" / "+m.den; }
+function fmtSub(m){ if(m.hosp_pct!==undefined||m.home_pct!==undefined){ var parts=[]; if(m.hosp_pct!==null&&m.hosp_pct!==undefined) parts.push("Hosp "+m.hosp_pct.toFixed(0)+"%"); if(m.home_pct!==null&&m.home_pct!==undefined) parts.push("Home "+m.home_pct.toFixed(0)+"%"); if(parts.length) return parts.join(" · "); } if(m.den===null||m.den===undefined) return null; if(m.num===null||m.num===undefined) return "n="+m.den; return m.num+" / "+m.den; }
 
 function lloFor(oppId){ var m=OPP_META[oppId]; return m?m.llo:("opp_"+oppId); }
 function buildMasterRows(flwRows, visitRows, nameByUser, asOf){
