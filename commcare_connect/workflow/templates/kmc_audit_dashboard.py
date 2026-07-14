@@ -463,12 +463,19 @@ var CAT_DESC = {"Fraud / data integrity":"Fabricated / copy-pasted data (weights
   "Clinical quality & skill":"Danger-sign detection, referrals, weight trends, equipment & wrap compliance.",
   "Model adherence":"Visit frequency, timely enrollment, FLW-driven early discharge."};
 
+// Metrics that legitimately re-scope to a date window (they judge the READINGS TAKEN in the period).
+// The other 12 are cohort/outcome metrics that need each case's full history (visits/case, mortality,
+// enrollment timing, weight trends, danger detection, early discharge) and are NEVER windowed.
+var WINDOWED_METRICS = {rounded_weights:1, modal_weight:1, hr_copycat:1, temp_copycat:1, spo2_implausible:1, gps_within_200m:1};
+var WINDOWED_METRICS_LIST = ["rounded_weights","modal_weight","hr_copycat","temp_copycat","spo2_implausible","gps_within_200m"];
+
 function fmtVal(v, unit){ if(v===null||v===undefined) return null; if(unit==="pct") return v.toFixed(1)+"%"; if(unit==="dec") return v.toFixed(1); if(unit==="gkg") return v.toFixed(1); return String(v); }
 function fmtSub(m){ if(m.hosp_pct!==undefined||m.home_pct!==undefined){ var parts=[]; if(m.hosp_pct!==null&&m.hosp_pct!==undefined) parts.push("Hosp "+m.hosp_pct.toFixed(0)+"%"); if(m.home_pct!==null&&m.home_pct!==undefined) parts.push("Home "+m.home_pct.toFixed(0)+"%"); if(parts.length) return parts.join(" · "); } if(m.den===null||m.den===undefined) return null; if(m.num===null||m.num===undefined) return "n="+m.den; return m.num+" / "+m.den; }
 
 function lloFor(oppId){ var m=OPP_META[oppId]; return m?m.llo:("opp_"+oppId); }
-function buildMasterRows(flwRows, visitRows, nameByUser, asOf){
+function buildMasterRows(flwRows, visitRows, nameByUser, asOf, winStartMs, winEndMs){
   nameByUser=nameByUser||{};
+  var winActive = (winStartMs!==null && winStartMs!==undefined && winEndMs!==null && winEndMs!==undefined);
   var visitsByOppUser={}, i, r, k;
   for(i=0;i<visitRows.length;i++){ r=visitRows[i]; k=r.opportunity_id+"|"+r.username; (visitsByOppUser[k]=visitsByOppUser[k]||[]).push(r); }
   var buckets={};
@@ -493,8 +500,19 @@ function buildMasterRows(flwRows, visitRows, nameByUser, asOf){
     res.country=countryFor(res.primary_opp);
     res._visit_rows=b.visit_rows; res.total_cases=b.agg_total_cases;
     res.total_visits=b.visit_rows.filter(function(v){return v.visit_number!=null&&v.visit_number!=="";}).length;
+    // ---- windowed variant (display only): re-run the SAME deriveMetrics on window-filtered visits.
+    // Full-history total_cases stays in aggDict so the <20-case exclusion remains a lifetime decision.
+    var winVisits=b.visit_rows;
+    if(winActive){ winVisits=b.visit_rows.filter(function(v){ var vd=parseDate(rget(v,"visit_date")); return vd!==null && vd>=winStartMs && vd<=winEndMs; }); }
+    res._win_visits=winVisits.length;
+    res.in_window = winActive ? (winVisits.length>0) : true;
+    var resWin = winActive ? deriveMetrics(aggDict, winVisits, asOf) : res;
+    res.win={}; for(var wi=0;wi<WINDOWED_METRICS_LIST.length;wi++){ var wk=WINDOWED_METRICS_LIST[wi]; res.win[wk]=resWin[wk]; }
+    // ---- effective bands = windowed for the 6 windowable metrics (when a window is set) + full-history for the rest
     var red=0,yellow=0,p1red=0;
-    for(var mi=0;mi<METRIC_KEYS.length;mi++){ var mk=METRIC_KEYS[mi]; var bnd=res[mk].rag; if(bnd==="RED"){ red++; if(PRIORITY[mk]===1) p1red++; } else if(bnd==="YELLOW") yellow++; }
+    for(var mi=0;mi<METRIC_KEYS.length;mi++){ var mk=METRIC_KEYS[mi];
+      var bnd=(winActive && WINDOWED_METRICS[mk]) ? (res.win[mk]?res.win[mk].rag:"N/A") : res[mk].rag;
+      if(bnd==="RED"){ red++; if(PRIORITY[mk]===1) p1red++; } else if(bnd==="YELLOW") yellow++; }
     res.red_count=red; res.yellow_count=yellow; res.p1_red_count=p1red;
     out.push(res);
   });
@@ -508,7 +526,26 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
   var visitRows = (pipelines && pipelines.weight_series && pipelines.weight_series.rows) || [];
   var asOf = React.useMemo(function(){ return Date.now(); }, []);
   var nameByUser = React.useMemo(function(){ var m={}; (workers||[]).forEach(function(w){ if (w && w.username && w.name) m[w.username]=w.name; }); return m; }, [workers]);
-  var masterRows = React.useMemo(function(){ return buildMasterRows(flwRows, visitRows, nameByUser, asOf); }, [flwRows, visitRows, nameByUser, asOf]);
+  // ---- date window (opt-in; default "all time" == today's behaviour) ----
+  var _winP = React.useState("all"); var winPreset=_winP[0], setWinPreset=_winP[1];
+  var _winS = React.useState(""); var winStart=_winS[0], setWinStart=_winS[1];
+  var _winE = React.useState(""); var winEnd=_winE[0], setWinEnd=_winE[1];
+  var winActive = !!(winStart && winEnd);
+  var winStartMs = winActive ? parseDate(winStart) : null;
+  var winEndMs = winActive ? parseDate(winEnd) : null;
+  var masterRows = React.useMemo(function(){ return buildMasterRows(flwRows, visitRows, nameByUser, asOf, winStartMs, winEndMs); }, [flwRows, visitRows, nameByUser, asOf, winStartMs, winEndMs]);
+  var scoped = React.useMemo(function(){ return winActive ? masterRows.filter(function(r){return r.in_window;}) : masterRows; }, [masterRows, winActive]);
+  function effM(r,k){ return (winActive && WINDOWED_METRICS[k] && r.win && r.win[k]) ? r.win[k] : r[k]; }
+  function effRag(r,k){ var m=effM(r,k); return m?m.rag:"N/A"; }
+  function computeWindow(preset){
+    var now=new Date(); var fmt=function(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");};
+    var s=new Date(now);
+    if(preset==="last_week"){ s.setDate(now.getDate()-7); return {start:fmt(s),end:fmt(now)}; }
+    if(preset==="last_2_weeks"){ s.setDate(now.getDate()-14); return {start:fmt(s),end:fmt(now)}; }
+    if(preset==="last_month"){ s.setDate(now.getDate()-30); return {start:fmt(s),end:fmt(now)}; }
+    return {start:"",end:""};
+  }
+  function applyPreset(p){ setWinPreset(p); if(p!=="custom"){ var w=computeWindow(p); setWinStart(w.start); setWinEnd(w.end); } }
 
   var _tab = React.useState("overview"); var activeTab=_tab[0], setActiveTab=_tab[1];
   var byLloRef = React.useRef(null), byLloInst = React.useRef(null);
@@ -534,10 +571,10 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
   React.useEffect(function(){ if (!startDate){ var now=new Date(); var fmt=function(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}; var start=new Date(now); start.setDate(now.getDate()-14); setStartDate(fmt(start)); setEndDate(fmt(now)); } }, []);
 
   var kpi = React.useMemo(function(){
-    var loaded=masterRows.length, excluded=0, anyRed=0, anyYellow=0, totalVisits=0, totalCases=0;
-    masterRows.forEach(function(r){ if (r._excluded) excluded++; if (r.red_count>=1) anyRed++; if (r.yellow_count>=1) anyYellow++; totalVisits+=r.total_visits||0; totalCases+=r.total_cases||0; });
+    var loaded=scoped.length, excluded=0, anyRed=0, anyYellow=0, totalVisits=0, totalCases=0;
+    scoped.forEach(function(r){ if (r._excluded) excluded++; if (r.red_count>=1) anyRed++; if (r.yellow_count>=1) anyYellow++; totalVisits+=r.total_visits||0; totalCases+=r.total_cases||0; });
     return { loaded:loaded, excluded:excluded, anyRed:anyRed, anyYellow:anyYellow, totalVisits:totalVisits, totalCases:totalCases };
-  }, [masterRows]);
+  }, [scoped]);
 
   var freshness = React.useMemo(function(){
     var latest=null;
@@ -549,7 +586,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
 
   var overview = React.useMemo(function(){
     var byC={}, lloTotals={};
-    masterRows.forEach(function(r){
+    scoped.forEach(function(r){
       var c=r.country||"Other", l=r.llo;
       byC[c]=byC[c]||{}; var s=byC[c][l]=byC[c][l]||{flws:0,red:0,yellow:0,clean:0,excluded:0};
       var t=lloTotals[l]=lloTotals[l]||{red:0,yellow:0,clean:0,excluded:0};
@@ -560,22 +597,22 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
       else { s.clean++; t.clean++; }
     });
     var flagRed={}; for (var mi=0;mi<METRIC_KEYS.length;mi++) flagRed[METRIC_KEYS[mi]]=0;
-    masterRows.forEach(function(r){ if (r._excluded) return; for (var mj=0;mj<METRIC_KEYS.length;mj++){ var k=METRIC_KEYS[mj]; if (r[k]&&r[k].rag==="RED") flagRed[k]++; } });
+    scoped.forEach(function(r){ if (r._excluded) return; for (var mj=0;mj<METRIC_KEYS.length;mj++){ var k=METRIC_KEYS[mj]; if (effRag(r,k)==="RED") flagRed[k]++; } });
     var topFlags=METRIC_KEYS.map(function(k){ return {k:k,label:META[k].label,red:flagRed[k]}; }).sort(function(a,b){ return b.red-a.red; });
     var catRed={}; for (var ci=0;ci<CAT_ORDER.length;ci++) catRed[CAT_ORDER[ci]]=0;
     var risk=[], analyzedN=0, flaggedRedN=0, cleanN=0;
-    masterRows.forEach(function(r){
+    scoped.forEach(function(r){
       if (r._excluded) return;
       analyzedN++;
       var catHit={}, reds=[];
-      for (var mi=0;mi<METRIC_KEYS.length;mi++){ var k=METRIC_KEYS[mi]; if (r[k]&&r[k].rag==="RED"){ reds.push(META[k].label); catHit[CAT[k]]=1; } }
+      for (var mi=0;mi<METRIC_KEYS.length;mi++){ var k=METRIC_KEYS[mi]; if (effRag(r,k)==="RED"){ reds.push(META[k].label); catHit[CAT[k]]=1; } }
       for (var cj=0;cj<CAT_ORDER.length;cj++){ if (catHit[CAT_ORDER[cj]]) catRed[CAT_ORDER[cj]]++; }
       if (r.red_count>=1) { flaggedRedN++; risk.push({name:r.flw_name||r.username, username:r.username, llo:r.llo, country:r.country, cases:r.total_cases, red:r.red_count, yellow:r.yellow_count, flags:reds}); }
       else if (r.yellow_count<1) cleanN++;
     });
     risk.sort(function(a,b){ return (b.red-a.red)||(b.cases-a.cases); });
     return { byC:byC, lloTotals:lloTotals, topFlags:topFlags, catRed:catRed, risk:risk, analyzedN:analyzedN, flaggedRedN:flaggedRedN, cleanN:cleanN };
-  }, [masterRows]);
+  }, [scoped, winActive]);
 
   React.useEffect(function(){
     if (activeTab!=="overview" || !byLloRef.current || !window.Chart) return;
@@ -599,7 +636,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
     return function(){ if (topFlagInst.current){ topFlagInst.current.destroy(); topFlagInst.current=null; } };
   }, [activeTab, overview]);
 
-  var analyzed = masterRows.filter(function(r){ return !r._excluded; });
+  var analyzed = scoped.filter(function(r){ return !r._excluded; });
   var filtered = React.useMemo(function(){
     var data = analyzed.slice();
     if (lloFilter!=="all") data=data.filter(function(d){return d.llo===lloFilter;});
@@ -613,11 +650,11 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
       if (sortKey==="name"){ va=a.flw_name||a.username||""; vb=b.flw_name||b.username||""; var c=va.localeCompare(vb); return sortAsc?c:-c; }
       if (sortKey==="cases"){ va=a.total_cases; vb=b.total_cases; }
       else if (sortKey==="red"){ va=a.red_count*100+a.yellow_count; vb=b.red_count*100+b.yellow_count; }
-      else { var m=META[sortKey]; var ma=a[sortKey], mb=b[sortKey]; va=(ma&&ma.value!=null?ma.value:-1); vb=(mb&&mb.value!=null?mb.value:-1); }
+      else { var ma=effM(a,sortKey), mb=effM(b,sortKey); va=(ma&&ma.value!=null?ma.value:-1); vb=(mb&&mb.value!=null?mb.value:-1); }
       return sortAsc?va-vb:vb-va;
     });
     return data;
-  }, [analyzed, filter, lloFilter, verFilter, search, sortKey, sortAsc]);
+  }, [analyzed, filter, lloFilter, verFilter, search, sortKey, sortAsc, winActive]);
 
   var selectedRows = filtered.filter(function(d){ return selected[d.llo+"|"+d.username]; });
   var selectedCount = selectedRows.length;
@@ -629,11 +666,15 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
 
   function bandColor(band){ return band==="RED"?"bg-red-50 text-red-800 font-semibold":band==="YELLOW"?"bg-amber-50 text-amber-800 font-medium":band==="GREEN"?"bg-green-50 text-green-700":"text-gray-400"; }
   function metricCell(d, key){
-    var m=d[key], meta=META[key]; var band=m.rag; var val=fmtVal(m.value, meta.unit); var sub=fmtSub(m);
+    var meta=META[key]; var windowed=winActive && WINDOWED_METRICS[key];
+    var m=windowed ? (d.win[key]||d[key]) : d[key];
+    var band=m.rag; var val=fmtVal(m.value, meta.unit); var sub=fmtSub(m);
     var cls="px-2 py-2 text-center whitespace-nowrap ";
-    if (band==="N/A" || val===null) return h("td",{className:cls+"text-gray-400",key:key,title:meta.label+" — not eligible (insufficient data / field absent)"}, h("span",{className:"italic text-xs"},"NE"));
-    return h("td",{className:cls+bandColor(band),key:key,title:meta.label+"  ["+meta.bands+"]  "+meta.desc},
-      h("div",{className:"text-sm"}, val),
+    var tag=windowed ? h("span",{className:"ml-0.5 text-blue-500 text-xs", title:"windowed to "+winStart+"…"+winEnd}, "◷") : null;
+    var titleExtra=windowed ? ("  [windowed "+winStart+"…"+winEnd+"; full-history "+(fmtVal(d[key].value,meta.unit)||"NE")+"]") : (WINDOWED_METRICS[key]?"":"  [full history]");
+    if (band==="N/A" || val===null) return h("td",{className:cls+"text-gray-400",key:key,title:meta.label+" — not eligible (insufficient data / field absent)"+titleExtra}, h("span",{className:"italic text-xs"},"NE"), tag);
+    return h("td",{className:cls+bandColor(band),key:key,title:meta.label+"  ["+meta.bands+"]  "+meta.desc+titleExtra},
+      h("div",{className:"text-sm"}, val, tag),
       sub?h("div",{className:"text-xs text-gray-400 mt-0.5"}, sub):null);
   }
 
@@ -682,7 +723,8 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
     var done=0, failed=0;
     oppIds.forEach(function(op){
       var opNum=parseInt(op,10);
-      var criteria={ audit_type:"date_range", granularity:"per_flw", title:("KMC Flag Audit "+startDate+" to "+endDate), start_date:startDate, end_date:endDate, count_per_flw:countPerFlw,
+      var aStart=winActive?winStart:startDate, aEnd=winActive?winEnd:endDate;
+      var criteria={ audit_type:"date_range", granularity:"per_flw", title:("KMC Flag Audit "+aStart+" to "+aEnd), start_date:aStart, end_date:aEnd, count_per_flw:countPerFlw,
         related_fields:[{imagePath:"anthropometric/upload_weight_image", fieldPath:"child_weight_visit", label:"Weight Reading", filter_by_image:false, filter_by_field:false}],
         selected_flw_user_ids:byOpp[op] };
       actions.createAudit({ opportunities:[{id:opNum, name:(OPP_META[opNum]||{}).name||("Opp "+opNum)}], criteria:criteria, workflow_run_id:instance.id, ai_agent_id: aiAgent==="none"?undefined:aiAgent })
@@ -718,6 +760,10 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
       h("option",{value:"all"},"All LLOs"), h("option",{value:"PIPN"},"PIPN"), h("option",{value:"NAMA"},"NAMA"), h("option",{value:"GHI"},"GHI"), h("option",{value:"Kikapu"},"Kikapu"), h("option",{value:"EHA"},"EHA"), h("option",{value:"BERI"},"BERI")),
     h("select",{value:verFilter, onChange:function(e){setVerFilter(e.target.value);}, className:"border border-gray-300 rounded-lg px-2 py-1.5 text-sm", title:"Filter by app version"},
       h("option",{value:"all"},"All versions"), h("option",{value:"V1"},"V1 (V0/V1)"), h("option",{value:"V2"},"V2"), h("option",{value:"V3"},"V3")),
+    h("select",{value:winPreset, onChange:function(e){applyPreset(e.target.value);}, className:"border border-gray-300 rounded-lg px-2 py-1.5 text-sm"+(winActive?" border-blue-400 text-blue-700":""), title:"Date window — scopes the 6 ◷ reading-quality flags + the audit + the FLW list. Cohort flags stay full history."},
+      h("option",{value:"all"},"◷ All time"), h("option",{value:"last_week"},"◷ Last 7 days"), h("option",{value:"last_2_weeks"},"◷ Last 14 days"), h("option",{value:"last_month"},"◷ Last 30 days"), h("option",{value:"custom"},"◷ Custom…")),
+    winPreset==="custom" ? h("input",{type:"date", value:winStart, max:winEnd||undefined, onChange:function(e){setWinStart(e.target.value);}, className:"border border-gray-300 rounded-lg px-2 py-1.5 text-sm", title:"Window start"}) : null,
+    winPreset==="custom" ? h("input",{type:"date", value:winEnd, min:winStart||undefined, onChange:function(e){setWinEnd(e.target.value);}, className:"border border-gray-300 rounded-lg px-2 py-1.5 text-sm", title:"Window end"}) : null,
     h("input",{type:"text", placeholder:"Search FLW...", value:search, onChange:function(e){setSearch(e.target.value);}, className:"flex-1 min-w-40 border border-gray-300 rounded-lg px-3 py-1.5 text-sm"}),
     h("label",{className:"flex items-center gap-2 text-sm text-gray-700"}, h("input",{type:"checkbox", checked:showP2, onChange:function(e){setShowP2(e.target.checked);}}), "Show Priority-2 metrics"));
 
@@ -726,7 +772,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
     h("th",{key:"_name", className:thBase+" text-left", onClick:function(){toggleSort("name");}}, "FLW", SortArrow("name")),
     h("th",{key:"_llo", className:thBase+" text-left"}, "LLO · Ver"),
     h("th",{key:"_cases", className:thBase+" text-center", onClick:function(){toggleSort("cases");}}, "Cases", SortArrow("cases")) ];
-  cols.forEach(function(f){ headerCells.push(h("th",{key:f, className:thBase+" text-center"+(PRIORITY[f]===2?" bg-gray-100":""), onClick:function(){toggleSort(f);}, title:META[f].label+"  ["+META[f].bands+"]\n"+META[f].desc}, META[f].label, h("span",{className:"ml-1 text-gray-300"},"ⓘ"), SortArrow(f))); });
+  cols.forEach(function(f){ var wm=WINDOWED_METRICS[f]; headerCells.push(h("th",{key:f, className:thBase+" text-center"+(PRIORITY[f]===2?" bg-gray-100":""), onClick:function(){toggleSort(f);}, title:META[f].label+"  ["+META[f].bands+"]\n"+META[f].desc+(wm?"\n(◷ windowed when a date range is set)":"\n(full history — not affected by the date range)")}, META[f].label, h("span",{className:"ml-1 "+(wm?"text-blue-400":"text-gray-300")}, wm?"◷":"ⓘ"), SortArrow(f))); });
   headerCells.push(h("th",{key:"_red", className:thBase+" text-center", onClick:function(){toggleSort("red");}}, "R/Y", SortArrow("red")));
 
   var bodyRows=[];
@@ -857,7 +903,12 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
   var overviewEl = h("div",{className:"space-y-5"}, glanceEl, catCardsEl, chartsEl, riskEl,
     h("div",{className:"space-y-4"}, h("div",{className:"text-sm font-bold text-gray-700"}, "Coverage by country → LLO"), rollupEl));
 
-  return h("div",{className:"space-y-5 pb-28"}, headerEl, kpiEl, tabBar,
+  var winBannerEl = winActive ? h("div",{className:"bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm text-blue-800 flex items-center flex-wrap gap-x-2 gap-y-1"},
+    h("span",{className:"font-semibold"}, "◷ Window: "+winStart+" → "+winEnd),
+    h("span",{className:"text-blue-600"}, "· "+scoped.length+" FLW"+(scoped.length===1?"":"s")+" active · the 6 ◷ flags are windowed to this range; all other flags stay full-history · a created audit uses this window"),
+    h("button",{onClick:function(){applyPreset("all");}, className:"ml-auto text-xs underline hover:text-blue-900"}, "clear window")) : null;
+
+  return h("div",{className:"space-y-5 pb-28"}, headerEl, kpiEl, tabBar, winBannerEl,
     (activeTab==="overview") ? overviewEl : h("div",{className:"space-y-5"}, filterEl, tableEl),
     (activeTab==="detail") ? actionBar : null, modal);
 }
