@@ -421,9 +421,9 @@ function deriveMetrics(aggRow, visitRows, asOf){
 }
 
 // ============================= display metadata =============================
-var OPP_META = {523:{llo:"NAMA",ver:"V1",name:"NAMA (V0/V1)"},524:{llo:"PIPN",ver:"V1",name:"PIPN (V0/V1)"},675:{llo:"GHI",ver:"V1",name:"GHI-UG (V0)"},874:{llo:"PIPN",ver:"V2",name:"PIPN (V2)"},938:{llo:"NAMA",ver:"V2",name:"NAMA (V2)"},1487:{llo:"PIPN",ver:"V3",name:"PIPN (V3)"},1488:{llo:"NAMA",ver:"V3",name:"NAMA (V3)"},1234:{llo:"GHI",ver:"V2",name:"GHI-KE (V2)"},1739:{llo:"Kikapu",ver:"V3",name:"Kikapu (V3)"},1236:{llo:"EHA",ver:"V2",name:"EHA (V2+)"},1790:{llo:"BERI",ver:"V3",name:"BERI (V3)"}};
+var OPP_META = {523:{llo:"NAMA",ver:"V1",name:"NAMA (V0/V1)"},524:{llo:"PIPN",ver:"V1",name:"PIPN (V0/V1)"},675:{llo:"GHI",ver:"V1",name:"GHI-KE (V0/V1)"},874:{llo:"PIPN",ver:"V2",name:"PIPN (V2)"},938:{llo:"NAMA",ver:"V2",name:"NAMA (V2)"},1487:{llo:"PIPN",ver:"V3",name:"PIPN (V3)"},1488:{llo:"NAMA",ver:"V3",name:"NAMA (V3)"},1234:{llo:"GHI",ver:"V2",name:"GHI-KE (V2)"},1739:{llo:"Kikapu",ver:"V3",name:"Kikapu (V3)"},1236:{llo:"EHA",ver:"V2",name:"EHA (V2+)"},1790:{llo:"BERI",ver:"V3",name:"BERI (V3)"}};
 function verFor(oppId){ var m=OPP_META[oppId]; return m?m.ver:"?"; }
-var COUNTRY = {523:"Uganda",524:"Uganda",675:"Uganda",874:"Uganda",938:"Uganda",1487:"Uganda",1488:"Uganda",1234:"Kenya",1739:"Kenya",1236:"Nigeria",1790:"Nigeria"};
+var COUNTRY = {523:"Uganda",524:"Uganda",675:"Kenya",874:"Uganda",938:"Uganda",1487:"Uganda",1488:"Uganda",1234:"Kenya",1739:"Kenya",1236:"Nigeria",1790:"Nigeria"};
 function countryFor(oppId){ return COUNTRY[oppId]||"Other"; }
 var P1_ORDER = ["low_avg_visits","mortality","enroll_ontime","zero_danger","no_referral","rounded_weights","gps_within_200m","hr_copycat","temp_copycat","spo2_implausible","flw_early_discharge"];
 var P2_ORDER = ["danger_rate_cases","weight_loss","weight_gain_gkgday","modal_weight","flat_weight","image_missing","kmc_wrap_missing"];
@@ -558,6 +558,8 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
   var _sortKey = React.useState("red"); var sortKey=_sortKey[0], setSortKey=_sortKey[1];
   var _sortAsc = React.useState(false); var sortAsc=_sortAsc[0], setSortAsc=_sortAsc[1];
   var _showP2 = React.useState(false); var showP2=_showP2[0], setShowP2=_showP2[1];
+  var _expScope = React.useState("view"); var exportScope=_expScope[0], setExportScope=_expScope[1];
+  var _copied = React.useState(""); var copiedMsg=_copied[0], setCopiedMsg=_copied[1];
   var _expanded = React.useState(null); var expanded=_expanded[0], setExpanded=_expanded[1];
   var _sel = React.useState({}); var selected=_sel[0], setSelected=_sel[1];
   var _modal = React.useState(false); var showModal=_modal[0], setShowModal=_modal[1];
@@ -678,6 +680,45 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
       sub?h("div",{className:"text-xs text-gray-400 mt-0.5"}, sub):null);
   }
 
+  // ---- Table export (UI-only: reads already-built rows; does NOT touch the compute core) ----
+  var EXPORT_METRIC_ORDER = P1_ORDER.concat(P2_ORDER);
+  function _exportRows(scope){ return scope==="all" ? masterRows : filtered; }
+  function _metricForExport(d, k, scope){
+    return (scope!=="all" && winActive && WINDOWED_METRICS[k] && d.win && d.win[k]) ? d.win[k] : d[k];
+  }
+  function _buildExportMatrix(scope){
+    var head=["FLW name","Username","LLO","Country","Versions","Opportunity IDs","Excluded (<20 cases)","Total cases","Total visits","Red flags","Yellow flags"];
+    EXPORT_METRIC_ORDER.forEach(function(k){ var lb=META[k].label; head.push(lb); head.push(lb+" band"); head.push(lb+" n/d"); });
+    var mx=[head];
+    _exportRows(scope).forEach(function(d){
+      var row=[ d.flw_name||d.username||"", d.username||"", d.llo||"", d.country||"", (d.versions||[]).join("/"),
+        (d.opportunity_ids||[]).join(" "), d._excluded?"yes":"no", d.total_cases, d.total_visits, d.red_count, d.yellow_count ];
+      EXPORT_METRIC_ORDER.forEach(function(k){ var m=_metricForExport(d,k,scope)||{}; var v=fmtVal(m.value, META[k].unit);
+        row.push(v==null?"NE":v); row.push((m.rag==null||m.rag==="N/A")?"NE":m.rag);
+        row.push((m.num!=null&&m.den!=null)?(m.num+"/"+m.den):""); });
+      mx.push(row);
+    });
+    return mx;
+  }
+  function _c2s(c){ return c==null?"":String(c); }
+  function _toCSV(mx){ return mx.map(function(r){ return r.map(function(c){ c=_c2s(c); return /[",\n\r]/.test(c)?('"'+c.replace(/"/g,'""')+'"'):c; }).join(","); }).join("\r\n"); }
+  function _toTSV(mx){ return mx.map(function(r){ return r.map(function(c){ return _c2s(c).replace(/[\t\r\n]/g," "); }).join("\t"); }).join("\n"); }
+  function _flash(msg){ setCopiedMsg(msg); window.setTimeout(function(){ setCopiedMsg(""); }, 2600); }
+  function _stamp(){ var dt=new Date(); function p(x){return (x<10?"0":"")+x;} return dt.getFullYear()+p(dt.getMonth()+1)+p(dt.getDate())+"-"+p(dt.getHours())+p(dt.getMinutes()); }
+  function doCopyTable(scope){
+    var mx=_buildExportMatrix(scope), tsv=_toTSV(mx), n=mx.length-1, lbl=(scope==="all"?"all FLWs":"current view");
+    function ok(){ _flash("Copied "+n+" row"+(n===1?"":"s")+" — "+lbl+" (paste into Sheets/Excel)"); }
+    function fb(){ try{ var ta=document.createElement("textarea"); ta.value=tsv; ta.style.position="fixed"; ta.style.top="-9999px"; document.body.appendChild(ta); ta.focus(); ta.select(); var okc=document.execCommand("copy"); document.body.removeChild(ta); okc?ok():_flash("Copy blocked — use Download CSV"); }catch(e){ _flash("Copy blocked — use Download CSV"); } }
+    if (navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(tsv).then(ok, fb); } else fb();
+  }
+  function doDownloadCSV(scope){
+    var mx=_buildExportMatrix(scope), csv="﻿"+_toCSV(mx);
+    try{ var blob=new Blob([csv],{type:"text/csv;charset=utf-8;"}), url=URL.createObjectURL(blob), a=document.createElement("a");
+      a.href=url; a.download="kmc-audit-"+(scope==="all"?"all-flws":"filtered")+"-"+_stamp()+".csv";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); window.setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+      _flash("Downloaded "+(mx.length-1)+" rows CSV"); }catch(e){ _flash("Download failed"); }
+  }
+
   function bandChip(d, key){
     var m=d[key], meta=META[key]; var band=m.rag; var val=fmtVal(m.value, meta.unit); var sub=fmtSub(m);
     var col=band==="RED"?"bg-red-100 text-red-800 border-red-200":band==="YELLOW"?"bg-amber-100 text-amber-800 border-amber-200":band==="GREEN"?"bg-green-50 text-green-700 border-green-200":"bg-gray-50 text-gray-400 border-gray-200";
@@ -766,6 +807,16 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
     winPreset==="custom" ? h("input",{type:"date", value:winEnd, min:winStart||undefined, onChange:function(e){setWinEnd(e.target.value);}, className:"border border-gray-300 rounded-lg px-2 py-1.5 text-sm", title:"Window end"}) : null,
     h("input",{type:"text", placeholder:"Search FLW...", value:search, onChange:function(e){setSearch(e.target.value);}, className:"flex-1 min-w-40 border border-gray-300 rounded-lg px-3 py-1.5 text-sm"}),
     h("label",{className:"flex items-center gap-2 text-sm text-gray-700"}, h("input",{type:"checkbox", checked:showP2, onChange:function(e){setShowP2(e.target.checked);}}), "Show Priority-2 metrics"));
+
+  var exportBarEl = h("div",{className:"bg-white rounded-lg shadow-sm px-3 py-2 flex flex-wrap items-center gap-2"},
+    h("span",{className:"text-xs font-semibold text-gray-500 uppercase tracking-wide mr-1"}, h("i",{className:"fa-solid fa-file-export mr-1"}), "Export"),
+    h("select",{value:exportScope, onChange:function(e){setExportScope(e.target.value);}, className:"border border-gray-300 rounded-lg px-2 py-1.5 text-sm", title:"Choose what to export"},
+      h("option",{value:"view"},"Current view — "+filtered.length+" FLW"+(filtered.length===1?"":"s")+" (filters applied)"),
+      h("option",{value:"all"},"All FLWs — "+masterRows.length+" (no filters)")),
+    h("button",{onClick:function(){doCopyTable(exportScope);}, className:"px-3 py-1.5 text-sm rounded-lg border border-gray-300 bg-white text-gray-700 hover:border-blue-400 hover:text-blue-700"}, h("i",{className:"fa-regular fa-clipboard mr-1.5"}), "Copy table"),
+    h("button",{onClick:function(){doDownloadCSV(exportScope);}, className:"px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700"}, h("i",{className:"fa-solid fa-download mr-1.5"}), "Download CSV"),
+    copiedMsg ? h("span",{className:"text-sm text-green-600 ml-1"}, h("i",{className:"fa-solid fa-check mr-1"}), copiedMsg) : null,
+    h("span",{className:"text-xs text-gray-400 ml-auto"}, "all 18 metrics · value · band · n/d"+(winActive?" · current-view honors the ◷ window; all-FLWs is full history":"")));
 
   var cols = P1_ORDER.concat(showP2?P2_ORDER:[]);
   var headerCells=[ h("th",{key:"_chk", className:"px-2 py-3 w-8"}),
@@ -909,7 +960,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
     h("button",{onClick:function(){applyPreset("all");}, className:"ml-auto text-xs underline hover:text-blue-900"}, "clear window")) : null;
 
   return h("div",{className:"space-y-5 pb-28"}, headerEl, kpiEl, tabBar, winBannerEl,
-    (activeTab==="overview") ? overviewEl : h("div",{className:"space-y-5"}, filterEl, tableEl),
+    (activeTab==="overview") ? overviewEl : h("div",{className:"space-y-5"}, filterEl, exportBarEl, tableEl),
     (activeTab==="detail") ? actionBar : null, modal);
 }
 """
