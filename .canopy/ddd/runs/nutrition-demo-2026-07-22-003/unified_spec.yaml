@@ -56,8 +56,9 @@ capabilities:
 - Distinguish a coached-to-close flag from a still-open investigation from an AI-caught
   misleading-photo suspension at a glance via the cell status pills and panel record
   pills.
-- Follow a single flagged child's MUAC recovery across their SAM follow-up visits —
-  red (SAM) through yellow (MAM) to green (recovered) — on a per-child follow-up timeline.
+- Follow a single flagged child's MUAC recovery across their SAM follow-up visits
+  — red (SAM) through yellow (MAM) to green (recovered) — on a per-child follow-up
+  timeline.
 getting_started:
 - Open your program's Program Admin Report run from the workflow list at /labs/workflow/.
 - Read the aggregate column to see which network managers met the SOP and which fell
@@ -580,8 +581,9 @@ scenes:
   - kind: wait_for
     must_succeed: true
     note: the AI badge itself — proves the AI-review verdict rendered, not just photos.
-      Exact-match regex so we bind the VISIBLE "Hyperzoomed" (no_match) badge, not the
-      hidden "Not Hyperzoomed" x-show spans that substring-match and sort first in the DOM.
+      Exact-match regex so we bind the VISIBLE "Hyperzoomed" (no_match) badge, not
+      the hidden "Not Hyperzoomed" x-show spans that substring-match and sort first
+      in the DOM.
     seconds: 20
     target: css:text=/^Hyperzoomed$/
   - kind: scroll_to
@@ -645,9 +647,9 @@ scenes:
   role: demo
   url: https://labs.connect.dimagi.com/labs/workflow/5017/run/?run_id=5019&opportunity_id=10036
   concept_claim: 'The SAM Follow-up Timeline tracks every flagged child''s MUAC across
-    their follow-up visits, so the program manager can watch one child climb from red
-    (SAM) through yellow (MAM) to green (recovered) over the review period — the oversight
-    loop closing on a child, not a metric.
+    their follow-up visits, so the program manager can watch one child climb from
+    red (SAM) through yellow (MAM) to green (recovered) over the review period — the
+    oversight loop closing on a child, not a metric.
 
     '
   design_intent: 'The funder''s ultimate unit is a child getting better, so the demo
@@ -674,9 +676,9 @@ scenes:
 
       '
   - id: recovery-status
-    description: 'A child whose latest MUAC reaches >=12.5 cm is marked Recovered, distinguishing
-      children who have climbed out of severe acute malnutrition from those still in
-      treatment.
+    description: 'A child whose latest MUAC reaches >=12.5 cm is marked Recovered,
+      distinguishing children who have climbed out of severe acute malnutrition from
+      those still in treatment.
 
       '
     verify: 'Playwright: assert the children table shows a ''Recovered'' column and
@@ -690,31 +692,36 @@ scenes:
     target: text:Latest MUAC
   - kind: wait_for
     must_succeed: true
-    note: at least one child row decoded before the cohort frame (gates on data load, not just the shell)
+    note: at least one child row decoded before the cohort frame (gates on data load,
+      not just the shell)
     seconds: 20
     target: css:tbody tr td
   - kind: scroll_to
     target: text:Recovered
   - kind: hold
-    note: the cohort - the program's children with their latest MUAC colour and the Recovered count
+    note: the cohort - the program's children with their latest MUAC colour and the
+      Recovered count
     seconds: 2
   - kind: click
     must_succeed: true
-    note: open the timeline for Beneficiary 1 (row 1, latest MUAC 13.5cm green/recovered, climbs from
-      red 11.0cm across 8 follow-ups). The drill fires ONLY from the row's Timeline button, not the
-      name cell; scope the row by exact-id text so 'Beneficiary 1' does not substring-match Beneficiary 10-19.
-    target: 'css:tr:has(div:text-is("Beneficiary 1")) button'
+    note: open the timeline for Beneficiary 1 (row 1, latest MUAC 13.5cm green/recovered,
+      climbs from red 11.0cm across 8 follow-ups). The drill fires ONLY from the row's
+      Timeline button, not the name cell; scope the row by exact-id text so 'Beneficiary
+      1' does not substring-match Beneficiary 10-19.
+    target: css:tr:has(div:text-is("Beneficiary 1")) button
   - kind: wait_for
     must_succeed: true
-    note: the follow-ups count renders only inside the open timeline panel - proves the drill opened
-      the timeline (vs the table header Latest MUAC that a substring wait would falsely match)
+    note: the follow-ups count renders only inside the open timeline panel - proves
+      the drill opened the timeline (vs the table header Latest MUAC that a substring
+      wait would falsely match)
     seconds: 8
     target: text:follow-ups
   - kind: scroll_to
     target: text:follow-ups
   - kind: hold
-    note: the closing payoff - Beneficiary 1's MUAC climbing across 8 follow-ups from red (11.0cm) to green (13.5cm), recovered
+    note: the closing payoff - Beneficiary 1's MUAC climbing across 8 follow-ups from
+      red (11.0cm) to green (13.5cm), recovered
     seconds: 4
-narrative_synced_version: 2
-narrative_synced_hash: b409deb86cb3e1f52b1258826bad15c6c41631d4e8510918ad26580e47763441
-narrative_synced_at: '2026-07-22T12:42:46.367946+00:00'
+narrative_synced_version: 3
+narrative_synced_hash: 5b997d08822e0f06ecd974535f83a027d2eff3c310ae4314232e01e2968ac60e
+narrative_synced_at: '2026-07-22T22:01:28.500954+00:00'

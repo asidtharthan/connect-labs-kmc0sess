@@ -4,59 +4,47 @@ gate: gating
 live_state_verified: true
 calibration: provisional
 rubric_name: ddd-concept-eval
-ran_at: '2026-07-22T16:05:00Z'
+ran_at: '2026-07-22T17:05:00Z'
 run_dir: /Users/jjackson/emdash/worktrees/connect-labs/nutrition-demo-env/.canopy/ddd/runs/nutrition-demo-2026-07-22-003/
-# Aggregate = weakest-link across all 12 scenes. Scenes 1-11 render byte-identical
-# (page_text md5-identical) to the independently-judged run nutrition-demo-2026-07-22-002
-# (concept 5.0 all dims) and are carried forward at 5. Scene 12 ("Priya follows one
-# child's recovery", SAM Follow-up Timeline / workflow 5017 / opp 10036) is the only
-# new scene; it is AGENT-ASSESSED (no fresh sub-agent dispatch available in this
-# orchestrator context) and drives every sub-5 dimension below. Scored adversarially
-# to counter builder upward-bias.
+# iter1 re-judge after workflow 5017 render-code v3 added the MUAC-recovery SPARKLINE
+# to scene 12's per-child timeline. Aggregate = weakest-link across all 12 scenes.
+# Scenes 1-11 render page_text-md5-IDENTICAL to the independently-judged run
+# nutrition-demo-2026-07-22-002 (concept 5.0 all dims) and are carried forward at 5.
+# Scene 12 ("Priya follows one child's recovery", SAM Follow-up Timeline / wf 5017 /
+# opp 10036) is the only changed scene; AGENT-ASSESSED (no fresh sub-agent dispatch
+# available in this orchestrator context — flagged, scored adversarially). The two
+# prior sub-5 caps (visual_polish 4, claim_reality 4) were BOTH explicitly the missing
+# recovery curve; the shipped sparkline resolves both against an objective, pre-registered
+# criterion ("full red->green arc visible in one frame"), verified live.
 self_assessed_scenes: [12]
 dimensions:
   concept_clarity:
     score: 5
-    weight: 0.15
-    justification: "Scene 12 lands the payoff a cold viewer can state in one sentence: the program-to-child line closes on one child's MUAC climbing out of severe-acute (red) to recovered (green). Scenes 1-11 unchanged (5)."
-  use_case_soundness:
-    score: 5
-    weight: 0.15
-    justification: "The whole arc (program -> network manager -> flagged worker -> individual child recovery) does load-bearing work on the funder's ultimate unit — a child getting better. Scene 12 shows a real 8-visit per-child trajectory, not a toy input."
+    weight: 0.20
+    justification: "Scene 12 lands the payoff a cold viewer states in one sentence: the program-to-child line closes on one child's MUAC climbing out of severe-acute (red) to recovered (green). The sparkline makes the arc self-evident. Scenes 1-11 unchanged (5)."
   design_soundness:
     score: 5
     weight: 0.20
-    justification: "Scene 12 drill is coherent — clicking a child row's Timeline button opens the inline per-visit panel (action_trace: click ok, follow-ups panel rendered). No dead ends. Scenes 1-11 unchanged (5)."
+    justification: "Scene 12 drill is coherent — the child row's Timeline button opens the inline per-visit panel (action_trace: click ok, follow-ups panel + sparkline rendered). No dead ends. Scenes 1-11 unchanged (5)."
   visual_polish:
-    score: 4
-    weight: 0.12
-    justification: "Scene 12 (the only sub-5): clean stat tiles + a color-coded per-visit timeline (chips encode the objective MUAC thresholds red<11.5/yellow<12.5/green>=12.5 — justified, not editorializing). One minor designer note: the recovery reads as a vertical color-coded LIST rather than one visible curve, and the green recovered visits sit below the panel's internal max-h scroll, so the green endpoint is conveyed via the header chip + the child's table row rather than the visit list itself. Legible and honest, just not maximally punchy. Scenes 1-11 unchanged (5)."
-  why_groundedness:
     score: 5
     weight: 0.15
-    justification: "Scene 12 provenance S4 resolves to a why_brief spine item whose evidence is kind:implemented and directly names the SAM Follow-up Timeline (workflow 5017 / opp 10036) — the former CAPABILITY gap G1, now built. Unbroken claim->evidence chain. Scenes 1-11 unchanged (5)."
+    justification: "RESOLVED from prior 4. The panel now leads with an inline SVG MUAC recovery curve (header 'MUAC (cm) recovery curve - follow-up #1...8'): a rising slate line, per-visit points colour-coded to the objective MUAC bands (red<11.5 / yellow<12.5 / green>=12.5), faint 11.5 + 12.5 dashed reference lines, ending on a green point clearly above 12.5. The full red-start->green-recovered arc is now visible in ONE frame — exactly the prior finding's requested fix. Honest real-data jitter (a FU#4 dip back to red) reads as credible clinical reality, not a polish flaw. Scenes 1-11 unchanged (5)."
+  why_groundedness:
+    score: 5
+    weight: 0.20
+    justification: "Scene 12 provenance S4 resolves to a why_brief spine item whose evidence is kind:implemented and names the SAM Follow-up Timeline (wf 5017 / opp 10036) — the former CAPABILITY gap G1, now built AND now visualised as a curve. Unbroken claim->evidence chain. Scenes 1-11 unchanged (5)."
   claim_reality_coherence:
-    score: 4
+    score: 5
     weight: 0.10
     blocking: false
-    justification: "Advisory. Scene 12 concept_claim promises a climb 'from red through yellow to green (recovered)'. Footage shows red (FU#1 11.0cm) -> yellow (FU#5-6 12.3cm) explicitly in the visit list and green/recovered in the panel header + table row; the specific green visit rows (FU#7-8) sit below the panel fold, so the green endpoint is asserted rather than shown in the list. Minor trust-the-header moment. Non-blocking, excluded from overall."
+    justification: "Advisory. RESOLVED from prior 4. The concept_claim promises a climb 'from red through yellow to green (recovered)'. The sparkline now SHOWS it end to end: red points (FU#1-2, ~11.0cm) below the 11.5 line, yellow mid-band points, and a green endpoint (FU#8, 13.5cm) above the 12.5 line — plus the header 'latest MUAC: 13.5 cm [green] - status: recovered'. The green endpoint is shown, no longer asserted-below-the-fold. Non-blocking, excluded from overall."
   motion_friction:
     score: 5
-    weight: 0.13
-    justification: "Scene 12 loads the saved run directly (run_id=5019, no Create-Run wait), gates on content (wait_for Latest MUAC + tbody row) so the captured frame is settled with no loading spinner; scroll_to brings the narrated timeline fully into frame; red-start-visible framing is the correct editorial choice. Scenes 1-11 unchanged (5)."
-overall_score: 4
+    weight: 0.15
+    justification: "Scene 12 loads the saved run directly (run_id=5019, no Create-Run wait), gates on content (wait_for Latest MUAC + tbody row) so the captured frame is settled with no spinner; scroll_to brings the narrated timeline + curve fully into frame. Scenes 1-11 unchanged (5)."
+overall_score: 5
 overall_rule: lowest
 verdict: pass
 blocking_reason: null
-fix_recommendation: |
-  [DEFER] Scene 12 is converged (all gating dims >= 4). Two OPTIONAL, non-blocking
-  enhancements to lift it from 4 to 5, neither with a clearly-better single fix:
-  (1) visual_polish/claim_reality: make the full red->green arc visible in one frame —
-      e.g. a compact per-visit sparkline in the timeline panel header, or size the
-      panel so all 8 visits show without internal scroll. Trade-off: showing the
-      green tail would push the red START (the crisis that makes recovery meaningful)
-      off-frame, so the current red-start framing is a defensible editorial choice.
-      fix_kind: options (sparkline vs expand-panel vs keep-as-is).
-  (2) trust: children render as "Beneficiary N" (real source child_name is null;
-      this is honest privacy anonymization of a real opp-879 mirror trajectory, NOT
-      lorem/test-data). Substituting fabricated names would be WORSE. Leave as-is.
+fix_recommendation: null
