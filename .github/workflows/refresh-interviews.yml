@@ -19,7 +19,12 @@ name: Refresh Interviews Dashboard
 on:
   schedule:
     - cron: '37 4 * * *' # 04:37 UTC daily — off-peak, odd minute (avoids top-of-hour scheduler congestion that delayed the '0 6' run by ~4h)
-  workflow_dispatch: {} # also runnable on-demand from the Actions tab
+  workflow_dispatch: # also runnable on-demand from the Actions tab
+    inputs:
+      full_resync:
+        description: 'Full OCS re-scan (state+words) to self-heal — slower + many more OCS requests; leave off for normal incremental runs'
+        type: boolean
+        default: false
 
 concurrency:
   group: refresh-interviews
@@ -51,6 +56,19 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install -r requirements-refresh.txt
+      # Carry the OCS caches between daily runs so the session/word pulls are INCREMENTAL (only new +
+      # recently-changed sessions) instead of re-downloading all ~18k sessions each day. Rolling key:
+      # every run saves a fresh cache (unique key) and restores the most recent prior one (restore-keys
+      # prefix). A cache miss (first run / eviction) just makes the scripts do a one-off full seed.
+      - name: Restore OCS caches (incremental sync state)
+        uses: actions/cache@v4
+        with:
+          path: |
+            _ocs_state_cache.json
+            _ocs_words_cache.json
+          key: ocs-cache-${{ github.run_id }}
+          restore-keys: |
+            ocs-cache-
       - name: Reassemble Connect snapshot from secrets (FALLBACK if the headless pull fails)
         env:
           CONNECT_SNAP_1: ${{ secrets.CONNECT_SNAP_1 }}
@@ -60,7 +78,10 @@ jobs:
           printf '%s' "${CONNECT_SNAP_1}${CONNECT_SNAP_2}${CONNECT_SNAP_3}" | base64 -d | gunzip > connect_user_data_snapshot.csv || true
           echo "fallback snapshot rows: $(wc -l < connect_user_data_snapshot.csv 2>/dev/null || echo 0)"
       - name: Refresh (Connect headless + HQ + OCS), audit, and publish dashboard
-        run: python refresh_interviews_dashboard.py --pull-connect --pull-hq --pull-ocs --pull-words --push
+        run: |
+          EXTRA=""
+          if [ "${{ inputs.full_resync }}" = "true" ]; then EXTRA="--full-resync"; echo "FULL OCS re-scan requested"; fi
+          python refresh_interviews_dashboard.py --pull-connect --pull-hq --pull-ocs --pull-words --push $EXTRA
       - name: Clean up snapshot (don't persist participant data on the runner)
         if: always()
         run: rm -f connect_user_data_snapshot.csv
