@@ -237,7 +237,10 @@ def main():
     ap.add_argument("--pull-words", action="store_true", help="live-pull OCS message word counts (avg-words metric)")
     ap.add_argument("--pull-connect", action="store_true", help="live-pull Connect user_data (needs PAT)")
     ap.add_argument("--push", action="store_true", help="push refreshed render to workflow 3962 (needs PAT)")
+    ap.add_argument("--full-resync", action="store_true",
+                    help="force a FULL OCS re-scan (state + words) instead of the incremental window (self-heal)")
     args = ap.parse_args()
+    ocs_full = ["--full"] if args.full_resync else []
 
     print(f"Connect Interviews dashboard refresh — workflow {WORKFLOW_ID} (opp {OWNER_OPP})", flush=True)
 
@@ -253,11 +256,11 @@ def main():
     else:
         print("\n=== 1. pull HQ: skipped (using existing hq_pull_full/) ===", flush=True)
     if args.pull_ocs:
-        run("2. pull OCS sessions", [PY, "pull_ocs_state.py"])
+        run("2. pull OCS sessions (incremental)", [PY, "pull_ocs_state.py", *ocs_full])
     else:
         print("\n=== 2. pull OCS: skipped (using existing _ocs_state_cache.json) ===", flush=True)
     if args.pull_words:
-        run("2b. pull OCS message word counts", [PY, "pull_ocs_words.py"])
+        run("2b. pull OCS message word counts (incremental)", [PY, "pull_ocs_words.py", *ocs_full])
     else:
         print("\n=== 2b. pull words: skipped (using existing _ocs_words_cache.json) ===", flush=True)
     if args.pull_connect:
