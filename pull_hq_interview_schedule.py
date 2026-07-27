@@ -40,6 +40,9 @@ _DEFAULT_DOMAINS = [
     "connect-int-ng-eha-2wt",
     "ccc-interview-abtest3-cow",
     "ccc-interview-abtest3-eha",
+    # Extension cohorts — separate domains, cohorts 1ECC1 (COWACDI) / 1ECE1 (EHA).
+    "connect-int-ng-cowac-ext",
+    "connect-int-ng-eha-ext",
 ]
 
 _creds_file = ROOT / ".hq_creds.json"
@@ -103,7 +106,11 @@ def build_chain(cohort_rows):
         seen.add(prev)
         d = by_prev[prev]
         topic = (d.get("next_interview") or "").strip()
-        if topic in ("--", ""):  # terminal sentinel (e.g. 2WT chain: 14 -> "--"); not a real interview
+        if topic in (
+            "--",
+            "",
+            "99",
+        ):  # terminal sentinel (2WT: 14 -> "--"; Extension: C -> "99"); not a real interview
             break
         seq.append({"n": len(seq) + 1, "topic": topic, "offset_days": offset})
         try:

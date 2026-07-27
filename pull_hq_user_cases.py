@@ -34,6 +34,9 @@ _DEFAULT_DOMAINS = [
     "connect-interview-eha-2",
     "ccc-interview-panel-cowac",
     "ccc-interview-panel-eha",
+    # Extension cohorts — 1ECC1 (COWACDI) / 1ECE1 (EHA).
+    "connect-int-ng-cowac-ext",
+    "connect-int-ng-eha-ext",
 ]
 
 _creds_file = ROOT / ".hq_creds.json"

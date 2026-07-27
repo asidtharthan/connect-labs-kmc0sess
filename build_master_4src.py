@@ -44,6 +44,9 @@ ALL_DOMAINS = [
     # ABT3 (Interview Length A/B test) — separate domains, cohorts 3ABT3C* (COWACDI) / 3ABT3E* (EHA).
     "ccc-interview-abtest3-cow",
     "ccc-interview-abtest3-eha",
+    # Extension cohorts — separate domains, cohorts 1ECC1 (COWACDI) / 1ECE1 (EHA).
+    "connect-int-ng-cowac-ext",
+    "connect-int-ng-eha-ext",
 ]
 
 # FALLBACK only — the live SUBGROUP_DESIGN is derived from the CommCare HQ `interview_schedule`
@@ -62,6 +65,7 @@ _FALLBACK_DESIGN = {
     "ABT3-A": {"topics": ["8S", "13", "10S", "11S"], "cadence": 3},
     "ABT3-B": {"topics": ["8L", "13L", "10L", "11L"], "cadence": 3},
     "2WT": {"topics": ["14"], "cadence": 14},  # 2-Week Test: single interview on topic 14; live design from CCHQ lookup
+    "EXT": {"topics": ["11", "C"], "cadence": 3},  # Extension: 2 interviews (Water & Diarrhea 2, Nutrition); live design from CCHQ lookup
 }
 # Authoritative map locked to master_v7_2026-06-10 (incl. the 'Prevalance' typo in C).
 TOPIC_NAMES = {
@@ -113,6 +117,7 @@ COHORT_TYPE_MAP = {
     "ABT3-A": "ABT3 A",
     "ABT3-B": "ABT3 B",
     "2WT": "2WT (2-Week Test)",
+    "EXT": "Extension",
 }
 
 # Cohorts seen in the data whose id doesn't map to any known subgroup design. Collected (not dropped
@@ -136,6 +141,8 @@ def cohort_to_sg(c):
         return "ABT3-A" if "A" in c[5:] else "ABT3-B"
     if re.search(r"2WT[CE]\d", c):  # 2-Week Test cohorts: 2WTC1 (COWACDI), 2WTE1 (EHA)
         return "2WT"
+    if re.search(r"EC[CE]\d", c):  # Extension cohorts: 1ECC1 (COWACDI), 1ECE1 (EHA) — COWACDI+EHA share one EXT subgroup
+        return "EXT"
     if re.search(r"P[CE]\d", c):  # Panel cohorts: 1PC1 (COWACDI), 1PE1 (EHA) — tight pattern, not a loose "PE" substring
         return "PANEL"
 
