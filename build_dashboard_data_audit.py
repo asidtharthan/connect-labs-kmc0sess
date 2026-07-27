@@ -37,7 +37,7 @@ chk("table3 identical", dd["table3"] == pay["table3"])
 
 # avg_words: independent recompute = Σ session_human_words / Σ session_human_msgs over STARTED rows
 _ROLL = {"TRS": "TRS", "TRE": "TRE", "ABT1-A": "ABT1", "ABT1-B": "ABT1", "ABT2-A": "ABT2", "ABT2-B": "ABT2",
-         "PANEL": "PANEL", "ABT3-A": "ABT3", "ABT3-B": "ABT3", "2WT": "2WT"}
+         "PANEL": "PANEL", "ABT3-A": "ABT3", "ABT3-B": "ABT3", "2WT": "2WT", "EXT": "EXT"}
 
 
 def _avg(pred):

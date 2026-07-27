@@ -64,6 +64,8 @@ def _cohort_to_sg(c):
         return "ABT3-A" if "A" in c[5:] else "ABT3-B"
     if re.search(r"2WT[CE]\d", c):
         return "2WT"
+    if re.search(r"EC[CE]\d", c):  # Extension cohorts: 1ECC1 (COWACDI), 1ECE1 (EHA)
+        return "EXT"
     if re.search(r"P[CE]\d", c):
         return "PANEL"
     return None
