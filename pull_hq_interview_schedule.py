@@ -106,11 +106,7 @@ def build_chain(cohort_rows):
         seen.add(prev)
         d = by_prev[prev]
         topic = (d.get("next_interview") or "").strip()
-        if topic in (
-            "--",
-            "",
-            "99",
-        ):  # terminal sentinel (2WT: 14 -> "--"; Extension: C -> "99"); not a real interview
+        if topic in ("--", ""):  # terminal sentinel (e.g. 2WT chain: 14 -> "--"); not a real interview
             break
         seq.append({"n": len(seq) + 1, "topic": topic, "offset_days": offset})
         try:

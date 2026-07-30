@@ -65,7 +65,7 @@ _FALLBACK_DESIGN = {
     "ABT3-A": {"topics": ["8S", "13", "10S", "11S"], "cadence": 3},
     "ABT3-B": {"topics": ["8L", "13L", "10L", "11L"], "cadence": 3},
     "2WT": {"topics": ["14"], "cadence": 14},  # 2-Week Test: single interview on topic 14; live design from CCHQ lookup
-    "EXT": {"topics": ["11", "C"], "cadence": 3},  # Extension: 2 interviews (Water & Diarrhea 2, Nutrition); live design from CCHQ lookup
+    "EXT": {"topics": ["11", "C", "99"], "cadence": 3},  # Extension: 3 interviews (Water & Diarrhea 2, Nutrition, Qualitative); live design from CCHQ lookup
 }
 # Authoritative map locked to master_v7_2026-06-10 (incl. the 'Prevalance' typo in C).
 TOPIC_NAMES = {
@@ -98,6 +98,7 @@ TOPIC_NAMES = {
     "13L": "Medicine Quality & Counterfeiting 3",
     "F": "Care Seeking Behavior",
     "G": "Trust, Beliefs & Health Perceptions",
+    "99": "Qualitative Interview",  # Extension cohort's 3rd interview (open-ended experience/feedback)
 }
 # Question count per topic (Cohort Tracker → Topics_Master). Design metadata for Breakdowns → By Topic.
 TOPIC_QUESTIONS = {
@@ -105,6 +106,7 @@ TOPIC_QUESTIONS = {
     "1": 9, "2": 10, "3": 19, "4": 16, "5": 5, "6": 13, "7": 7,
     "8": 10, "9": 5, "10": 8, "11": 10, "12": 13, "13": 7, "14": 20,
     "8S": 7, "8L": 20, "10S": 7, "10L": 20, "11S": 7, "11L": 20, "13L": 20,
+    "99": 1,  # Extension qualitative interview: 1 multi-part question
 }
 COHORT_TYPE_MAP = {
     "TRS": "Standard",
