@@ -198,15 +198,16 @@ for sg in SG_PRESENT:
     line_days[sg] = days_series
 
 # ---- per-subgroup "still rolling out" flag (drives the dotted funnel line) ----
-# The dotted/settled line should reflect whether a subgroup is still working through its interview
-# schedule, not the release-window guess (training_date = earliest invited_date, which for re-draw
-# cohorts like ABT3 precedes the real interview start by ~a week, so windows read "settled" while
-# interviews are still firing). "Recent trigger" is NOT a usable signal — every subgroup accrues a
-# long tail of late/returning triggers, so that would mark everything active. Instead: a subgroup is
-# "active" (-> dotted) if ANY of its cohorts is still within its schedule window, measured from that
-# cohort's FIRST real interview trigger (its true start): today - first_trigger <= num_interviews x
-# cadence. That ignores the tail (uses the start), so ABT3 (started ~1 week ago) is dotted while TRS
-# (started in April) is solid. Additive: does not touch line_status, funnel numbers, or the nulling.
+# Option A (data-driven, no hardcoded dates): a subgroup is "active" (-> dotted) while it is still
+# releasing interviews, i.e. TODAY is on/before the projected release of its LAST interview for its
+# latest-launching cohort; SOLID once every cohort's last interview has been released. Projected from
+# signals the pipeline already holds: each cohort's invitation/training date + the CCHQ schedule's
+# cumulative offset to the last interview (`_offset`), plus a fixed lag for FLWs to finish Learn before
+# interview 1 fires. (training_date = earliest invited_date, which for re-draw cohorts precedes the
+# real interview start by ~a week — the lag absorbs that skew.) Falls back to the cohort's FIRST real
+# interview trigger + offset when the invitation date isn't available yet, and marks a present-but-
+# date-less cohort active. Additive: does not touch line_status, funnel numbers, or the nulling.
+LINE_LAG_DAYS = 7  # invitation/training date -> interview-1 release lag (FLWs complete Learn first)
 _cohort_first_trig = {}
 for r in bm.rows:
     _td = bm.parse_dt(r.get("trigger_received_on"))
@@ -214,12 +215,23 @@ for r in bm.rows:
     if _td and (_c not in _cohort_first_trig or _td < _cohort_first_trig[_c]):
         _cohort_first_trig[_c] = _td
 line_active = {sg: False for sg in SG_PRESENT}
-for _c, _ft in _cohort_first_trig.items():
+# iterate every cohort seen in the data (cohort_info only holds the older cohorts, so the newer
+# subgroups would be missed if we looped over it — the union below keeps them in).
+for _c in set(_cohort_first_trig) | set(bm.cohort_info):
     _sg = bm.cohort_to_sg(_c)
     if _sg not in line_active:
         continue
-    _span = len(bm.SUBGROUP_DESIGN[_sg]["topics"]) * bm.SUBGROUP_DESIGN[_sg]["cadence"]
-    if (TODAY - _ft.date()).days <= _span:
+    _last_off = _offset(_c, len(bm.SUBGROUP_DESIGN[_sg]["topics"]), _sg)
+    _cad = bm.SUBGROUP_DESIGN[_sg]["cadence"]  # grace: one cadence for the last interview to be taken
+    _train = bm.cohort_info.get(_c, {}).get("training_date")
+    if _train:
+        _end = _train + timedelta(days=LINE_LAG_DAYS + _last_off + _cad)
+    elif _c in _cohort_first_trig:
+        _end = _cohort_first_trig[_c].date() + timedelta(days=_last_off + _cad)
+    else:
+        line_active[_sg] = True  # present but no invitation/trigger date yet -> still rolling out
+        continue
+    if TODAY <= _end:
         line_active[_sg] = True
 
 
