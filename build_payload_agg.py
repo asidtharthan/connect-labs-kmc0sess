@@ -234,6 +234,20 @@ for _c in set(_cohort_first_trig) | set(bm.cohort_info):
     if TODAY <= _end:
         line_active[_sg] = True
 
+# Authoritative dotted->solid dates from the program rollout schedule (per the cohort tracker /
+# program owners). These OVERRIDE the derived projection above for named subgroups whose real rollout
+# can't be inferred from the schedule alone — PANEL is behind its 13-interview schedule (would project
+# into mid-Aug) and EXT is still ramping (a derived estimate undershoots). Any subgroup NOT listed here
+# keeps the data-driven estimate above, so new subgroups still auto-derive. Update when the rollout
+# schedule changes; drop an entry once its date has passed to hand the subgroup back to the estimate.
+LINE_DOTTED_UNTIL = {
+    "PANEL": date(2026, 7, 31),  # dotted through Jul 31 -> solid Aug 1
+    "EXT": date(2026, 8, 9),     # dotted through Aug 9  -> solid Aug 10
+}
+for _sg, _until in LINE_DOTTED_UNTIL.items():
+    if _sg in line_active:
+        line_active[_sg] = TODAY <= _until
+
 
 # ---- Tables 1-3 ----
 def agg(keyfn, keys):
