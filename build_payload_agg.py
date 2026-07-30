@@ -198,16 +198,29 @@ for sg in SG_PRESENT:
     line_days[sg] = days_series
 
 # ---- per-subgroup "still rolling out" flag (drives the dotted funnel line) ----
-# A subgroup's funnel line is DOTTED (still collecting) through its explicit rollout cutoff, and SOLID
-# the day after. These dates come from the program schedule (authoritative), NOT a derived heuristic:
-# the old design-span guess (today - first_trigger <= num_interviews x cadence) mis-timed the switch
-# because late/early triggers and re-draw cohorts skew the start, so a line would settle while
-# interviews were still firing (or vice-versa). Interviews for every subgroup conclude 2026-07-31;
-# the Extension cohort (EXT) runs on to 2026-08-09. Update these dates as the schedule changes.
-# Additive: does not touch line_status, funnel numbers, or the nulling.
-_LINE_DOTTED_UNTIL = {"EXT": date(2026, 8, 9)}
-_LINE_DOTTED_UNTIL_DEFAULT = date(2026, 7, 31)
-line_active = {sg: TODAY <= _LINE_DOTTED_UNTIL.get(sg, _LINE_DOTTED_UNTIL_DEFAULT) for sg in SG_PRESENT}
+# The dotted/settled line should reflect whether a subgroup is still working through its interview
+# schedule, not the release-window guess (training_date = earliest invited_date, which for re-draw
+# cohorts like ABT3 precedes the real interview start by ~a week, so windows read "settled" while
+# interviews are still firing). "Recent trigger" is NOT a usable signal — every subgroup accrues a
+# long tail of late/returning triggers, so that would mark everything active. Instead: a subgroup is
+# "active" (-> dotted) if ANY of its cohorts is still within its schedule window, measured from that
+# cohort's FIRST real interview trigger (its true start): today - first_trigger <= num_interviews x
+# cadence. That ignores the tail (uses the start), so ABT3 (started ~1 week ago) is dotted while TRS
+# (started in April) is solid. Additive: does not touch line_status, funnel numbers, or the nulling.
+_cohort_first_trig = {}
+for r in bm.rows:
+    _td = bm.parse_dt(r.get("trigger_received_on"))
+    _c = r["cohort_id"]
+    if _td and (_c not in _cohort_first_trig or _td < _cohort_first_trig[_c]):
+        _cohort_first_trig[_c] = _td
+line_active = {sg: False for sg in SG_PRESENT}
+for _c, _ft in _cohort_first_trig.items():
+    _sg = bm.cohort_to_sg(_c)
+    if _sg not in line_active:
+        continue
+    _span = len(bm.SUBGROUP_DESIGN[_sg]["topics"]) * bm.SUBGROUP_DESIGN[_sg]["cadence"]
+    if (TODAY - _ft.date()).days <= _span:
+        line_active[_sg] = True
 
 
 # ---- Tables 1-3 ----
