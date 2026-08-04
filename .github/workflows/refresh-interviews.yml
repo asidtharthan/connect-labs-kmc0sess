@@ -33,7 +33,11 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 50 (not 30) so a one-off FULL OCS rebuild (when the incremental cache is lost/evicted: full
+    # session scan ~7min + full word-count fetch of ~9.4k sessions ~25min + build/audit/publish) can
+    # complete and re-save the cache. Steady-state incremental runs finish in ~8min; the headroom only
+    # matters on the recovery run after a cache miss.
+    timeout-minutes: 50
     env:
       PYTHONUTF8: '1'
       PYTHONIOENCODING: 'utf-8'
