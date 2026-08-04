@@ -478,20 +478,64 @@ if connect_pending_sgs:
 # starter counts tie out exactly with table1[sg].flws / connectFunnel[sg].started. Session DATE is the
 # OCS session start (created_at, UTC), joined via matched_session_id. Collapsed to one row per (flw,day).
 _sid2date = {e["sid"]: e["first"].date() for _lst in bm.ocs_by_key.values() for e in _lst}
-_eng_flw_dates = defaultdict(lambda: defaultdict(set))  # sg -> flw -> {session dates}
+_eng_flw_dates = defaultdict(lambda: defaultdict(set))     # sg -> flw -> {started session dates}
+_eng_comp_topic_dt = defaultdict(lambda: defaultdict(dict))  # sg -> flw -> {topic: earliest completed date}
 for r in bm.rows:
-    if r.get("is_started") == "Y":
-        _d = _sid2date.get(r.get("matched_session_id"))
-        if _d:
-            _eng_flw_dates[r["subgroup"]][r["connect_id"]].add(_d)
+    _d = _sid2date.get(r.get("matched_session_id"))
+    if r.get("is_started") == "Y" and _d:
+        _eng_flw_dates[r["subgroup"]][r["connect_id"]].add(_d)
+    if r.get("is_completed") == "Y" and _d:
+        _tc = r["topic_code"]
+        _cur = _eng_comp_topic_dt[r["subgroup"]][r["connect_id"]].get(_tc)
+        if _cur is None or _d < _cur:
+            _eng_comp_topic_dt[r["subgroup"]][r["connect_id"]][_tc] = _d
+
+
+def _eng_finished_dates(sg, design_len):
+    """{flw: date they completed all `design_len` interviews} — a "Finished" FLW's silence is not dropout."""
+    out = {}
+    if design_len <= 0:
+        return out
+    for _flw, _tdates in _eng_comp_topic_dt.get(sg, {}).items():
+        if len(_tdates) >= design_len:
+            out[_flw] = sorted(_tdates.values())[design_len - 1]  # date the Nth distinct topic was done
+    return out
+
+
+# Per-subgroup scheduled rollout-end (same signals as the dotted funnel line) so we can mark a cohort
+# "ended" — a started FLW who never finished but whose cohort's window has closed isn't a live dropout.
+_eng_end = {}
+for _c in set(_cohort_first_trig) | set(bm.cohort_info):
+    _esg = bm.cohort_to_sg(_c)
+    if _esg not in SG_PRESENT:
+        continue
+    _elo = _offset(_c, len(bm.SUBGROUP_DESIGN[_esg]["topics"]), _esg)
+    _ecad = bm.SUBGROUP_DESIGN[_esg]["cadence"]
+    _etr = bm.cohort_info.get(_c, {}).get("training_date")
+    if _etr:
+        _ee = _etr + timedelta(days=LINE_LAG_DAYS + _elo + _ecad)
+    elif _c in _cohort_first_trig:
+        _ee = _cohort_first_trig[_c].date() + timedelta(days=_elo + _ecad)
+    else:
+        continue
+    if _esg not in _eng_end or _ee > _eng_end[_esg]:
+        _eng_end[_esg] = _ee
+for _esg, _eu in LINE_DOTTED_UNTIL.items():  # authoritative overrides win
+    if _esg in _eng_end:
+        _eng_end[_esg] = _eu
 
 
 def _eng_maxgap(ds):
     return max((b - a).days for a, b in zip(ds, ds[1:])) if len(ds) > 1 else 0
 
 
-def _eng_compute(flw_dates, gap_thresh):
-    """Return the per-week series dict for one subgroup, or None if no sessions."""
+def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date):
+    """Per-week series for one subgroup (or None if no sessions).
+
+    Adds a FINISHED bucket (completed all scheduled interviews) that outranks the silence buckets, so a
+    completer's inactivity reads as "done", not "dropped" (Neal's cross-cohort fix). The grid ends at the
+    last actual session date, so an ended cohort naturally freezes there rather than trailing to today.
+    """
     all_dates = [d for ds in flw_dates.values() for d in ds]
     if not all_dates:
         return None
@@ -501,12 +545,12 @@ def _eng_compute(flw_dates, gap_thresh):
         Ws.append(w); w += timedelta(days=7)
     Ws.append(last)                          # final point = data's last date (freezes ended cohorts)
     weeks, started_s = [], []
-    steady_p, incons_p, drop_p = [], [], []
-    new_s, active_s, slow_s, quiet_s = [], [], [], []
+    steady_p, incons_p, drop_p, fin_p = [], [], [], []
+    new_s, active_s, slow_s, quiet_s, finst_s = [], [], [], [], []
     prevW = None
     for W in Ws:
-        started = steady = incons = drop = new = active = slow = quiet = 0
-        for ds in flw_dates.values():
+        started = steady = incons = drop = new = active = slow = quiet = fin = 0
+        for _flw, ds in flw_dates.items():
             dsW = sorted(d for d in ds if d <= W)
             if not dsW:
                 continue
@@ -514,41 +558,56 @@ def _eng_compute(flw_dates, gap_thresh):
             fd, ld = dsW[0], dsW[-1]
             sil = (W - ld).days
             mg = _eng_maxgap(dsW)
-            if sil > 14:            drop += 1        # priority: dropped -> inconsistent -> steady
+            _fdate = finished_dates.get(_flw)
+            is_finished = _fdate is not None and _fdate <= W
+            if is_finished:         fin += 1         # FINISHED outranks the silence buckets
+            elif sil > 14:          drop += 1        # then: dropped -> inconsistent -> steady
             elif mg > gap_thresh or sil > gap_thresh: incons += 1
             else:                   steady += 1
-            is_new = (fd > prevW) if prevW is not None else (fd >= Ws[0] - timedelta(days=6))
-            if is_new:      new += 1                 # priority: new -> active -> slow -> quiet
-            elif sil <= 7:  active += 1
-            elif sil <= 14: slow += 1
-            else:           quiet += 1
+            if not is_finished:                      # FINISHED outranks new/active/slow/quiet too
+                is_new = (fd > prevW) if prevW is not None else (fd >= Ws[0] - timedelta(days=6))
+                if is_new:      new += 1             # then: new -> active -> slow -> quiet
+                elif sil <= 7:  active += 1
+                elif sil <= 14: slow += 1
+                else:           quiet += 1
         weeks.append(W.isoformat()); started_s.append(started)
         steady_p.append(round(100 * steady / started)); incons_p.append(round(100 * incons / started))
-        drop_p.append(round(100 * drop / started))
+        drop_p.append(round(100 * drop / started)); fin_p.append(round(100 * fin / started))
         new_s.append(new); active_s.append(active); slow_s.append(slow); quiet_s.append(quiet)
+        finst_s.append(fin)
         prevW = W
+    ended = end_date is not None and TODAY > end_date
     return {"weeks": weeks, "started": started_s,
-            "steady_pct": steady_p, "incons_pct": incons_p, "drop_pct": drop_p,
-            "new": new_s, "active": active_s, "slow": slow_s, "quiet": quiet_s,
-            "gap_thresh": gap_thresh, "total_started": started_s[-1]}
+            "finished_pct": fin_p, "steady_pct": steady_p, "incons_pct": incons_p, "drop_pct": drop_p,
+            "finished": finst_s, "new": new_s, "active": active_s, "slow": slow_s, "quiet": quiet_s,
+            "gap_thresh": gap_thresh, "total_started": started_s[-1],
+            "ended": ended, "end_date": end_date.isoformat() if end_date else None}
 
 
 cohort_engagement = {}
 for _sg in SG_PRESENT:
-    _ce = _eng_compute(_eng_flw_dates.get(_sg, {}), 2 * bm.SUBGROUP_DESIGN[_sg]["cadence"])
+    _dlen = len(bm.SUBGROUP_DESIGN[_sg]["topics"])
+    _ce = _eng_compute(_eng_flw_dates.get(_sg, {}), _eng_finished_dates(_sg, _dlen),
+                       2 * bm.SUBGROUP_DESIGN[_sg]["cadence"], _eng_end.get(_sg))
     if _ce:
         cohort_engagement[_sg] = _ce
 # "ALL" = program-wide: every started FLW (distinct), each FLW's dates = the UNION of their real-topic
-# session dates across all subgroups (their full interview history). Cadences are mixed here, so the
-# steady/inconsistent gap uses an 8-day default (2x the 4-day modal cadence); the render notes this.
+# session dates across all subgroups. Each FLW's "finished" uses their OWN subgroup's schedule length.
+# Cadences are mixed, so steady/inconsistent uses an 8-day default (2x the 4-day modal cadence).
 _eng_all_dates = defaultdict(set)
-for _sg_d in _eng_flw_dates.values():
-    for _flw, _ds in _sg_d.items():
+_eng_all_finished = {}
+for _sg_d in SG_PRESENT:
+    _fd = _eng_finished_dates(_sg_d, len(bm.SUBGROUP_DESIGN[_sg_d]["topics"]))
+    for _flw, _ds in _eng_flw_dates.get(_sg_d, {}).items():
         _eng_all_dates[_flw] |= _ds
-_ce_all = _eng_compute(_eng_all_dates, 8)
+    for _flw, _dt in _fd.items():
+        if _flw not in _eng_all_finished or _dt < _eng_all_finished[_flw]:
+            _eng_all_finished[_flw] = _dt
+_ce_all = _eng_compute(_eng_all_dates, _eng_all_finished, 8, None)
 if _ce_all:
     cohort_engagement["ALL"] = _ce_all
-print(f"[eng] cohort_engagement: {[(sg, cohort_engagement[sg]['total_started']) for sg in cohort_engagement]}")
+print(f"[eng] cohort_engagement: "
+      f"{[(sg, cohort_engagement[sg]['total_started'], cohort_engagement[sg]['finished'][-1]) for sg in cohort_engagement]}")
 
 payload = {
     "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),  # stamped at build; render shows this

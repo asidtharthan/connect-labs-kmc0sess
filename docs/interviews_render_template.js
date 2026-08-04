@@ -307,9 +307,10 @@ function WorkflowUI(props) {
       eng2Inst.current = new window.Chart(eng2Ref.current.getContext("2d"), {
         type: "line",
         data: { labels: labels, datasets: [
+          { label: "Finished: completed all interviews", data: ce.finished_pct, borderColor: "#00695C", backgroundColor: "#00695C" },
           { label: "Steady: never a gap > " + gt + " days", data: ce.steady_pct, borderColor: "#2E7D32", backgroundColor: "#2E7D32" },
           { label: "Inconsistent: at least one " + (gt + 1) + "+ day gap", data: ce.incons_pct, borderColor: "#F9A825", backgroundColor: "#F9A825" },
-          { label: "Dropped off: silent 14+ days", data: ce.drop_pct, borderColor: "#C62828", backgroundColor: "#C62828" }
+          { label: "Dropped off: silent 14+ days (not finished)", data: ce.drop_pct, borderColor: "#C62828", backgroundColor: "#C62828" }
         ].map(function (d) { return Object.assign({ fill: false, tension: 0.2, borderWidth: 3, pointRadius: 3, pointHoverRadius: 6 }, d); }) },
         options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 16 } },
           plugins: { legend: { position: "bottom", labels: { boxWidth: 14, font: { size: 11 } } },
@@ -323,14 +324,15 @@ function WorkflowUI(props) {
       eng3Inst.current = new window.Chart(eng3Ref.current.getContext("2d"), {
         type: "bar",
         data: { labels: labels, datasets: [
+          { label: "Finished: completed all interviews", data: ce.finished, backgroundColor: "#00695C" },
           { label: "Active: interview within last 7 days (started earlier)", data: ce.active, backgroundColor: "#2E7D32" },
-          { label: "Started this week (first-ever interview)", data: ce.new, backgroundColor: "#1565C0" },
+          { label: "Started this week (first-ever interview)", data: ce.new, backgroundColor: "#42A5F5" },
           { label: "Slow: last interview 8-14 days ago", data: ce.slow, backgroundColor: "#F9A825" },
-          { label: "Quiet: 14+ days since last interview", data: ce.quiet, backgroundColor: "#C62828" }
+          { label: "Quiet: 14+ days since last interview (not finished)", data: ce.quiet, backgroundColor: "#C62828" }
         ] },
         options: { responsive: true, maintainAspectRatio: false,
           plugins: { legend: { position: "bottom", labels: { boxWidth: 14, font: { size: 11 } } },
-            title: { display: true, text: "Status of started FLWs at each week's end (backward-looking)" },
+            title: { display: true, text: "Status of started FLWs at each week's end" },
             tooltip: { callbacks: { label: function (c) { return c.dataset.label.split(":")[0] + ": " + c.parsed.y; } } } },
           scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, title: { display: true, text: "FLWs" } } } },
         plugins: [stackedSegLabels(), whiteBg]
@@ -355,21 +357,22 @@ function WorkflowUI(props) {
           <div className="text-sm text-gray-500 px-2 py-6">No engagement data for {engSg} yet.</div>
         ) : (function () {
           var n = ce.weeks.length - 1;
-          var started = ce.total_started, steady = ce.steady_pct[n], drop = ce.drop_pct[n];
+          var started = ce.total_started, finished = ce.finished_pct[n], drop = ce.drop_pct[n];
           var activeNow = ce.active[n];
+          var endTxt = ce.end_date ? (function () { var p = ce.end_date.split("-"); return MON[parseInt(p[1], 10) - 1] + " " + parseInt(p[2], 10); })() : null;
           var kpi = [
             { label: "Started interviewing", val: started, sub: "unique FLWs", color: "#1565C0" },
-            { label: "Steady", val: steady + "%", sub: "never a >" + ce.gap_thresh + "d gap", color: "#2E7D32" },
+            { label: "Finished", val: finished + "%", sub: "completed all interviews", color: "#00695C" },
             { label: "Active now", val: activeNow, sub: "interviewed in last 7d", color: "#2E7D32" },
-            { label: "Dropped off", val: drop + "%", sub: "silent 14+ days", color: "#C62828" }
+            { label: "Dropped off", val: drop + "%", sub: "silent 14+, not finished", color: "#C62828" }
           ];
           return (
             <React.Fragment>
               <div className="text-xs bg-indigo-50 border border-indigo-100 rounded px-3 py-2 text-gray-700">
                 {engSg === "ALL" ? (
-                  <span><b>Program-wide roll-up.</b> <b>{started}</b> FLWs have started interviewing across all cohorts. Note: cohorts that have <i>completed</i> their interview schedule (e.g. the 2-interview Training cohorts — the bulk of FLWs) correctly read as <b>Slow / Quiet</b> here once finished, so this view is best for the recruitment curve; for true engagement vs attrition, pick a single still-active cohort (e.g. PANEL).</span>
+                  <span><b>Program-wide roll-up.</b> <b>{started}</b> FLWs have started interviewing across all cohorts; <b>{finished}%</b> have <b>finished</b> their whole schedule and only <b>{drop}%</b> dropped off (silent 14+ without finishing). Cohorts run different-length schedules, so read this as the recruitment + completion picture; for one cohort's engagement detail, pick it above.</span>
                 ) : (
-                  <span><b>Read this as recruitment + engagement, not attrition.</b> Of <b>{started}</b> FLWs who have started interviewing in {scope}, <b>{steady}%</b> stay steady and <b>{activeNow}</b> are active right now; only <b>{drop}%</b> have truly dropped off (silent 14+ days). A dip in the retention curve is mostly <i>later starts</i> and <i>slower cadence</i>, not people quitting.</span>
+                  <span><b>Read this as recruitment + engagement, not attrition.</b> Of <b>{started}</b> FLWs who started interviewing in {scope}, <b>{finished}%</b> <b>finished</b> all their interviews and <b>{activeNow}</b> are active right now; only <b>{drop}%</b> truly dropped off (silent 14+ days without finishing). A dip in the retention curve is mostly <i>finishers</i>, <i>later starts</i> and <i>slower cadence</i> — not people quitting.{ce.ended && endTxt ? <span> This cohort's schedule ended ~<b>{endTxt}</b>.</span> : null}</span>
                 )}
               </div>
               <div className="flex flex-wrap gap-2 px-1">
@@ -388,9 +391,9 @@ function WorkflowUI(props) {
               <div style={{ height: "300px" }}><canvas ref={eng3Ref}></canvas></div>
               <Legend title="How to read these three panels">
                 <div><b>Panel 1 — recruitment:</b> cumulative FLWs who have started interviewing (appeared in the interview data). Not invited counts.</div>
-                <div><b>Panel 2 — engagement quality:</b> each starter is Steady (never a gap &gt; {ce.gap_thresh} days), Inconsistent (≥1 gap of {ce.gap_thresh + 1}+ days), or Dropped off (silent 14+ days). <b>Steady is a one-way ratchet</b> — a single long gap moves an FLW to Inconsistent permanently.</div>
-                <div><b>Panel 3 — status now:</b> where every starter stands at each week's end — Active (≤7d), Started-this-week, Slow (8–14d), Quiet (14+d). Totals equal Panel 1 by construction.</div>
-                <div className="text-gray-400">Backward-looking (never depends on future data); x-axis is the week-ending date. {engSg === "ALL" ? ce.gap_thresh + "-day gap threshold (program-wide default — cohorts here have mixed cadences)" : ce.gap_thresh + " = 2× the " + engSg + " interview cadence"}; the 14-day dropout window is cadence-independent.</div>
+                <div><b>Panel 2 — engagement quality:</b> each starter is <b>Finished</b> (completed all their interviews), Steady (never a gap &gt; {ce.gap_thresh} days), Inconsistent (≥1 gap of {ce.gap_thresh + 1}+ days), or Dropped off (silent 14+ days without finishing). Finished outranks the rest — a completer's silence is <i>done</i>, not dropout. <b>Steady is a one-way ratchet</b> — a single long gap moves an FLW to Inconsistent permanently.</div>
+                <div><b>Panel 3 — status now:</b> where every starter stands at each week's end — Finished, Active (≤7d), Started-this-week, Slow (8–14d), Quiet (14+d). Totals equal Panel 1 by construction.</div>
+                <div className="text-gray-400">x-axis is the week-ending date; the grid ends at the last interview date (so an ended cohort freezes there). {engSg === "ALL" ? ce.gap_thresh + "-day gap threshold (program-wide default — cohorts here have mixed cadences)" : ce.gap_thresh + " = 2× the " + engSg + " interview cadence"}; the 14-day dropout window is cadence-independent.{ce.ended && endTxt ? " Cohort schedule ended ~" + endTxt + "." : ""}</div>
               </Legend>
             </React.Fragment>
           );
