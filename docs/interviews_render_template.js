@@ -260,6 +260,24 @@ function WorkflowUI(props) {
       ctx.restore();
     } };
   }
+  // opaque white background so exported PNGs aren't transparent
+  var whiteBg = { beforeDraw: function (chart) { var ctx = chart.ctx; ctx.save(); ctx.globalCompositeOperation = "destination-over"; ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, chart.width, chart.height); ctx.restore(); } };
+  // Download the 3 engagement panels stacked into one white PNG (c-suite-ready).
+  function downloadEngPng() {
+    var cs = [eng1Ref.current, eng2Ref.current, eng3Ref.current].filter(Boolean);
+    if (!cs.length) return;
+    var pad = 18, gap = 22, title = 34;
+    var w = Math.max.apply(null, cs.map(function (c) { return c.width; }));
+    var h = cs.reduce(function (a, c) { return a + c.height; }, 0) + gap * (cs.length - 1) + pad * 2 + title;
+    var out = document.createElement("canvas"); out.width = w + pad * 2; out.height = h;
+    var ctx = out.getContext("2d");
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, out.width, out.height);
+    ctx.fillStyle = "#111827"; ctx.font = "bold 16px sans-serif";
+    ctx.fillText("Cohort Engagement — " + engSg + "  (as of " + (DATA.today || "") + ")", pad, 24);
+    var y = title + pad;
+    cs.forEach(function (c) { ctx.drawImage(c, pad, y); y += c.height + gap; });
+    var a = document.createElement("a"); a.download = "cohort_engagement_" + engSg + ".png"; a.href = out.toDataURL("image/png"); a.click();
+  }
 
   React.useEffect(function () {
     if (activeTab !== "funnels" || funView !== "engagement" || !window.Chart) return;
@@ -277,7 +295,7 @@ function WorkflowUI(props) {
             subtitle: { display: true, text: "FLWs appearing in the interview data; additional FLWs were invited but never started", color: "#6b7280", font: { style: "italic", size: 11 } },
             tooltip: { callbacks: { label: function (c) { return "Started: " + c.parsed.y; } } } },
           scales: { y: { beginAtZero: true, title: { display: true, text: "FLWs started" } } } },
-        plugins: [barTopLabels("#1565C0")]
+        plugins: [barTopLabels("#1565C0"), whiteBg]
       });
     }
     if (eng2Ref.current) {
@@ -293,7 +311,7 @@ function WorkflowUI(props) {
             title: { display: true, text: "Engagement quality among FLWs who started" },
             tooltip: { callbacks: { label: function (c) { return c.dataset.label.split(":")[0] + ": " + c.parsed.y + "%"; } } } },
           scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: "% of started FLWs" }, ticks: { callback: function (v) { return v + "%"; } } } } },
-        plugins: [linePointLabels()]
+        plugins: [linePointLabels(), whiteBg]
       });
     }
     if (eng3Ref.current) {
@@ -310,7 +328,7 @@ function WorkflowUI(props) {
             title: { display: true, text: "Status of started FLWs at each week's end (backward-looking)" },
             tooltip: { callbacks: { label: function (c) { return c.dataset.label.split(":")[0] + ": " + c.parsed.y; } } } },
           scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, title: { display: true, text: "FLWs" } } } },
-        plugins: [stackedSegLabels()]
+        plugins: [stackedSegLabels(), whiteBg]
       });
     }
     return function () { [eng1Inst, eng2Inst, eng3Inst].forEach(function (r) { if (r.current) { r.current.destroy(); r.current = null; } }); };
@@ -318,13 +336,15 @@ function WorkflowUI(props) {
 
   function renderEngagement() {
     var CE = DATA.cohortEngagement || {};
-    var sgs = SG_ORDER.filter(function (sg) { return CE[sg]; });
+    var sgs = (CE["ALL"] ? ["ALL"] : []).concat(SG_ORDER.filter(function (sg) { return CE[sg]; }));
     var ce = CE[engSg];
+    var scope = engSg === "ALL" ? "all cohorts" : engSg;
     return (
       <React.Fragment>
         <div className="flex flex-wrap items-center gap-2 px-1">
           <span className="text-xs font-medium text-gray-600">Cohort:</span>
-          {sgs.map(function (sg) { return <span key={sg}>{subBtn(engSg, sg, setEngSg, sg)}</span>; })}
+          {sgs.map(function (sg) { return <span key={sg}>{subBtn(engSg, sg, setEngSg, sg === "ALL" ? "All cohorts" : sg)}</span>; })}
+          {ce ? <button onClick={downloadEngPng} title="Download all 3 panels as one PNG" className="ml-auto px-3 py-1.5 text-sm rounded-md border border-gray-300 hover:bg-gray-100">↓ PNG</button> : null}
         </div>
         {!ce ? (
           <div className="text-sm text-gray-500 px-2 py-6">No engagement data for {engSg} yet.</div>
@@ -341,7 +361,11 @@ function WorkflowUI(props) {
           return (
             <React.Fragment>
               <div className="text-xs bg-indigo-50 border border-indigo-100 rounded px-3 py-2 text-gray-700">
-                <b>Read this as recruitment + engagement, not attrition.</b> Of <b>{started}</b> FLWs who have started interviewing in {engSg}, <b>{steady}%</b> stay steady and <b>{activeNow}</b> are active right now; only <b>{drop}%</b> have truly dropped off (silent 14+ days). A dip in the retention curve is mostly <i>later starts</i> and <i>slower cadence</i>, not people quitting.
+                {engSg === "ALL" ? (
+                  <span><b>Program-wide roll-up.</b> <b>{started}</b> FLWs have started interviewing across all cohorts. Note: cohorts that have <i>completed</i> their interview schedule (e.g. the 2-interview Training cohorts — the bulk of FLWs) correctly read as <b>Slow / Quiet</b> here once finished, so this view is best for the recruitment curve; for true engagement vs attrition, pick a single still-active cohort (e.g. PANEL).</span>
+                ) : (
+                  <span><b>Read this as recruitment + engagement, not attrition.</b> Of <b>{started}</b> FLWs who have started interviewing in {scope}, <b>{steady}%</b> stay steady and <b>{activeNow}</b> are active right now; only <b>{drop}%</b> have truly dropped off (silent 14+ days). A dip in the retention curve is mostly <i>later starts</i> and <i>slower cadence</i>, not people quitting.</span>
+                )}
               </div>
               <div className="flex flex-wrap gap-2 px-1">
                 {kpi.map(function (k) {
@@ -361,7 +385,7 @@ function WorkflowUI(props) {
                 <div><b>Panel 1 — recruitment:</b> cumulative FLWs who have started interviewing (appeared in the interview data). Not invited counts.</div>
                 <div><b>Panel 2 — engagement quality:</b> each starter is Steady (never a gap &gt; {ce.gap_thresh} days), Inconsistent (≥1 gap of {ce.gap_thresh + 1}+ days), or Dropped off (silent 14+ days). <b>Steady is a one-way ratchet</b> — a single long gap moves an FLW to Inconsistent permanently.</div>
                 <div><b>Panel 3 — status now:</b> where every starter stands at each week's end — Active (≤7d), Started-this-week, Slow (8–14d), Quiet (14+d). Totals equal Panel 1 by construction.</div>
-                <div className="text-gray-400">Backward-looking (never depends on future data); x-axis is the week-ending date. {ce.gap_thresh} = 2× the {engSg} interview cadence; the 14-day dropout window is cadence-independent.</div>
+                <div className="text-gray-400">Backward-looking (never depends on future data); x-axis is the week-ending date. {engSg === "ALL" ? ce.gap_thresh + "-day gap threshold (program-wide default — cohorts here have mixed cadences)" : ce.gap_thresh + " = 2× the " + engSg + " interview cadence"}; the 14-day dropout window is cadence-independent.</div>
               </Legend>
             </React.Fragment>
           );

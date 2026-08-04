@@ -527,6 +527,16 @@ for _sg in SG_PRESENT:
     _ce = _eng_compute(_eng_flw_dates.get(_sg, {}), 2 * bm.SUBGROUP_DESIGN[_sg]["cadence"])
     if _ce:
         cohort_engagement[_sg] = _ce
+# "ALL" = program-wide: every started FLW (distinct), each FLW's dates = the UNION of their real-topic
+# session dates across all subgroups (their full interview history). Cadences are mixed here, so the
+# steady/inconsistent gap uses an 8-day default (2x the 4-day modal cadence); the render notes this.
+_eng_all_dates = defaultdict(set)
+for _sg_d in _eng_flw_dates.values():
+    for _flw, _ds in _sg_d.items():
+        _eng_all_dates[_flw] |= _ds
+_ce_all = _eng_compute(_eng_all_dates, 8)
+if _ce_all:
+    cohort_engagement["ALL"] = _ce_all
 print(f"[eng] cohort_engagement: {[(sg, cohort_engagement[sg]['total_started']) for sg in cohort_engagement]}")
 
 payload = {
