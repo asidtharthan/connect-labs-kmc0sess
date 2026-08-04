@@ -459,6 +459,17 @@ for cohort in sorted(bm.cohort_info):
 
 dropoff = {"subgroups": dropoff_sg, "cohorts": dict(dropoff_cohorts)}
 
+# Subgroups whose Connect funnel (Invited/Accepted/Learn/Claimed) is PENDING: they have interview
+# data but their cohorts are missing from the Connect snapshot (a stale/failed Connect pull). The
+# render flags these so Invited=0 reads as "not pulled yet", not "nobody invited".
+connect_pending_sgs = sorted({
+    bm.cohort_info[c]["subgroup"]
+    for c in getattr(bm, "CONNECT_PENDING_COHORTS", set())
+    if c in bm.cohort_info and bm.cohort_info[c]["subgroup"] in SG_PRESENT
+})
+if connect_pending_sgs:
+    print(f"[eng] connect-funnel PENDING subgroups: {connect_pending_sgs}")
+
 # ---- Cohort Engagement (3-panel: recruitment / engagement-quality / current-status) ----
 # Neal's spec: separate what the single retention curve conflates — (1) how many FLWs have STARTED
 # interviewing, (2) how consistently starters keep going, (3) where each starter stands now. All
@@ -566,6 +577,7 @@ payload = {
     "topic_status": topic_status_out,
     "topic_status_cohort": topic_status_cohort_out,
     "dropoff": dropoff,
+    "connect_pending_subgroups": connect_pending_sgs,
     "cohort_engagement": cohort_engagement,
     "states": STATES,
     "topics": APPLICABLE,

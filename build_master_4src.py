@@ -366,6 +366,30 @@ for k in triggers_by_flw_iv:
     triggers_by_flw_iv[k].sort(key=lambda tb: tb["received_on"])
 print(f"[2/3] welcome keys={len(welcome_flws_by_key)}, trigger (flw,iv) keys={len(triggers_by_flw_iv)}")
 
+# ---- union in cohorts present in the CommCare interview data but MISSING from the Connect snapshot ----
+# cohort_info is otherwise Connect-only, so when the Connect pull is stale/failed for a subgroup
+# (e.g. ABT3/2WT/EXT while the CONNECT_SNAP fallback predates them) those whole cohorts vanish from
+# counts.cohorts and the per-cohort drop-off — even though their interviews are fully counted from
+# CommCare/OCS. Add them here: subgroup + interview funnel populate now; their Connect-funnel columns
+# stay empty (cohort_flws stays empty) until a fresh Connect pull fills them in. cohort_flws emptiness
+# is the "Connect funnel pending" signal used downstream.
+_cc_cohorts = {t["cohort_id"] for lst in triggers_by_flw_iv.values() for t in lst}
+_conn_pending = []
+for _c in sorted(_cc_cohorts):
+    if not _c or _c in cohort_info:
+        continue
+    _sg = cohort_to_sg(_c)
+    if _sg is None:
+        if not is_test_cohort(_c):
+            unmapped_cohorts.add(_c)
+        continue
+    cohort_info[_c] = {"subgroup": _sg, "training_date": None}
+    _conn_pending.append(_c)
+CONNECT_PENDING_COHORTS = set(_conn_pending)  # cohorts with interview data but no Connect funnel yet
+if _conn_pending:
+    print(f"[1+] {len(_conn_pending)} cohort(s) in CommCare data but missing from the Connect snapshot "
+          f"(Connect funnel PENDING until next successful Connect pull): {_conn_pending}")
+
 # ---------------- 4. OCS live ----------------
 ocs_by_key = defaultdict(list)
 sessions = json.loads(CACHE.read_text())

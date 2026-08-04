@@ -212,6 +212,7 @@ out = {
     "topicStatus": topic_status,
     "topicStatusCohort": payload["topic_status_cohort"],
     "dropoff": payload["dropoff"],
+    "connectPendingSubgroups": payload.get("connect_pending_subgroups", []),
     "cohortEngagement": payload.get("cohort_engagement", {}),
     "granular": granular,
     "granular_total": len(bm.rows),
