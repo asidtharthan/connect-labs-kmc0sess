@@ -311,14 +311,15 @@ for r in bm.rows:
         _eng_started[r["subgroup"]].add(r["connect_id"])
 _eng_started["ALL"] = set().union(*_eng_started.values()) if _eng_started else set()  # program-wide distinct
 _eng_bad = []
-_eng_keys = ("weeks", "started", "steady_pct", "incons_pct", "drop_pct", "new", "active", "slow", "quiet")
+_eng_keys = ("weeks", "started", "finished_pct", "steady_pct", "incons_pct", "drop_pct",
+             "finished", "new", "active", "slow", "quiet")
 for sg, c in _eng.items():
     if len({len(c[k]) for k in _eng_keys}) != 1:
         _eng_bad.append(f"{sg}: array lengths differ"); continue
     for i in range(len(c["weeks"])):
-        if c["new"][i] + c["active"][i] + c["slow"][i] + c["quiet"][i] != c["started"][i]:
+        if c["finished"][i] + c["new"][i] + c["active"][i] + c["slow"][i] + c["quiet"][i] != c["started"][i]:
             _eng_bad.append(f"{sg}[{i}]: Panel3 stack != Panel1 started")
-        if not (99 <= c["steady_pct"][i] + c["incons_pct"][i] + c["drop_pct"][i] <= 101):
+        if not (99 <= c["finished_pct"][i] + c["steady_pct"][i] + c["incons_pct"][i] + c["drop_pct"][i] <= 101):
             _eng_bad.append(f"{sg}[{i}]: quality % sum != 100")
     if any(c["started"][i] > c["started"][i + 1] for i in range(len(c["started"]) - 1)):
         _eng_bad.append(f"{sg}: started not monotonic")
