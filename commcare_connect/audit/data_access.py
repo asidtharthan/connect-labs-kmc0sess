@@ -1007,14 +1007,15 @@ class AuditDataAccess:
         Returns:
             List of AuditSessionRecord objects linked to the workflow run
         """
-        # Filter server-side by labs_record_id (the parent workflow-run link).
-        # get_records passes labs_record_id straight through to the export endpoint,
-        # which DOES support it (the old comment here was stale). The previous
-        # approach fetched ALL AuditSession records for the opp and filtered in
-        # Python, which silently returned 0 sessions once a run/opp had accumulated
-        # many sessions (per-FLW granularity, large or repeated runs): the export
-        # response is capped, so the run's sessions fell outside the returned page
-        # and the results screen showed "0 sessions" even though the audit ran.
+        # Filter server-side by labs_record_id (the parent workflow-run link) instead
+        # of fetching every AuditSession for the opportunity and filtering in Python.
+        # The old approach returned 0 sessions for large runs (per-FLW granularity /
+        # many accumulated sessions) — most likely because the /export/labs_record/
+        # response is capped and the run's sessions fell outside the returned page
+        # (the cap is server-side and not observable from this repo, so this is an
+        # inference). get_records forwards labs_record_id to the endpoint and other
+        # live callers (e.g. workflow delete_run) rely on that server-side filter, so
+        # scoping the query to the run returns just its sessions and sidesteps any cap.
         sessions = self.labs_api.get_records(
             experiment="audit",
             type="AuditSession",
