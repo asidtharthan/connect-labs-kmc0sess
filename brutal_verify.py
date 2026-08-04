@@ -176,12 +176,16 @@ chk("master unique FLWs == unique cids in valid triggers (raw)",
     len({r['connect_id'] for r in R}) == len({tf[0] for tf in valid_trig}),
     f"{len({r['connect_id'] for r in R})} == {len({tf[0] for tf in valid_trig})}")
 
-# C3: connect cohorts (mapped, non-test) == counts.cohorts
+# C3: counts.cohorts == mapped, non-test cohorts across the UNION of the Connect snapshot AND the
+# CommCare interview data (cohort_info is that union now — cohorts with interviews but no Connect
+# funnel yet are counted too, so a stale/failed Connect pull no longer hides whole cohorts).
 snap = list(csv.DictReader(open(ROOT / "connect_user_data_snapshot.csv", encoding="utf-8")))
 snap_cohorts = {(row.get("cohort_id") or "").strip() for row in snap}
 mapped_cohorts = {c for c in snap_cohorts if cohort_to_sg(c) and not is_test(c)}
-chk("counts.cohorts == mapped connect cohorts (raw snapshot)",
-    DD["counts"]["cohorts"] == len(mapped_cohorts), f"{DD['counts']['cohorts']} == {len(mapped_cohorts)}")
+cc_cohorts = {r["cohort_id"] for r in R if cohort_to_sg(r["cohort_id"]) and not is_test(r["cohort_id"])}
+union_cohorts = mapped_cohorts | cc_cohorts
+chk("counts.cohorts == mapped cohorts (Connect snapshot ∪ CommCare interview data)",
+    DD["counts"]["cohorts"] == len(union_cohorts), f"{DD['counts']['cohorts']} == {len(union_cohorts)}")
 
 # C4: started/completed flags grounded to OCS cache
 sid_status = {s["sid"]: (s.get("interview_status") or "") for s in cache}

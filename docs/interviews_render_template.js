@@ -79,6 +79,11 @@ function WorkflowUI(props) {
     "10": "Malaria 2", "11": "Water & Diarrhea 2", "12": "Community & FLW Profile 2", "13": "Medicine Quality & Counterfeiting 2", "14": "Malaria 5",
     "8S": "Antibiotics and ACT Use 2", "8L": "Antibiotics and ACT Use 3", "10S": "Malaria 3", "10L": "Malaria 4", "11S": "Water & Diarrhea 3", "11L": "Water & Diarrhea 4", "13L": "Medicine Quality & Counterfeiting 3" };
   var SG_ORDER = ["TRS", "TRE", "ABT1-A", "ABT1-B", "ABT2-A", "ABT2-B", "PANEL", "ABT3-A", "ABT3-B", "2WT", "EXT"];
+  // Subgroups whose Connect funnel (Invited/Accepted/Claimed) hasn't been pulled yet (cohorts present
+  // in the interview data but missing from the Connect snapshot). Their Invited=0 means "not pulled",
+  // not "nobody invited" — flagged in the UI so the 0s aren't misread.
+  var CONNECT_PENDING = DATA.connectPendingSubgroups || [];
+  function connPending(sg) { return CONNECT_PENDING.indexOf(sg) >= 0; }
   // 6 states in the spec order (Notes doc): not-applicable -> completed
   var STATES = ["not-applicable", "not-available-yet", "available-not-started", "available-missed-overdue", "started-not-completed", "completed"];
   var STATES5 = ["not-available-yet", "available-not-started", "available-missed-overdue", "started-not-completed", "completed"];
@@ -1098,6 +1103,11 @@ function WorkflowUI(props) {
               <div><b>% Started</b> = Started ÷ Eligible · <b>% Triggered</b> = Triggered ÷ Eligible · <b>% Completed</b> = Completed ÷ Started.</div>
             </Legend>
 
+            {CONNECT_PENDING.length ? (
+              <div className="text-xs bg-amber-50 border border-amber-200 rounded px-3 py-2 text-amber-800">
+                ⏳ <b>Connect funnel pending for: {CONNECT_PENDING.join(", ")}.</b> These cohorts are live in the interview data (Triggered/Started/Completed are correct), but their Connect leg (Invited/Accepted/Started&amp;Completed Learn/Claimed) hasn&#39;t been pulled yet — it shows 0 until the next successful Connect pull. Cohort counts and interview funnels are complete.
+              </div>
+            ) : null}
             <div className="overflow-x-auto">
               <h3 className="text-sm font-semibold text-gray-700 px-1 py-1">Connect funnel by subgroup</h3>
               <p className="text-xs text-gray-400 px-1">Invited → Accepted → Started/Completed Learn → Claimed → FLW registered (HQ) → # Initiated (any Welcome form). From Connect user_data (static snapshot) + HQ.</p>
@@ -1112,12 +1122,12 @@ function WorkflowUI(props) {
                     var c = s.connect;
                     return (
                       <tr key={s.sg} className="hover:bg-gray-50">
-                        <td className={td + " font-medium"}>{s.sg} <span className="text-gray-400">({s.cohorts_n})</span></td>
-                        <td className={td + " text-right"}>{c.invited}</td>
-                        <td className={td + " text-right"}>{c.accepted}</td>
-                        <td className={td + " text-right"}>{c.learn_started}</td>
-                        <td className={td + " text-right"}>{c.learn_completed}</td>
-                        <td className={td + " text-right"}>{c.claimed}</td>
+                        <td className={td + " font-medium"}>{s.sg} <span className="text-gray-400">({s.cohorts_n})</span>{connPending(s.sg) ? <span title="Connect funnel not pulled yet — Invited/Accepted/Claimed pending" className="ml-1 text-amber-600">⏳</span> : null}</td>
+                        <td className={td + " text-right"}>{connPending(s.sg) ? <span className="text-amber-600" title="pending Connect pull">⏳</span> : c.invited}</td>
+                        <td className={td + " text-right"}>{connPending(s.sg) ? "—" : c.accepted}</td>
+                        <td className={td + " text-right"}>{connPending(s.sg) ? "—" : c.learn_started}</td>
+                        <td className={td + " text-right"}>{connPending(s.sg) ? "—" : c.learn_completed}</td>
+                        <td className={td + " text-right"}>{connPending(s.sg) ? "—" : c.claimed}</td>
                         <td className={td + " text-right"}>{c.flw_reg}</td>
                         <td className={td + " text-right font-medium"}>{c.initiated}</td>
                       </tr>
