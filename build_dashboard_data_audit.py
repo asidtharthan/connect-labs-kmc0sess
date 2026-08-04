@@ -309,6 +309,7 @@ _eng_started = defaultdict(set)
 for r in bm.rows:
     if r.get("is_started") == "Y" and r.get("matched_session_id"):
         _eng_started[r["subgroup"]].add(r["connect_id"])
+_eng_started["ALL"] = set().union(*_eng_started.values()) if _eng_started else set()  # program-wide distinct
 _eng_bad = []
 _eng_keys = ("weeks", "started", "steady_pct", "incons_pct", "drop_pct", "new", "active", "slow", "quiet")
 for sg, c in _eng.items():
