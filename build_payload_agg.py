@@ -459,6 +459,76 @@ for cohort in sorted(bm.cohort_info):
 
 dropoff = {"subgroups": dropoff_sg, "cohorts": dict(dropoff_cohorts)}
 
+# ---- Cohort Engagement (3-panel: recruitment / engagement-quality / current-status) ----
+# Neal's spec: separate what the single retention curve conflates — (1) how many FLWs have STARTED
+# interviewing, (2) how consistently starters keep going, (3) where each starter stands now. All
+# backward-looking (computable each week, never future-dependent), from interview SESSION records only.
+# We use the pipeline's canonical started rows (one matched OCS session per interview slot) so the
+# starter counts tie out exactly with table1[sg].flws / connectFunnel[sg].started. Session DATE is the
+# OCS session start (created_at, UTC), joined via matched_session_id. Collapsed to one row per (flw,day).
+_sid2date = {e["sid"]: e["first"].date() for _lst in bm.ocs_by_key.values() for e in _lst}
+_eng_flw_dates = defaultdict(lambda: defaultdict(set))  # sg -> flw -> {session dates}
+for r in bm.rows:
+    if r.get("is_started") == "Y":
+        _d = _sid2date.get(r.get("matched_session_id"))
+        if _d:
+            _eng_flw_dates[r["subgroup"]][r["connect_id"]].add(_d)
+
+
+def _eng_maxgap(ds):
+    return max((b - a).days for a, b in zip(ds, ds[1:])) if len(ds) > 1 else 0
+
+
+def _eng_compute(flw_dates, gap_thresh):
+    """Return the per-week series dict for one subgroup, or None if no sessions."""
+    all_dates = [d for ds in flw_dates.values() for d in ds]
+    if not all_dates:
+        return None
+    first, last = min(all_dates), max(all_dates)
+    Ws, w = [], first + timedelta(days=6)   # week-ending dates every 7 days from first session
+    while w < last:
+        Ws.append(w); w += timedelta(days=7)
+    Ws.append(last)                          # final point = data's last date (freezes ended cohorts)
+    weeks, started_s = [], []
+    steady_p, incons_p, drop_p = [], [], []
+    new_s, active_s, slow_s, quiet_s = [], [], [], []
+    prevW = None
+    for W in Ws:
+        started = steady = incons = drop = new = active = slow = quiet = 0
+        for ds in flw_dates.values():
+            dsW = sorted(d for d in ds if d <= W)
+            if not dsW:
+                continue
+            started += 1
+            fd, ld = dsW[0], dsW[-1]
+            sil = (W - ld).days
+            mg = _eng_maxgap(dsW)
+            if sil > 14:            drop += 1        # priority: dropped -> inconsistent -> steady
+            elif mg > gap_thresh or sil > gap_thresh: incons += 1
+            else:                   steady += 1
+            is_new = (fd > prevW) if prevW is not None else (fd >= Ws[0] - timedelta(days=6))
+            if is_new:      new += 1                 # priority: new -> active -> slow -> quiet
+            elif sil <= 7:  active += 1
+            elif sil <= 14: slow += 1
+            else:           quiet += 1
+        weeks.append(W.isoformat()); started_s.append(started)
+        steady_p.append(round(100 * steady / started)); incons_p.append(round(100 * incons / started))
+        drop_p.append(round(100 * drop / started))
+        new_s.append(new); active_s.append(active); slow_s.append(slow); quiet_s.append(quiet)
+        prevW = W
+    return {"weeks": weeks, "started": started_s,
+            "steady_pct": steady_p, "incons_pct": incons_p, "drop_pct": drop_p,
+            "new": new_s, "active": active_s, "slow": slow_s, "quiet": quiet_s,
+            "gap_thresh": gap_thresh, "total_started": started_s[-1]}
+
+
+cohort_engagement = {}
+for _sg in SG_PRESENT:
+    _ce = _eng_compute(_eng_flw_dates.get(_sg, {}), 2 * bm.SUBGROUP_DESIGN[_sg]["cadence"])
+    if _ce:
+        cohort_engagement[_sg] = _ce
+print(f"[eng] cohort_engagement: {[(sg, cohort_engagement[sg]['total_started']) for sg in cohort_engagement]}")
+
 payload = {
     "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),  # stamped at build; render shows this
     "today": str(TODAY),
@@ -486,6 +556,7 @@ payload = {
     "topic_status": topic_status_out,
     "topic_status_cohort": topic_status_cohort_out,
     "dropoff": dropoff,
+    "cohort_engagement": cohort_engagement,
     "states": STATES,
     "topics": APPLICABLE,
     "sg_order": SG_PRESENT,

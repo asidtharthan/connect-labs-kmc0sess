@@ -50,6 +50,11 @@ function WorkflowUI(props) {
   var lsg = React.useState({}); var hidSg = lsg[0], setHidSg = lsg[1];   // funnels line chart: hidden subgroups (custom legend toggle)
   var lineRef = React.useRef(null), lineInst = React.useRef(null);
   var barRef = React.useRef(null), barInst = React.useRef(null);
+  var fvw = React.useState("retention"); var funView = fvw[0], setFunView = fvw[1];   // funnels tab: retention lines | cohort engagement (3-panel)
+  var esg = React.useState("PANEL"); var engSg = esg[0], setEngSg = esg[1];            // cohort-engagement: selected subgroup
+  var eng1Ref = React.useRef(null), eng1Inst = React.useRef(null);
+  var eng2Ref = React.useRef(null), eng2Inst = React.useRef(null);
+  var eng3Ref = React.useRef(null), eng3Inst = React.useRef(null);
 
   // Design + topic names come from the build (DATA.subgroupDesign / topicNames), derived from the
   // CommCare HQ interview_schedule lookup — single source of truth. Fallbacks for older data only.
@@ -222,6 +227,148 @@ function WorkflowUI(props) {
     });
     return function () { if (barInst.current) { barInst.current.destroy(); barInst.current = null; } };
   }, [activeTab, tableSub, topicChart, tcMode, topicGroupMode, naMode]);
+
+  // ---- Cohort Engagement (3-panel) helpers + charts ----
+  var MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  function fmtWk(iso) { var p = iso.split("-"); return MON[parseInt(p[1], 10) - 1] + " " + parseInt(p[2], 10); }
+  // Manual value labels (no datalabels plugin is available in the Labs render env).
+  function barTopLabels(color) {
+    return { afterDatasetsDraw: function (chart) {
+      var ctx = chart.ctx, meta = chart.getDatasetMeta(0);
+      ctx.save(); ctx.fillStyle = color; ctx.font = "bold 11px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+      meta.data.forEach(function (el, i) { var v = chart.data.datasets[0].data[i]; if (v == null) return; ctx.fillText(v, el.x, el.y - 3); });
+      ctx.restore();
+    } };
+  }
+  function linePointLabels() {
+    return { afterDatasetsDraw: function (chart) {
+      var ctx = chart.ctx; ctx.save(); ctx.font = "bold 10px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+      chart.data.datasets.forEach(function (ds, di) {
+        var meta = chart.getDatasetMeta(di); if (meta.hidden) return; ctx.fillStyle = ds.borderColor;
+        meta.data.forEach(function (el, i) { var v = ds.data[i]; if (v == null) return; ctx.fillText(v + "%", el.x, el.y - 6); });
+      });
+      ctx.restore();
+    } };
+  }
+  function stackedSegLabels() {
+    return { afterDatasetsDraw: function (chart) {
+      var ctx = chart.ctx; ctx.save(); ctx.font = "bold 11px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = "#fff";
+      chart.data.datasets.forEach(function (ds, di) {
+        var meta = chart.getDatasetMeta(di);
+        meta.data.forEach(function (el, i) { var v = ds.data[i]; if (!v || v < 15) return; if (Math.abs(el.base - el.y) < 14) return; ctx.fillText(v, el.x, (el.y + el.base) / 2); });
+      });
+      ctx.restore();
+    } };
+  }
+
+  React.useEffect(function () {
+    if (activeTab !== "funnels" || funView !== "engagement" || !window.Chart) return;
+    [eng1Inst, eng2Inst, eng3Inst].forEach(function (r) { if (r.current) { r.current.destroy(); r.current = null; } });
+    var ce = (DATA.cohortEngagement || {})[engSg];
+    if (!ce) return;
+    var labels = ce.weeks.map(fmtWk), gt = ce.gap_thresh;
+    if (eng1Ref.current) {
+      eng1Inst.current = new window.Chart(eng1Ref.current.getContext("2d"), {
+        type: "bar",
+        data: { labels: labels, datasets: [{ label: "FLWs started", data: ce.started, backgroundColor: "#1565C0", maxBarThickness: 70 }] },
+        options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 18 } },
+          plugins: { legend: { display: false },
+            title: { display: true, text: engSg + ": cumulative FLWs who started interviewing, by week" },
+            subtitle: { display: true, text: "FLWs appearing in the interview data; additional FLWs were invited but never started", color: "#6b7280", font: { style: "italic", size: 11 } },
+            tooltip: { callbacks: { label: function (c) { return "Started: " + c.parsed.y; } } } },
+          scales: { y: { beginAtZero: true, title: { display: true, text: "FLWs started" } } } },
+        plugins: [barTopLabels("#1565C0")]
+      });
+    }
+    if (eng2Ref.current) {
+      eng2Inst.current = new window.Chart(eng2Ref.current.getContext("2d"), {
+        type: "line",
+        data: { labels: labels, datasets: [
+          { label: "Steady: never a gap > " + gt + " days", data: ce.steady_pct, borderColor: "#2E7D32", backgroundColor: "#2E7D32" },
+          { label: "Inconsistent: at least one " + (gt + 1) + "+ day gap", data: ce.incons_pct, borderColor: "#F9A825", backgroundColor: "#F9A825" },
+          { label: "Dropped off: silent 14+ days", data: ce.drop_pct, borderColor: "#C62828", backgroundColor: "#C62828" }
+        ].map(function (d) { return Object.assign({ fill: false, tension: 0.2, borderWidth: 3, pointRadius: 3, pointHoverRadius: 6 }, d); }) },
+        options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 16 } },
+          plugins: { legend: { position: "bottom", labels: { boxWidth: 14, font: { size: 11 } } },
+            title: { display: true, text: "Engagement quality among FLWs who started" },
+            tooltip: { callbacks: { label: function (c) { return c.dataset.label.split(":")[0] + ": " + c.parsed.y + "%"; } } } },
+          scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: "% of started FLWs" }, ticks: { callback: function (v) { return v + "%"; } } } } },
+        plugins: [linePointLabels()]
+      });
+    }
+    if (eng3Ref.current) {
+      eng3Inst.current = new window.Chart(eng3Ref.current.getContext("2d"), {
+        type: "bar",
+        data: { labels: labels, datasets: [
+          { label: "Active: interview within last 7 days (started earlier)", data: ce.active, backgroundColor: "#2E7D32" },
+          { label: "Started this week (first-ever interview)", data: ce.new, backgroundColor: "#1565C0" },
+          { label: "Slow: last interview 8-14 days ago", data: ce.slow, backgroundColor: "#F9A825" },
+          { label: "Quiet: 14+ days since last interview", data: ce.quiet, backgroundColor: "#C62828" }
+        ] },
+        options: { responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: "bottom", labels: { boxWidth: 14, font: { size: 11 } } },
+            title: { display: true, text: "Status of started FLWs at each week's end (backward-looking)" },
+            tooltip: { callbacks: { label: function (c) { return c.dataset.label.split(":")[0] + ": " + c.parsed.y; } } } },
+          scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, title: { display: true, text: "FLWs" } } } },
+        plugins: [stackedSegLabels()]
+      });
+    }
+    return function () { [eng1Inst, eng2Inst, eng3Inst].forEach(function (r) { if (r.current) { r.current.destroy(); r.current = null; } }); };
+  }, [activeTab, funView, engSg]);
+
+  function renderEngagement() {
+    var CE = DATA.cohortEngagement || {};
+    var sgs = SG_ORDER.filter(function (sg) { return CE[sg]; });
+    var ce = CE[engSg];
+    return (
+      <React.Fragment>
+        <div className="flex flex-wrap items-center gap-2 px-1">
+          <span className="text-xs font-medium text-gray-600">Cohort:</span>
+          {sgs.map(function (sg) { return <span key={sg}>{subBtn(engSg, sg, setEngSg, sg)}</span>; })}
+        </div>
+        {!ce ? (
+          <div className="text-sm text-gray-500 px-2 py-6">No engagement data for {engSg} yet.</div>
+        ) : (function () {
+          var n = ce.weeks.length - 1;
+          var started = ce.total_started, steady = ce.steady_pct[n], drop = ce.drop_pct[n];
+          var activeNow = ce.active[n];
+          var kpi = [
+            { label: "Started interviewing", val: started, sub: "unique FLWs", color: "#1565C0" },
+            { label: "Steady", val: steady + "%", sub: "never a >" + ce.gap_thresh + "d gap", color: "#2E7D32" },
+            { label: "Active now", val: activeNow, sub: "interviewed in last 7d", color: "#2E7D32" },
+            { label: "Dropped off", val: drop + "%", sub: "silent 14+ days", color: "#C62828" }
+          ];
+          return (
+            <React.Fragment>
+              <div className="text-xs bg-indigo-50 border border-indigo-100 rounded px-3 py-2 text-gray-700">
+                <b>Read this as recruitment + engagement, not attrition.</b> Of <b>{started}</b> FLWs who have started interviewing in {engSg}, <b>{steady}%</b> stay steady and <b>{activeNow}</b> are active right now; only <b>{drop}%</b> have truly dropped off (silent 14+ days). A dip in the retention curve is mostly <i>later starts</i> and <i>slower cadence</i>, not people quitting.
+              </div>
+              <div className="flex flex-wrap gap-2 px-1">
+                {kpi.map(function (k) {
+                  return (
+                    <div key={k.label} className="rounded border border-gray-200 bg-white px-3 py-2" style={{ minWidth: "130px" }}>
+                      <div className="text-lg font-bold" style={{ color: k.color }}>{k.val}</div>
+                      <div className="text-xs font-medium text-gray-700">{k.label}</div>
+                      <div className="text-gray-400" style={{ fontSize: "10px" }}>{k.sub}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ height: "260px" }}><canvas ref={eng1Ref}></canvas></div>
+              <div style={{ height: "300px" }}><canvas ref={eng2Ref}></canvas></div>
+              <div style={{ height: "300px" }}><canvas ref={eng3Ref}></canvas></div>
+              <Legend title="How to read these three panels">
+                <div><b>Panel 1 — recruitment:</b> cumulative FLWs who have started interviewing (appeared in the interview data). Not invited counts.</div>
+                <div><b>Panel 2 — engagement quality:</b> each starter is Steady (never a gap &gt; {ce.gap_thresh} days), Inconsistent (≥1 gap of {ce.gap_thresh + 1}+ days), or Dropped off (silent 14+ days). <b>Steady is a one-way ratchet</b> — a single long gap moves an FLW to Inconsistent permanently.</div>
+                <div><b>Panel 3 — status now:</b> where every starter stands at each week's end — Active (≤7d), Started-this-week, Slow (8–14d), Quiet (14+d). Totals equal Panel 1 by construction.</div>
+                <div className="text-gray-400">Backward-looking (never depends on future data); x-axis is the week-ending date. {ce.gap_thresh} = 2× the {engSg} interview cadence; the 14-day dropout window is cadence-independent.</div>
+              </Legend>
+            </React.Fragment>
+          );
+        })()}
+      </React.Fragment>
+    );
+  }
 
   function subBtn(cur, val, set, label) {
     var on = cur === val;
@@ -877,7 +1024,15 @@ function WorkflowUI(props) {
         {activeTab === "funnels" && (
           <div className="p-3 space-y-4">
             <div className="flex flex-wrap items-center gap-2 px-1">
-              <span className="text-xs font-medium text-gray-600">View:</span>
+              <span className="text-xs font-semibold text-gray-700">View:</span>
+              {subBtn(funView, "retention", setFunView, "Retention lines")}
+              {subBtn(funView, "engagement", setFunView, "Cohort engagement")}
+            </div>
+            {funView === "engagement" && renderEngagement()}
+            {funView === "retention" && (
+            <React.Fragment>
+            <div className="flex flex-wrap items-center gap-2 px-1">
+              <span className="text-xs font-medium text-gray-600">X-axis:</span>
               {subBtn(lineMode, "pct", setLineMode, "By interview #")}
               {subBtn(lineMode, "time", setLineMode, "By calendar day")}
               <span className="mx-1 text-gray-300">|</span>
@@ -1019,6 +1174,8 @@ function WorkflowUI(props) {
                 </tbody>
               </table>
             </div>
+            </React.Fragment>
+            )}
 
           </div>
         )}

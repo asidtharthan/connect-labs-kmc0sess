@@ -303,6 +303,31 @@ chk("lineSeries pts_di == funnel pct_started_di", ldi_bad == 0, f"{ldi_bad} mism
 cb_bad = sum(1 for f in dd["funnel"] if f["pct_completed_base"] != round(100 * f["completed"] / f["elig"], 1))
 chk("funnel pct_completed_base == 100*completed/eligible (all rows)", cb_bad == 0, f"{cb_bad} bad")
 
+# ---- Cohort Engagement (3-panel): internal consistency + tie-out to canonical started count ----
+_eng = dd.get("cohortEngagement", {})
+_eng_started = defaultdict(set)
+for r in bm.rows:
+    if r.get("is_started") == "Y" and r.get("matched_session_id"):
+        _eng_started[r["subgroup"]].add(r["connect_id"])
+_eng_bad = []
+_eng_keys = ("weeks", "started", "steady_pct", "incons_pct", "drop_pct", "new", "active", "slow", "quiet")
+for sg, c in _eng.items():
+    if len({len(c[k]) for k in _eng_keys}) != 1:
+        _eng_bad.append(f"{sg}: array lengths differ"); continue
+    for i in range(len(c["weeks"])):
+        if c["new"][i] + c["active"][i] + c["slow"][i] + c["quiet"][i] != c["started"][i]:
+            _eng_bad.append(f"{sg}[{i}]: Panel3 stack != Panel1 started")
+        if not (99 <= c["steady_pct"][i] + c["incons_pct"][i] + c["drop_pct"][i] <= 101):
+            _eng_bad.append(f"{sg}[{i}]: quality % sum != 100")
+    if any(c["started"][i] > c["started"][i + 1] for i in range(len(c["started"]) - 1)):
+        _eng_bad.append(f"{sg}: started not monotonic")
+    if c["total_started"] != (c["started"][-1] if c["started"] else 0):
+        _eng_bad.append(f"{sg}: total_started != started[-1]")
+    if c["total_started"] != len(_eng_started.get(sg, ())):
+        _eng_bad.append(f"{sg}: total_started {c['total_started']} != distinct started FLWs {len(_eng_started.get(sg, ()))}")
+chk("cohortEngagement: Panel3==Panel1, %~100, monotonic, ties to distinct started FLWs (all subgroups)",
+    not _eng_bad, "; ".join(_eng_bad[:6]))
+
 print("=" * 80)
 n_pass = sum(results)
 n_tot = len(results)
