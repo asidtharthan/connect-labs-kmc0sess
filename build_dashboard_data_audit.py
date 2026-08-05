@@ -264,7 +264,8 @@ fm = dd.get("flwMatrix", [])
 chk("flwMatrix row count == claimed (FLW,cohort) pairs", len(fm) == claimed_pairs, f"{len(fm)} == {claimed_pairs}")
 cell_bad = 0
 for r in fm:
-    topics = bm.SUBGROUP_DESIGN.get(r["g"], {}).get("topics", [])
+    _rsg = r.get("g") or bm.cohort_info.get(r["c"], {}).get("subgroup")   # flwMatrix rows now drop g; derive from cohort
+    topics = bm.SUBGROUP_DESIGN.get(_rsg, {}).get("topics", [])
     if len(r["s"]) != len(topics):
         cell_bad += 1
     if any((not isinstance(x, int)) or x < 1 or x > 5 for x in r["s"]):

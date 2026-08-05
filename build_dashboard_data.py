@@ -193,11 +193,13 @@ for _cohort, _info in bm.cohort_info.items():
     _topics = bm.SUBGROUP_DESIGN[_sg]["topics"]
     _claimed = [f for f in bm.cohort_flws[_cohort] if bm.cohort_flw_meta[(_cohort, f)].get("date_claimed")]
     for _flw in _claimed:
-        flw_matrix.append({
-            "f": _flw, "c": _cohort, "g": _sg,
-            "u": 1 if _untrained.get(_flw) else 0,
-            "s": [_status_idx(_flw, _cohort, _sg, t, _topics) for t in _topics],
-        })
+        # drop per-row "g" (subgroup) — re-derived in the render from cohortSG below; and omit "u" when 0
+        # (render treats a missing u as untrained=false). Both shrink this, the largest DATA key (~59%).
+        _row = {"f": _flw, "c": _cohort,
+                "s": [_status_idx(_flw, _cohort, _sg, t, _topics) for t in _topics]}
+        if _untrained.get(_flw):
+            _row["u"] = 1
+        flw_matrix.append(_row)
 
 out = {
     "built_at": payload.get("built_at", ""),
@@ -218,6 +220,7 @@ out = {
     "granular": granular,
     "granular_total": len(bm.rows),
     "flwMatrix": flw_matrix,
+    "cohortSG": {_c: _i["subgroup"] for _c, _i in bm.cohort_info.items()},  # cohort->subgroup (flwMatrix rows drop g)
     "deimpact": payload.get("deimpact", {}),
     # design + topic names derived from the CCHQ interview_schedule lookup — single source of truth
     # so the render stops hardcoding them (fixes PANEL's 13-topic sequence everywhere).

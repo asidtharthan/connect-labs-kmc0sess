@@ -651,9 +651,11 @@ function WorkflowUI(props) {
   var gq = gSearch.trim().toLowerCase();
   // ---- per-(FLW × cohort) × topic matrix + a connect_id lookup for filtering both tables ----
   var FM = DATA.flwMatrix || [];
+  var CSG = DATA.cohortSG || {};   // cohort -> subgroup (flwMatrix rows drop their own g to save payload; re-derive here)
   var flwInfo = {};   // connect_id -> { g: subgroup, cohorts: {cohort:1}, u: untrained }
   var cohortSG = {};  // cohort id -> subgroup (global, for session-level subgroup filtering)
   FM.forEach(function (r) {
+    if (r.g == null) r.g = CSG[r.c];   // restore subgroup on each row so all downstream r.g uses work unchanged
     var fi = flwInfo[r.f] || (flwInfo[r.f] = { g: r.g, cohorts: {}, cg: {}, u: 0 });
     fi.cohorts[r.c] = 1; fi.cg[r.c] = r.g; if (r.u) fi.u = 1;   // cg: cohort -> subgroup (topic disambiguation)
     cohortSG[r.c] = r.g;
