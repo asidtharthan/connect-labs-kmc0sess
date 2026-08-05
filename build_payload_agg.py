@@ -480,7 +480,12 @@ if connect_pending_sgs:
 _sid2date = {e["sid"]: e["first"].date() for _lst in bm.ocs_by_key.values() for e in _lst}
 _eng_flw_dates = defaultdict(lambda: defaultdict(set))     # sg -> flw -> {started session dates}
 _eng_comp_topic_dt = defaultdict(lambda: defaultdict(dict))  # sg -> flw -> {topic: earliest completed date}
+_eng_flw_llo = {}                                          # flw -> LLO (COWACDI / EHA), for the by-LLO split
+_cohort_llo = getattr(bm, "cohort_llo", {})
 for r in bm.rows:
+    _llo = _cohort_llo.get(r["cohort_id"])
+    if _llo and r["connect_id"] not in _eng_flw_llo:
+        _eng_flw_llo[r["connect_id"]] = _llo
     _d = _sid2date.get(r.get("matched_session_id"))
     if r.get("is_started") == "Y" and _d:
         _eng_flw_dates[r["subgroup"]][r["connect_id"]].add(_d)
@@ -489,6 +494,13 @@ for r in bm.rows:
         _cur = _eng_comp_topic_dt[r["subgroup"]][r["connect_id"]].get(_tc)
         if _cur is None or _d < _cur:
             _eng_comp_topic_dt[r["subgroup"]][r["connect_id"]][_tc] = _d
+
+
+def _eng_filter_llo(flw_dates, finished_dates, llo):
+    """Restrict a subgroup's (flw_dates, finished_dates) to FLWs of one LLO."""
+    fd = {f: d for f, d in flw_dates.items() if _eng_flw_llo.get(f) == llo}
+    fn = {f: d for f, d in finished_dates.items() if _eng_flw_llo.get(f) == llo}
+    return fd, fn
 
 
 def _eng_finished_dates(sg, design_len):
@@ -585,12 +597,22 @@ def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date):
 
 
 cohort_engagement = {}
+cohort_engagement_llo = {}   # {sg: {"COWACDI": {...}, "EHA": {...}}} — same series, split by partner
 for _sg in SG_PRESENT:
     _dlen = len(bm.SUBGROUP_DESIGN[_sg]["topics"])
-    _ce = _eng_compute(_eng_flw_dates.get(_sg, {}), _eng_finished_dates(_sg, _dlen),
-                       2 * bm.SUBGROUP_DESIGN[_sg]["cadence"], _eng_end.get(_sg))
+    _gt, _end = 2 * bm.SUBGROUP_DESIGN[_sg]["cadence"], _eng_end.get(_sg)
+    _fd, _fn = _eng_flw_dates.get(_sg, {}), _eng_finished_dates(_sg, _dlen)
+    _ce = _eng_compute(_fd, _fn, _gt, _end)
     if _ce:
         cohort_engagement[_sg] = _ce
+    _llo_out = {}
+    for _llo in ("COWACDI", "EHA"):
+        _fdl, _fnl = _eng_filter_llo(_fd, _fn, _llo)
+        _cl = _eng_compute(_fdl, _fnl, _gt, _end)
+        if _cl:
+            _llo_out[_llo] = _cl
+    if _llo_out:
+        cohort_engagement_llo[_sg] = _llo_out
 # "ALL" = program-wide: every started FLW (distinct), each FLW's dates = the UNION of their real-topic
 # session dates across all subgroups. Each FLW's "finished" uses their OWN subgroup's schedule length.
 # Cadences are mixed, so steady/inconsistent uses an 8-day default (2x the 4-day modal cadence).
@@ -606,8 +628,17 @@ for _sg_d in SG_PRESENT:
 _ce_all = _eng_compute(_eng_all_dates, _eng_all_finished, 8, None)
 if _ce_all:
     cohort_engagement["ALL"] = _ce_all
+    _all_llo = {}
+    for _llo in ("COWACDI", "EHA"):
+        _fdl, _fnl = _eng_filter_llo(_eng_all_dates, _eng_all_finished, _llo)
+        _cl = _eng_compute(_fdl, _fnl, 8, None)
+        if _cl:
+            _all_llo[_llo] = _cl
+    if _all_llo:
+        cohort_engagement_llo["ALL"] = _all_llo
 print(f"[eng] cohort_engagement: "
       f"{[(sg, cohort_engagement[sg]['total_started'], cohort_engagement[sg]['finished'][-1]) for sg in cohort_engagement]}")
+print(f"[eng] by-LLO splits for: {sorted(cohort_engagement_llo)}")
 
 payload = {
     "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),  # stamped at build; render shows this
@@ -638,6 +669,7 @@ payload = {
     "dropoff": dropoff,
     "connect_pending_subgroups": connect_pending_sgs,
     "cohort_engagement": cohort_engagement,
+    "cohort_engagement_llo": cohort_engagement_llo,
     "states": STATES,
     "topics": APPLICABLE,
     "sg_order": SG_PRESENT,

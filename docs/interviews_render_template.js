@@ -51,7 +51,8 @@ function WorkflowUI(props) {
   var lineRef = React.useRef(null), lineInst = React.useRef(null);
   var barRef = React.useRef(null), barInst = React.useRef(null);
   var fvw = React.useState("retention"); var funView = fvw[0], setFunView = fvw[1];   // funnels tab: retention lines | cohort engagement (3-panel)
-  var esg = React.useState("PANEL"); var engSg = esg[0], setEngSg = esg[1];            // cohort-engagement: selected subgroup
+  var esg = React.useState("ALL"); var engSg = esg[0], setEngSg = esg[1];              // cohort-engagement: selected cohort (default ALL — meaningful first view)
+  var ell = React.useState("all"); var engLlo = ell[0], setEngLlo = ell[1];            // cohort-engagement: LLO filter (all | COWACDI | EHA)
   var eng1Ref = React.useRef(null), eng1Inst = React.useRef(null);
   var eng2Ref = React.useRef(null), eng2Inst = React.useRef(null);
   var eng3Ref = React.useRef(null), eng3Inst = React.useRef(null);
@@ -267,6 +268,28 @@ function WorkflowUI(props) {
   }
   // opaque white background so exported PNGs aren't transparent
   var whiteBg = { beforeDraw: function (chart) { var ctx = chart.ctx; ctx.save(); ctx.globalCompositeOperation = "destination-over"; ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, chart.width, chart.height); ctx.restore(); } };
+  // the engagement series for the current cohort + LLO filter ("all" -> whole cohort; else the LLO split)
+  function engData(sg, llo) {
+    if (llo && llo !== "all") return ((DATA.cohortEngagementLLO || {})[sg] || {})[llo];
+    return (DATA.cohortEngagement || {})[sg];
+  }
+  // mark a cohort's scheduled active period: dashed line + greyed tail from the scheduled end date to the
+  // right edge, so the weeks after the cohort ended read as "program concluded", not user drop-off.
+  function activePeriodMarker(ce) {
+    return { afterDraw: function (chart) {
+      if (!ce || !ce.ended || !ce.end_date) return;
+      var idx = -1; for (var i = 0; i < ce.weeks.length; i++) { if (ce.weeks[i] >= ce.end_date) { idx = i; break; } }
+      if (idx < 0) return;   // scheduled end is after the last data point — nothing to shade
+      var x = chart.scales.x.getPixelForValue(idx), ca = chart.chartArea, ctx = chart.ctx;
+      ctx.save();
+      ctx.fillStyle = "rgba(107,114,128,0.10)"; ctx.fillRect(x, ca.top, ca.right - x, ca.bottom - ca.top);
+      ctx.strokeStyle = "#6b7280"; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.moveTo(x, ca.top); ctx.lineTo(x, ca.bottom); ctx.stroke();
+      ctx.setLineDash([]); ctx.fillStyle = "#6b7280"; ctx.font = "10px sans-serif"; ctx.textAlign = "left";
+      ctx.fillText("◀ active period", x + 4, ca.top + 10);
+      ctx.restore();
+    } };
+  }
   // Download the 3 engagement panels stacked into one white PNG (c-suite-ready).
   function downloadEngPng() {
     var cs = [eng1Ref.current, eng2Ref.current, eng3Ref.current].filter(Boolean);
@@ -277,19 +300,20 @@ function WorkflowUI(props) {
     var out = document.createElement("canvas"); out.width = w + pad * 2; out.height = h;
     var ctx = out.getContext("2d");
     ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, out.width, out.height);
+    var lloTag = engLlo !== "all" ? " · " + engLlo : "";
     ctx.fillStyle = "#111827"; ctx.font = "bold 16px sans-serif";
-    ctx.fillText("Cohort Engagement — " + engSg + "  (as of " + (DATA.today || "") + ")", pad, 24);
+    ctx.fillText("Cohort Engagement — " + engSg + lloTag + "  (as of " + (DATA.today || "") + ")", pad, 24);
     var y = title + pad;
     cs.forEach(function (c) { ctx.drawImage(c, pad, y); y += c.height + gap; });
-    var a = document.createElement("a"); a.download = "cohort_engagement_" + engSg + ".png"; a.href = out.toDataURL("image/png"); a.click();
+    var a = document.createElement("a"); a.download = "cohort_engagement_" + engSg + (engLlo !== "all" ? "_" + engLlo : "") + ".png"; a.href = out.toDataURL("image/png"); a.click();
   }
 
   React.useEffect(function () {
     if (activeTab !== "funnels" || funView !== "engagement" || !window.Chart) return;
     [eng1Inst, eng2Inst, eng3Inst].forEach(function (r) { if (r.current) { r.current.destroy(); r.current = null; } });
-    var ce = (DATA.cohortEngagement || {})[engSg];
+    var ce = engData(engSg, engLlo);
     if (!ce) return;
-    var labels = ce.weeks.map(fmtWk), gt = ce.gap_thresh;
+    var labels = ce.weeks.map(fmtWk), gt = ce.gap_thresh, apm = activePeriodMarker(ce);
     if (eng1Ref.current) {
       eng1Inst.current = new window.Chart(eng1Ref.current.getContext("2d"), {
         type: "bar",
@@ -300,7 +324,7 @@ function WorkflowUI(props) {
             subtitle: { display: true, text: "FLWs appearing in the interview data; additional FLWs were invited but never started", color: "#6b7280", font: { style: "italic", size: 11 } },
             tooltip: { callbacks: { label: function (c) { return "Started: " + c.parsed.y; } } } },
           scales: { y: { beginAtZero: true, title: { display: true, text: "FLWs started" } } } },
-        plugins: [barTopLabels("#1565C0"), whiteBg]
+        plugins: [barTopLabels("#1565C0"), whiteBg, apm]
       });
     }
     if (eng2Ref.current) {
@@ -317,7 +341,7 @@ function WorkflowUI(props) {
             title: { display: true, text: "Engagement quality among FLWs who started" },
             tooltip: { callbacks: { label: function (c) { return c.dataset.label.split(":")[0] + ": " + c.parsed.y + "%"; } } } },
           scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: "% of started FLWs" }, ticks: { callback: function (v) { return v + "%"; } } } } },
-        plugins: [linePointLabels(), whiteBg]
+        plugins: [linePointLabels(), whiteBg, apm]
       });
     }
     if (eng3Ref.current) {
@@ -335,26 +359,29 @@ function WorkflowUI(props) {
             title: { display: true, text: "Status of started FLWs at each week's end" },
             tooltip: { callbacks: { label: function (c) { return c.dataset.label.split(":")[0] + ": " + c.parsed.y; } } } },
           scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, title: { display: true, text: "FLWs" } } } },
-        plugins: [stackedSegLabels(), whiteBg]
+        plugins: [stackedSegLabels(), whiteBg, apm]
       });
     }
     return function () { [eng1Inst, eng2Inst, eng3Inst].forEach(function (r) { if (r.current) { r.current.destroy(); r.current = null; } }); };
-  }, [activeTab, funView, engSg]);
+  }, [activeTab, funView, engSg, engLlo]);
 
   function renderEngagement() {
     var CE = DATA.cohortEngagement || {};
     var sgs = (CE["ALL"] ? ["ALL"] : []).concat(SG_ORDER.filter(function (sg) { return CE[sg]; }));
-    var ce = CE[engSg];
-    var scope = engSg === "ALL" ? "all cohorts" : engSg;
+    var ce = engData(engSg, engLlo);
+    var scope = (engSg === "ALL" ? "all cohorts" : engSg) + (engLlo !== "all" ? " · " + engLlo : "");
     return (
       <React.Fragment>
         <div className="flex flex-wrap items-center gap-2 px-1">
           <span className="text-xs font-medium text-gray-600">Cohort:</span>
           {sgs.map(function (sg) { return <span key={sg}>{subBtn(engSg, sg, setEngSg, sg === "ALL" ? "All cohorts" : sg)}</span>; })}
+          <span className="mx-1 text-gray-300">|</span>
+          <span className="text-xs font-medium text-gray-600">LLO:</span>
+          {[["all", "Both"], ["COWACDI", "COWACDI"], ["EHA", "EHA"]].map(function (o) { return <span key={o[0]}>{subBtn(engLlo, o[0], setEngLlo, o[1])}</span>; })}
           {ce ? <button onClick={downloadEngPng} title="Download all 3 panels as one PNG" className="ml-auto px-3 py-1.5 text-sm rounded-md border border-gray-300 hover:bg-gray-100">↓ PNG</button> : null}
         </div>
         {!ce ? (
-          <div className="text-sm text-gray-500 px-2 py-6">No engagement data for {engSg} yet.</div>
+          <div className="text-sm text-gray-500 px-2 py-6">No engagement data for {scope} yet{engLlo !== "all" ? " (this cohort has no " + engLlo + " FLWs)" : ""}.</div>
         ) : (function () {
           var n = ce.weeks.length - 1;
           var started = ce.total_started, finished = ce.finished_pct[n], drop = ce.drop_pct[n];

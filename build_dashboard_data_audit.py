@@ -313,22 +313,45 @@ _eng_started["ALL"] = set().union(*_eng_started.values()) if _eng_started else s
 _eng_bad = []
 _eng_keys = ("weeks", "started", "finished_pct", "steady_pct", "incons_pct", "drop_pct",
              "finished", "new", "active", "slow", "quiet")
-for sg, c in _eng.items():
+
+
+def _eng_consistent(label, c, expect_started=None):
+    """Internal invariants for one engagement series; append issues to _eng_bad."""
     if len({len(c[k]) for k in _eng_keys}) != 1:
-        _eng_bad.append(f"{sg}: array lengths differ"); continue
+        _eng_bad.append(f"{label}: array lengths differ"); return
     for i in range(len(c["weeks"])):
         if c["finished"][i] + c["new"][i] + c["active"][i] + c["slow"][i] + c["quiet"][i] != c["started"][i]:
-            _eng_bad.append(f"{sg}[{i}]: Panel3 stack != Panel1 started")
+            _eng_bad.append(f"{label}[{i}]: Panel3 stack != Panel1 started")
         if not (99 <= c["finished_pct"][i] + c["steady_pct"][i] + c["incons_pct"][i] + c["drop_pct"][i] <= 101):
-            _eng_bad.append(f"{sg}[{i}]: quality % sum != 100")
+            _eng_bad.append(f"{label}[{i}]: quality % sum != 100")
     if any(c["started"][i] > c["started"][i + 1] for i in range(len(c["started"]) - 1)):
-        _eng_bad.append(f"{sg}: started not monotonic")
+        _eng_bad.append(f"{label}: started not monotonic")
     if c["total_started"] != (c["started"][-1] if c["started"] else 0):
-        _eng_bad.append(f"{sg}: total_started != started[-1]")
-    if c["total_started"] != len(_eng_started.get(sg, ())):
-        _eng_bad.append(f"{sg}: total_started {c['total_started']} != distinct started FLWs {len(_eng_started.get(sg, ()))}")
+        _eng_bad.append(f"{label}: total_started != started[-1]")
+    if expect_started is not None and c["total_started"] != expect_started:
+        _eng_bad.append(f"{label}: total_started {c['total_started']} != {expect_started}")
+
+
+for sg, c in _eng.items():
+    _eng_consistent(sg, c, expect_started=len(_eng_started.get(sg, ())))
 chk("cohortEngagement: Panel3==Panel1, %~100, monotonic, ties to distinct started FLWs (all subgroups)",
     not _eng_bad, "; ".join(_eng_bad[:6]))
+
+# by-LLO splits: each split internally consistent AND COWACDI+EHA started == the all-LLO started
+_engllo = dd.get("cohortEngagementLLO", {})
+_llo_bad = []
+for sg, splits in _engllo.items():
+    for llo, c in splits.items():
+        _eng_before = len(_eng_bad)
+        _eng_consistent(f"{sg}/{llo}", c)
+        _llo_bad += _eng_bad[_eng_before:]
+    all_c = _eng.get(sg)
+    if all_c:
+        split_sum = sum(splits[llo]["total_started"] for llo in splits)
+        if split_sum != all_c["total_started"]:
+            _llo_bad.append(f"{sg}: COWACDI+EHA started {split_sum} != all {all_c['total_started']}")
+chk("cohortEngagementLLO: each LLO split consistent AND COWACDI+EHA started == all-LLO started",
+    not _llo_bad, "; ".join(_llo_bad[:6]))
 
 print("=" * 80)
 n_pass = sum(results)

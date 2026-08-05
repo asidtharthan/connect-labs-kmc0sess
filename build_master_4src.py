@@ -315,6 +315,10 @@ print(f"[1] Connect: {len(cohort_info)} cohorts, {sum(len(v) for v in cohort_flw
 welcome_flws_by_key = defaultdict(set)
 triggers_by_flw_iv = defaultdict(list)
 flw_registered = set()  # connect_ids that submitted an HQ FLW-registration form (for "FLW Reg (HQ)" funnel column)
+# Each HQ domain is LLO-specific (…cowac… = COWACDI, …eha… = EHA). Tally each cohort's trigger forms by
+# the domain's LLO, then assign the cohort to its MAJORITY LLO — robust to a few stray cross-posted forms
+# (e.g. 1ECE1 had 73 EHA vs 1 COWACDI). Drives the render's per-LLO retention comparison.
+_cohort_llo_ct = defaultdict(Counter)
 for domain in ALL_DOMAINS:
     for ft in ["welcome_click_start", "trigger_bot", "flw_registration"]:
         path = HQ_DIR / f"{domain}__{ft}.jsonl"
@@ -353,6 +357,9 @@ for domain in ALL_DOMAINS:
                         wniv = SUBGROUP_DESIGN[_wsg]["topics"][0]
                 welcome_flws_by_key[(cohort_id, wniv)].add(cid)
             else:
+                _llo = "EHA" if "eha" in domain else ("COWACDI" if "cowac" in domain else None)
+                if _llo:
+                    _cohort_llo_ct[cohort_id][_llo] += 1
                 triggers_by_flw_iv[(cid, niv)].append(
                     {
                         "connect_id": cid,
@@ -364,7 +371,10 @@ for domain in ALL_DOMAINS:
                 )
 for k in triggers_by_flw_iv:
     triggers_by_flw_iv[k].sort(key=lambda tb: tb["received_on"])
-print(f"[2/3] welcome keys={len(welcome_flws_by_key)}, trigger (flw,iv) keys={len(triggers_by_flw_iv)}")
+# cohort_id -> LLO (COWACDI / EHA) by majority of trigger-form domains
+cohort_llo = {c: ct.most_common(1)[0][0] for c, ct in _cohort_llo_ct.items() if ct}
+print(f"[2/3] welcome keys={len(welcome_flws_by_key)}, trigger (flw,iv) keys={len(triggers_by_flw_iv)}, "
+      f"cohort_llo={Counter(cohort_llo.values())}")
 
 # ---- union in cohorts present in the CommCare interview data but MISSING from the Connect snapshot ----
 # cohort_info is otherwise Connect-only, so when the Connect pull is stale/failed for a subgroup
