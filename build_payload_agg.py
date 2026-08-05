@@ -139,6 +139,7 @@ def _release_status(sg, n):
 funnel = []
 line = {}
 line_di = {}
+line_prev = {}   # per-subgroup: %Started with denominator = FLWs who STARTED the PREVIOUS interview (item: retention-prev)
 line_status = {}
 line_days = {}   # per-subgroup: median days from the FLW's interview-1 trigger to interview-N trigger
 for sg in SG_PRESENT:
@@ -147,6 +148,7 @@ for sg in SG_PRESENT:
     topic1 = bm.SUBGROUP_DESIGN[sg]["topics"][0]
     series = []
     series_di = []
+    series_prev = []
     statuses = []
     days_series = []
     for i, tc in enumerate(bm.SUBGROUP_DESIGN[sg]["topics"]):
@@ -155,6 +157,12 @@ for sg in SG_PRESENT:
         t, s, cc = len(f["t"]), len(f["s"]), len(f["c"])
         s_di = s - di["count"] if (di and n == di["last_n"]) else s
         st = _release_status(sg, n)
+        # "reached-previous-interview" retention: same numerator (started), but denominator = FLWs who
+        # STARTED interview n-1 (had a session, any status) instead of the constant initiated base — so
+        # later interviews aren't diluted by FLWs who simply haven't reached that stage yet. n=1 uses elig
+        # (no previous interview). null when the previous interview has 0 starters (can't divide).
+        prev_started = len(fset[(sg, n - 1)]["s"]) if n > 1 else elig
+        pct_started_prev = round(100 * s / prev_started, 1) if prev_started else None
         funnel.append(
             {
                 "sg": sg,
@@ -174,12 +182,16 @@ for sg in SG_PRESENT:
                 # de-impacted started (penult/last artifact removed from the LAST interview only)
                 "started_di": s_di,
                 "pct_started_di": round(100 * s_di / elig, 1),
+                # %Started vs FLWs who started the previous interview (reached-prev denominator)
+                "prev_started": prev_started,
+                "pct_started_prev": pct_started_prev,
                 # release status (not-available / in-progress / settled) for funnel display
                 "status": st,
             }
         )
         series.append(round(100 * s / elig, 1))
         series_di.append(round(100 * s_di / elig, 1))
+        series_prev.append(pct_started_prev)
         statuses.append(st)
         # median days from when the FLW DID interview 1 (session start) to when they DID interview n.
         # Anchored on the actual OCS session start (not the trigger), so day 0 = "the day they did their
@@ -194,6 +206,7 @@ for sg in SG_PRESENT:
         days_series.append(round(med_days, 1) if med_days is not None else None)
     line[sg] = series
     line_di[sg] = series_di
+    line_prev[sg] = series_prev
     line_status[sg] = statuses
     line_days[sg] = days_series
 
@@ -658,6 +671,7 @@ payload = {
     "line_pct_started": line,
     "line_days": line_days,           # median days from when FLW DID interview-1 to interview-N (session start)
     "line_pct_started_di": line_di,   # de-impacted %started series (item 8)
+    "line_pct_started_prev": line_prev,  # %started vs FLWs who started the PREVIOUS interview (reached-prev denom)
     "line_status": line_status,       # per-point release status (not-available/in-progress/settled)
     "line_active": line_active,       # per-subgroup: still actively triggering -> dotted funnel line
     "deimpact": deimpact,             # {sg: {last_n, count}} penult/last artifact summary

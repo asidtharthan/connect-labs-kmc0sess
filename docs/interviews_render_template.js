@@ -47,6 +47,8 @@ function WorkflowUI(props) {
   var deImpact = dimp[0], setDeImpact = dimp[1];   // item 8: raw vs de-impacted (penult/last artifact)
   var lvm = React.useState("pct");
   var lineMode = lvm[0], setLineMode = lvm[1];   // funnels retention chart x-axis: pct (by interview #) | time (by real calendar days since first interview); y is % Started in both
+  var ldm = React.useState("init");
+  var denomMode = ldm[0], setDenomMode = ldm[1];   // retention denominator: init (# initiated, constant) | prev (FLWs who started the previous interview)
   var lsg = React.useState({}); var hidSg = lsg[0], setHidSg = lsg[1];   // funnels line chart: hidden subgroups (custom legend toggle)
   var lineRef = React.useRef(null), lineInst = React.useRef(null);
   var barRef = React.useRef(null), barInst = React.useRef(null);
@@ -171,13 +173,17 @@ function WorkflowUI(props) {
     if (lineInst.current) lineInst.current.destroy();
     // Both modes show retention (% Started) on Y. "pct" = x is the interview ordinal (evenly spaced);
     // "time" = x is real calendar days since the FLW's first interview (each dot at the day it landed).
-    var byDay = lineMode === "time";
+    // The prev-denominator view is interview-# only (a "reached previous interview" denominator has no
+    // meaning on a calendar-day axis), so force byDay off when denomMode === "prev".
+    var prevDenom = denomMode === "prev";
+    var byDay = lineMode === "time" && !prevDenom;
     var maxLen = 0; DATA.lineSeries.forEach(function (s) { maxLen = Math.max(maxLen, s.pts.length); });
     var labels = []; for (var i = 1; i <= maxLen; i++) labels.push("Int " + i);
     lineInst.current = new window.Chart(lineRef.current.getContext("2d"), {
       type: "line",
       data: { labels: byDay ? undefined : labels, datasets: DATA.lineSeries.map(function (s) {
-        var raw = (deImpact && s.pts_di && s.pts_di.length) ? s.pts_di : s.pts;
+        // denominator: prev = %started vs previous-interview starters; else initiated base (raw / de-impacted)
+        var raw = prevDenom ? (s.pts_prev || []) : ((deImpact && s.pts_di && s.pts_di.length) ? s.pts_di : s.pts);
         var st = s.status || [];
         var dd = s.days || [];
         // not-available interviews (not yet offered) → null so the line ends instead of a false 0%
@@ -201,12 +207,12 @@ function WorkflowUI(props) {
           pointRadius: byDay ? 4 : 3, pointHoverRadius: 6,
           hidden: !!hidSg[s.sg], borderDash: inProgress ? [8, 5] : undefined }; }) },
       options: { responsive: true, maintainAspectRatio: false,
-        plugins: { title: { display: true, text: byDay ? "% FLWs still starting each interview, plotted against real days since their first interview — each dot is an interview at the day it landed; two dots on ~the same day = the last two triggered back-to-back (penultimate artifact)" : "% FLWs who started each interview round (denominator = # FLWs initiated, constant per subgroup) — solid = subgroup fully settled, dotted = subgroup still in progress, line ends where interviews aren't offered yet" }, legend: { display: false } },
-        scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: "% Started" } },
+        plugins: { title: { display: true, text: prevDenom ? "% who started each interview OF THOSE WHO REACHED THE PREVIOUS ONE (denominator = FLWs who started interview N-1, not the full initiated base) — later interviews no longer collapse just because many FLWs haven't reached that stage yet; interview 1 = vs # initiated" : (byDay ? "% FLWs still starting each interview, plotted against real days since their first interview — each dot is an interview at the day it landed; two dots on ~the same day = the last two triggered back-to-back (penultimate artifact)" : "% FLWs who started each interview round (denominator = # FLWs initiated, constant per subgroup) — solid = subgroup fully settled, dotted = subgroup still in progress, line ends where interviews aren't offered yet") }, legend: { display: false } },
+        scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: prevDenom ? "% Started (of prev-interview starters)" : "% Started" } },
           x: byDay ? { type: "linear", beginAtZero: true, title: { display: true, text: "Days since first interview" } } : { title: { display: true, text: "Interview #" } } } }
     });
     return function () { if (lineInst.current) { lineInst.current.destroy(); lineInst.current = null; } };
-  }, [activeTab, deImpact, hidSg, lineMode]);
+  }, [activeTab, deImpact, hidSg, lineMode, denomMode]);
 
   // ---- stacked bar chart (Table View > Topic completion) ----
   React.useEffect(function () {
@@ -1129,9 +1135,16 @@ function WorkflowUI(props) {
             {funView === "retention" && (
             <React.Fragment>
             <div className="flex flex-wrap items-center gap-2 px-1">
+              <span className="text-xs font-medium text-gray-600">Denominator:</span>
+              {subBtn(denomMode, "init", setDenomMode, "# Initiated")}
+              {subBtn(denomMode, "prev", setDenomMode, "Reached prev interview")}
+              <span className="text-gray-400" style={{ fontSize: "10px" }} title="# Initiated: % Started = started ÷ FLWs who initiated (constant base) — later interviews look low because many FLWs haven't reached them.\nReached prev interview: denominator = FLWs who STARTED the previous interview, so each point is 'of those who got here, how many started this one' — later interviews no longer collapse.">ℹ</span>
+              <span className="mx-1 text-gray-300">|</span>
               <span className="text-xs font-medium text-gray-600">X-axis:</span>
               {subBtn(lineMode, "pct", setLineMode, "By interview #")}
-              {subBtn(lineMode, "time", setLineMode, "By calendar day")}
+              {denomMode === "prev"
+                ? <span className="text-gray-300 line-through" title="Calendar-day view isn't available with the reached-prev denominator">By calendar day</span>
+                : subBtn(lineMode, "time", setLineMode, "By calendar day")}
               <span className="mx-1 text-gray-300">|</span>
               <span className="text-xs font-medium text-gray-600">Penult/last artifact:</span>
               {subBtn(deImpact ? "di" : "raw", "raw", function () { setDeImpact(false); }, "Raw")}
