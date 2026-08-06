@@ -301,20 +301,26 @@ for sg in SG_ORDER:
         if fmap2[sg][i + 1]["pct_started_di"] != p:
             ldi_bad += 1
 chk("lineSeries pts_di == funnel pct_started_di", ldi_bad == 0, f"{ldi_bad} mismatched points")
-# reached-previous-interview retention: denom = started[n-1] (n=1 -> elig); recompute independently
+# reached-previous-interview retention: numerator = |started(n) ∩ started(n-1)| (intersection, so it's
+# bounded ≤100%), denom = |started(n-1)| (n=1 -> elig / started). Validate arithmetic + bounds.
 lp_bad = 0
 for sg in SG_ORDER:
     rows = fmap2.get(sg, {})
     for n in sorted(rows):
         f = rows[n]
         denom = rows[n - 1]["started"] if n > 1 else f["elig"]
-        exp = round(100 * f["started"] / denom, 1) if denom else None
+        num = f.get("prev_num")
+        exp = round(100 * num / denom, 1) if denom else None
         if f.get("prev_started") != denom or f.get("pct_started_prev") != exp:
+            lp_bad += 1
+        # numerator must be a subset count of the denominator -> rate can never exceed 100%
+        if num is not None and (num > denom or (f.get("pct_started_prev") or 0) > 100):
             lp_bad += 1
         # lineSeries pts_prev must equal the funnel value
         if ls[sg].get("pts_prev", [])[n - 1] != f.get("pct_started_prev"):
             lp_bad += 1
-chk("pct_started_prev == 100*started[n]/started[n-1] (n=1->elig) & lineSeries pts_prev matches", lp_bad == 0, f"{lp_bad} bad")
+chk("pct_started_prev = 100*|started(n)∩started(n-1)|/started(n-1) (n=1->elig), bounded ≤100, lineSeries matches",
+    lp_bad == 0, f"{lp_bad} bad")
 cb_bad = sum(1 for f in dd["funnel"] if f["pct_completed_base"] != round(100 * f["completed"] / f["elig"], 1))
 chk("funnel pct_completed_base == 100*completed/eligible (all rows)", cb_bad == 0, f"{cb_bad} bad")
 

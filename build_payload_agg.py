@@ -157,12 +157,19 @@ for sg in SG_PRESENT:
         t, s, cc = len(f["t"]), len(f["s"]), len(f["c"])
         s_di = s - di["count"] if (di and n == di["last_n"]) else s
         st = _release_status(sg, n)
-        # "reached-previous-interview" retention: same numerator (started), but denominator = FLWs who
-        # STARTED interview n-1 (had a session, any status) instead of the constant initiated base — so
-        # later interviews aren't diluted by FLWs who simply haven't reached that stage yet. n=1 uses elig
-        # (no previous interview). null when the previous interview has 0 starters (can't divide).
-        prev_started = len(fset[(sg, n - 1)]["s"]) if n > 1 else elig
-        pct_started_prev = round(100 * s / prev_started, 1) if prev_started else None
+        # "reached-previous-interview" retention: of the FLWs who STARTED interview n-1, what fraction
+        # ALSO started interview n. Numerator = |started(n) ∩ started(n-1)| (NOT raw started(n) — an FLW
+        # can start n without n-1, which would push the ratio >100% and off the chart). Denominator =
+        # |started(n-1)|. This is bounded ≤100% and is the true conditional retention (later interviews
+        # aren't diluted by FLWs who haven't reached that stage). n=1 uses the initiated base (no previous);
+        # null when the previous interview has 0 starters.
+        if n > 1:
+            prev_set = fset[(sg, n - 1)]["s"]
+            prev_started = len(prev_set)
+            prev_num = len(f["s"] & prev_set)   # started n AND started n-1
+        else:
+            prev_started, prev_num = elig, s
+        pct_started_prev = round(100 * prev_num / prev_started, 1) if prev_started else None
         funnel.append(
             {
                 "sg": sg,
@@ -183,7 +190,8 @@ for sg in SG_PRESENT:
                 "started_di": s_di,
                 "pct_started_di": round(100 * s_di / elig, 1),
                 # %Started vs FLWs who started the previous interview (reached-prev denominator)
-                "prev_started": prev_started,
+                "prev_started": prev_started,          # denominator = |started(n-1)| (n=1 -> elig)
+                "prev_num": prev_num,                  # numerator = |started(n) ∩ started(n-1)| (n=1 -> started)
                 "pct_started_prev": pct_started_prev,
                 # release status (not-available / in-progress / settled) for funnel display
                 "status": st,
