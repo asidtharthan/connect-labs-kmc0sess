@@ -315,6 +315,31 @@ print(f"[1] Connect: {len(cohort_info)} cohorts, {sum(len(v) for v in cohort_flw
 welcome_flws_by_key = defaultdict(set)
 triggers_by_flw_iv = defaultdict(list)
 flw_registered = set()  # connect_ids that submitted an HQ FLW-registration form (for "FLW Reg (HQ)" funnel column)
+flw_demographics = {}   # connect_id -> {name,gender,state,lga,settlement,type_of_flw,native_language,education,experience_years,training_batch} from the Learn flw_registration form (for the FLW-level retention analysis)
+
+
+def _flw_demo(form):
+    """Extract demographics from an flw_registration form (settlement key varies by LGA)."""
+    loc = form.get("location") if isinstance(form.get("location"), dict) else {}
+    setl = form.get("settlement") if isinstance(form.get("settlement"), dict) else {}
+    settlement = (setl.get("settlements") or next((v for k, v in setl.items() if k.endswith("_settlement") and v), "") or "")
+    exp = form.get("years_of_experience_as_flw")
+    try:
+        exp = int(float(exp)) if exp not in (None, "") else None
+    except (TypeError, ValueError):
+        exp = None
+    return {
+        "name": (form.get("name") or "").strip(),
+        "gender": (form.get("gender") or "").strip(),
+        "state": (loc.get("state_of_work") or "").strip(),
+        "lga": (loc.get("lga") or "").strip(),
+        "settlement": str(settlement).strip(),
+        "type_of_flw": (form.get("type_of_flw") or "").strip(),
+        "native_language": (form.get("native_language") or "").strip(),
+        "education": (form.get("highest_educational_qual") or "").strip(),
+        "experience_years": exp,
+        "training_batch": (form.get("training_batch") or "").strip(),
+    }
 # Each HQ domain is LLO-specific (…cowac… = COWACDI, …eha… = EHA). Tally each cohort's trigger forms by
 # the domain's LLO, then assign the cohort to its MAJORITY LLO — robust to a few stray cross-posted forms
 # (e.g. 1ECE1 had 73 EHA vs 1 COWACDI). Drives the render's per-LLO retention comparison.
@@ -337,6 +362,9 @@ for domain in ALL_DOMAINS:
             if ft == "flw_registration":
                 if cid:
                     flw_registered.add(cid)
+                    # keep the first non-empty demographic record per FLW (they register once)
+                    if cid not in flw_demographics or not flw_demographics[cid].get("lga"):
+                        flw_demographics[cid] = _flw_demo(form)
                 continue
             recv = parse_dt(sub.get("received_on"))
             if not cid or not recv:

@@ -796,7 +796,7 @@ function WorkflowUI(props) {
       <div className="bg-white rounded-lg shadow-sm">
         <div className="border-b border-gray-200 px-5">
           <nav className="-mb-px flex space-x-6">
-            {[["overview", "Overview"], ["table", "Table View"], ["funnels", "Interview Completion Funnels"], ["fullretention", "Full Retention Table"], ["breakdowns", "Breakdowns"]].map(function (t) {
+            {[["overview", "Overview"], ["table", "Table View"], ["funnels", "Interview Completion Funnels"], ["fullretention", "Full Retention Table"], ["breakdowns", "Breakdowns"], ["flw", "FLW Retention"]].map(function (t) {
               var on = activeTab === t[0];
               return (
                 <button key={t[0]} onClick={function () { setTab(t[0]); }}
@@ -1488,6 +1488,105 @@ function WorkflowUI(props) {
             )}
           </div>
         )}
+
+        {activeTab === "flw" && (function () {
+          var FE = DATA.flwEngagement || {};
+          if (!FE.n_flws) return <div className="p-6 text-sm text-gray-500">FLW-level analysis not available in this build.</div>;
+          var N = FE.n_flws;
+          var TIER_COLOR = { Champion: "#065f46", Solid: "#2E7D32", Slipping: "#F9A825", "At-risk": "#EF6C00", Lost: "#C62828" };
+          var PERSONA_COLOR = { Champion: "#065f46", "Steady finisher": "#2E7D32", "Slow-but-finishing": "#F9A825", "Re-engager": "#1565C0", "Early dropper": "#EF6C00", "One-and-done": "#C62828", Lapsed: "#9ca3af" };
+          var healthy = (FE.tiers || []).filter(function (t) { return t.k === "Champion" || t.k === "Solid"; }).reduce(function (a, t) { return a + t.pct; }, 0);
+          var cc = FE.crossCohort || { multi: {}, single: {}, dist: [] };
+          // horizontal bar row
+          var bar = function (label, pct, color, right, key) {
+            return (
+              <div key={key} className="flex items-center gap-2 text-xs py-0.5">
+                <div className="text-gray-700 text-right" style={{ width: "150px", flexShrink: 0 }}>{label}</div>
+                <div className="flex-1 bg-gray-100 rounded h-4 relative" style={{ minWidth: "80px" }}>
+                  <div className="h-4 rounded" style={{ width: Math.min(100, pct) + "%", backgroundColor: color }}></div>
+                </div>
+                <div className="text-gray-600 font-medium text-right" style={{ width: "78px", flexShrink: 0 }}>{right}</div>
+              </div>
+            );
+          };
+          var card = function (val, label, sub, color, key) {
+            return (
+              <div key={key} className="rounded border border-gray-200 bg-white px-3 py-2" style={{ minWidth: "150px" }}>
+                <div className="text-xl font-bold" style={{ color: color }}>{val}</div>
+                <div className="text-xs font-medium text-gray-700">{label}</div>
+                <div className="text-gray-400" style={{ fontSize: "10px" }}>{sub}</div>
+              </div>
+            );
+          };
+          return (
+            <div className="p-4 space-y-4">
+              <div className="text-xs bg-indigo-50 border border-indigo-100 rounded px-3 py-2 text-gray-700">
+                <b>Per-FLW, cross-cohort.</b> One row per unique FLW who started interviewing, with their timeline unioned across every cohort/arm they were part of ({FE.coverage_lga}% have demographics). Engagement tier is an RFM-style blend of recency, completion and answer depth.
+              </div>
+              <div className="flex flex-wrap gap-2 px-1">
+                {card(N.toLocaleString(), "FLWs analysed", "started ≥1 interview", "#1565C0", "k1")}
+                {card(healthy + "%", "Healthy engagers", "Champion + Solid tier", "#065f46", "k2")}
+                {card((cc.dist.filter(function (d) { return d.k !== "1"; }).reduce(function (a, d) { return a + d.pct; }, 0)) + "%", "In multiple cohorts", "re-used across arms", "#6d28d9", "k3")}
+                {card((FE.byState[0] && FE.byState[0].finished) + "%", "Best state finish", (FE.byState[0] && FE.byState[0].k) || "", "#2E7D32", "k4")}
+              </div>
+
+              {/* Cross-cohort headline */}
+              <div className="rounded border border-purple-200 bg-purple-50 px-3 py-2 text-xs text-gray-700">
+                <b>⭐ Cross-cohort is the norm — and re-use builds engagement, it doesn't fatigue it.</b> {cc.multi.n} FLWs ({100 - (cc.single.n ? Math.round(100 * cc.single.n / N) : 0)}%) span ≥2 cohorts. Multi-cohort FLWs engage <b>deeper</b> (<b>{cc.multi.depth}</b> vs {cc.single.depth} words/session) at the same completion rate ({cc.multi.completion} vs {cc.single.completion}). <span className="text-gray-500">(Their higher "finished" share is partly mechanical — more cohorts = more chances to finish one — so depth is the cleaner signal.)</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <div className="text-sm font-semibold text-gray-700 mb-1">Engagement tier</div>
+                  {(FE.tiers || []).map(function (t) { return bar(t.k, t.pct, TIER_COLOR[t.k] || "#9ca3af", t.n + " · " + t.pct + "%", t.k); })}
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-gray-700 mb-1">Behavioral persona</div>
+                  {(FE.personas || []).map(function (t) { return bar(t.k, t.pct, PERSONA_COLOR[t.k] || "#9ca3af", t.n + " · " + t.pct + "%", t.k); })}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-sm font-semibold text-gray-700 mb-1">How deep FLWs get (share reaching each interview)</div>
+                <p className="text-gray-400 mb-1" style={{ fontSize: "10px" }}>Deepest interview reached across an FLW's cohorts. NB: most FLWs are in 2-interview cohorts, so the Int≥3 step reflects who was in a longer-schedule cohort, not only drop-off — see the retention chart for true per-stage survival.</p>
+                {(FE.survival || []).map(function (s) { return bar("reached Int≥" + s.d, s.pct, "#1565C0", s.reached + " · " + s.pct + "%", "sv" + s.d); })}
+              </div>
+
+              {/* First-interview predictor */}
+              <div className="rounded border border-gray-200 bg-white px-3 py-2">
+                <div className="text-sm font-semibold text-gray-700 mb-1">Early engagement depth predicts finishing</div>
+                <p className="text-gray-500 text-xs mb-2">FLWs split at the median answer-depth. Deeper early engagement → much higher completion (the strongest lever in the retention literature).</p>
+                <div className="flex flex-wrap gap-2">
+                  {card((FE.firstIv.hi.finished) + "%", "Above-median depth finish", "n=" + FE.firstIv.hi.n + " · " + FE.firstIv.hi.depth + " words/session", "#065f46", "fi1")}
+                  {card((FE.firstIv.lo.finished) + "%", "Below-median depth finish", "n=" + FE.firstIv.lo.n + " · " + FE.firstIv.lo.depth + " words/session", "#C62828", "fi2")}
+                </div>
+              </div>
+
+              {/* Cross-cuts */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <div className="text-sm font-semibold text-gray-700 mb-1">Finish rate by state</div>
+                  {(FE.byState || []).map(function (s) { return bar(s.k + " (n=" + s.n + ")", s.finished, "#1565C0", s.finished + "%", "st" + s.k); })}
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-gray-700 mb-1">Finish rate by FLW type</div>
+                  {(FE.byType || []).map(function (s) { return bar(s.k + " (n=" + s.n + ")", s.finished, "#00695C", s.finished + "%", "ty" + s.k); })}
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-gray-700 mb-1">Finish rate by LLO</div>
+                  {(FE.byLLO || []).map(function (s) { return bar(s.k + " (n=" + s.n + ")", s.finished, "#6d28d9", s.finished + "%", "llo" + s.k); })}
+                </div>
+              </div>
+
+              <Legend title="How this is built">
+                <div><b>Grain:</b> one row per unique FLW (deduped across cohorts); metrics union their sessions across every arm.</div>
+                <div><b>Tier (RFM):</b> Recency (days since last interview) + completion rate + answer depth (words/session), each scored 1–5.</div>
+                <div><b>Persona:</b> rule-based behavioral segment (Champion / Steady finisher / Slow-but-finishing / Re-engager / Early dropper / One-and-done / Lapsed).</div>
+                <div><b>Finished:</b> completed all scheduled interviews in ≥1 of their cohorts. Full per-FLW detail is in the flw_analysis.csv export.</div>
+              </Legend>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

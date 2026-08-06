@@ -374,6 +374,24 @@ for sg, splits in _engllo.items():
 chk("cohortEngagementLLO: each LLO split consistent AND COWACDI+EHA started == all-LLO started",
     not _llo_bad, "; ".join(_llo_bad[:6]))
 
+# ---- FLW-level analysis (flwEngagement): ties to canonical distinct-started-FLW count + %s sum ~100 ----
+_fe = dd.get("flwEngagement", {})
+_fe_bad = []
+_distinct_started = len({r["connect_id"] for r in bm.rows if r.get("is_started") == "Y"})
+if _fe.get("n_flws") != _distinct_started:
+    _fe_bad.append(f"n_flws {_fe.get('n_flws')} != distinct started FLWs {_distinct_started}")
+for _k in ("tiers", "personas"):
+    _s = sum(t["pct"] for t in _fe.get(_k, []))
+    if _fe.get(_k) and not (97 <= _s <= 103):
+        _fe_bad.append(f"{_k} pct sum {_s} != ~100")
+    if _fe.get(_k) and sum(t["n"] for t in _fe[_k]) != _fe["n_flws"]:
+        _fe_bad.append(f"{_k} counts != n_flws")
+for _cc in ("byState", "byType", "byLLO"):
+    if any(not (0 <= r["finished"] <= 100) or not (0 <= r["completion"] <= 1) for r in _fe.get(_cc, [])):
+        _fe_bad.append(f"{_cc} out of range")
+chk("flwEngagement: n_flws==distinct started FLWs; tier/persona counts sum to n_flws & %~100; cross-cuts in range",
+    not _fe_bad, "; ".join(_fe_bad[:6]))
+
 print("=" * 80)
 n_pass = sum(results)
 n_tot = len(results)

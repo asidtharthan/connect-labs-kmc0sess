@@ -9,6 +9,7 @@ from collections import defaultdict
 from datetime import date as _date, timedelta as _timedelta
 
 import build_master_4src as bm
+import build_flw_analysis as bfa  # per-FLW cross-cohort rollup (import-safe; reuses cached bm)
 
 STATES_NA = [
     "completed",
@@ -219,6 +220,7 @@ out = {
     "connectPendingSubgroups": payload.get("connect_pending_subgroups", []),
     "cohortEngagement": payload.get("cohort_engagement", {}),
     "cohortEngagementLLO": payload.get("cohort_engagement_llo", {}),
+    "flwEngagement": bfa.aggregate(bfa.build_records()),  # per-FLW cross-cohort analysis (compact aggregates)
     "granular": granular,
     "granular_total": len(bm.rows),
     "flwMatrix": flw_matrix,
