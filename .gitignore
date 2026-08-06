@@ -399,3 +399,7 @@ _interview_schedule.json
 
 # versioned Connect snapshots (participant data — archived locally, tracked via docs/connect_snapshot_manifest.csv)
 connect_snapshots/
+
+# per-FLW analysis outputs (flw_analysis.csv has connect_ids + names — participant data; payload is a regenerated artifact)
+flw_analysis.csv
+flw_analysis_payload.json
