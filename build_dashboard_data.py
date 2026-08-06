@@ -236,6 +236,11 @@ out = {
 s = json.dumps(out, separators=(",", ":"))
 open("dashboard_data.json", "w", encoding="utf-8").write(s)
 print(f"dashboard_data.json: {len(s.encode()) / 1024:.1f} KB")
+# render_data.json — the PRUNED payload the render actually embeds (dashboard_data.json stays
+# complete so every audit gate keeps asserting against it). Written here so the two can't drift.
+import build_render_data  # noqa: E402  (local module; imported late so a failure names this step)
+
+build_render_data.build_and_write(os.path.dirname(os.path.abspath(__file__)))
 print(f"  counts: {counts}")
 print(
     f"  connectFunnel rows: {len(connect_funnel)}; funnel rows: {len(out['funnel'])}; topicStatus: {len(topic_status)}; granular: {len(granular)}/{len(bm.rows)}"

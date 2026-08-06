@@ -59,6 +59,11 @@ OWNER_OPP = 1251
 TEMPLATE = os.path.join("docs", "interviews_render_template.js")
 RENDER_OUT = os.path.join("docs", "interviews_master_v3_render.js")
 DATA_JSON = "dashboard_data.json"
+# The render embeds the PRUNED payload (render_data.json), not dashboard_data.json: Labs caps
+# render_code at 512 KB and the pruned copy drops render-unread keys + re-encodes flwMatrix (~148 KB
+# saved on live data). dashboard_data.json stays COMPLETE — every audit gate still asserts on it, and
+# brutal_verify.py section G proves render_data.json is a faithful transform of it.
+RENDER_DATA_JSON = "render_data.json"
 
 # UTF-8 so the audit scripts' unicode (Σ, ÷, —) don't crash on Windows consoles.
 ENV = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
@@ -78,12 +83,24 @@ def run(label, cmd, required=True):
 
 
 def inject():
-    """Inject dashboard_data.json into the render template -> final render JS. Babel-validated separately."""
+    """Inject render_data.json (the pruned payload) into the render template -> final render JS.
+    Babel-validated separately. dashboard_data.json is NOT embedded — see RENDER_DATA_JSON above."""
     print("\n=== 7. inject data into render template ===", flush=True)
     with open(TEMPLATE, encoding="utf-8") as f:
         tpl = f.read()
-    with open(DATA_JSON, encoding="utf-8") as f:
+    rd_path = os.path.join(ROOT, RENDER_DATA_JSON)
+    dd_path = os.path.join(ROOT, DATA_JSON)
+    if not os.path.exists(rd_path):
+        print(f"ABORT: {RENDER_DATA_JSON} missing — run build_dashboard_data.py (it writes both).", flush=True)
+        sys.exit(1)
+    # Guard against embedding a stale pruned payload if someone rebuilt dashboard_data.json by hand.
+    if os.path.getmtime(rd_path) < os.path.getmtime(dd_path) - 1:
+        print(f"ABORT: {RENDER_DATA_JSON} is older than {DATA_JSON} — rebuild with build_dashboard_data.py.", flush=True)
+        sys.exit(1)
+    with open(rd_path, encoding="utf-8") as f:
         data = f.read().strip()
+    with open(dd_path, encoding="utf-8") as f:
+        full_kb = len(f.read().encode()) / 1024
     if "/*__DATA__*/" not in tpl:
         print("ABORT: template missing /*__DATA__*/ placeholder", flush=True)
         sys.exit(1)
@@ -91,7 +108,11 @@ def inject():
     with open(RENDER_OUT, "w", encoding="utf-8") as f:
         f.write(out)
     kb = len(out.encode()) / 1024
-    print(f"--- wrote {RENDER_OUT} ({kb:.1f} KB)", flush=True)
+    code_kb = (len(tpl.encode()) - len("/*__DATA__*/")) / 1024
+    data_kb = len(data.encode()) / 1024
+    print(f"--- wrote {RENDER_OUT} ({kb:.1f} KB = {code_kb:.1f} KB code + {data_kb:.1f} KB data)", flush=True)
+    print(f"---   payload: {full_kb:.1f} KB full -> {data_kb:.1f} KB pruned "
+          f"(saved {full_kb - data_kb:.1f} KB); headroom vs the 512 KB Labs limit: {512 - kb:.1f} KB", flush=True)
     if kb > 500:
         print(f"WARNING: render is {kb:.0f} KB, near the 512 KB Labs limit — reduce granular sample.", flush=True)
     return out

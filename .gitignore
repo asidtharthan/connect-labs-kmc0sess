@@ -387,6 +387,7 @@ connect_user_data_snapshot.csv
 master_v7_2026-06-10.csv
 master_4src.csv
 dashboard_data.json
+render_data.json
 payload_agg.json
 topic_status_long.csv
 docs/interviews_master_v3_render.js

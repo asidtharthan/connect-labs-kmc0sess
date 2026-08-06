@@ -10,7 +10,9 @@ Layers verified:
   C. RAW -> master     trigger forms / OCS sessions / connect snapshot vs master_4src.csv
   D. master -> dash    every aggregate recomputed from master_4src.csv vs dashboard_data.json
   E. CROSS-PLACE       same metric in >1 dashboard section must match
-  F. RENDER binding    injected render embeds exactly dashboard_data.json
+  F. RENDER binding    injected render embeds exactly render_data.json (and stays under 512 KB)
+  G. TRANSFORM         render_data.json is a faithful transform of dashboard_data.json — exact
+                       drop-allowlist, byte-identical retained keys, exact flwMatrix round-trip
 """
 import csv, json, os, re, sys
 from collections import defaultdict
@@ -423,11 +425,141 @@ for s in DD["lineSeries"]:
 chk("lineSeries base==initiated & pts==funnel pct_started", ls_bad == 0, f"{ls_bad} bad")
 
 # ============================================================ F. RENDER binding
-sec("F. RENDER — injected render embeds exactly dashboard_data.json")
+sec("F. RENDER — injected render embeds exactly render_data.json (the pruned payload)")
 render = (ROOT / "docs" / "interviews_master_v3_render.js").read_text(encoding="utf-8")
-raw_json = (ROOT / "dashboard_data.json").read_text(encoding="utf-8")
-chk("dashboard_data.json substring present verbatim in injected render", raw_json in render,
+raw_json = (ROOT / "render_data.json").read_text(encoding="utf-8")
+chk("render_data.json substring present verbatim in injected render", raw_json in render,
     f"render {len(render)} chars, data {len(raw_json)} chars")
+_render_kb = len(render.encode()) / 1024
+chk("injected render under the 512 KB Labs render_code limit", _render_kb < 512, f"{_render_kb:.1f} KB")
+
+# ============================================================ G. TRANSFORM equivalence
+# render_data.json is a pruned/re-encoded copy of dashboard_data.json (Labs caps render_code at
+# 512 KB). This section proves the transform is FAITHFUL, with its own decoder — it deliberately does
+# NOT import build_render_data.py, so an encoder bug cannot hide behind a matching decoder bug.
+sec("G. TRANSFORM — render_data.json is a faithful, lossless-for-the-UI transform of dashboard_data.json")
+RD = json.loads(raw_json)
+
+# The ONLY keys the transform is allowed to remove. Re-stated here independently: if a future build
+# drops anything else (or stops dropping one of these), the gate fails rather than silently shipping
+# a payload with a missing key.
+ALLOWED_DROP_TOP = {"funnel", "granular_total"}
+ALLOWED_DROP_COHORT = {"connect"}
+ALLOWED_DROP_COHORT_IV = {"pct_completed_base", "started_di", "pct_started_di"}
+ADDED_KEYS = {"flwMatrixCohorts", "flwMatrixV2", "flwMatrixOrder", "flwMatrixOrderW"}
+
+# G1: top-level key set == dashboard keys - dropped - flwMatrix + the flwMatrix* encoding keys
+exp_top = (set(DD) - ALLOWED_DROP_TOP - {"flwMatrix"}) | ADDED_KEYS
+chk("render_data top-level keys == dashboard keys − allowlist + flwMatrix encoding",
+    set(RD) == exp_top,
+    f"missing={sorted(exp_top - set(RD))} unexpected={sorted(set(RD) - exp_top)}")
+
+# G2: every RETAINED top-level key is byte-identical (same JSON serialisation) to its counterpart
+_j = lambda o: json.dumps(o, separators=(",", ":"), sort_keys=False)
+diff_top = [k for k in DD if k not in ALLOWED_DROP_TOP | {"flwMatrix", "dropoff"} and _j(DD[k]) != _j(RD.get(k))]
+chk("retained top-level keys byte-identical to dashboard_data.json", not diff_top, f"differing: {diff_top}")
+
+# G3: dropoff — subgroups untouched; cohorts identical modulo exactly the allowlist
+chk("dropoff.subgroups byte-identical (subgroup-level connect/di/base ARE read by the render)",
+    _j(DD["dropoff"]["subgroups"]) == _j(RD["dropoff"].get("subgroups")), "")
+chk("dropoff sibling keys preserved", set(DD["dropoff"]) == set(RD["dropoff"]),
+    f"{sorted(DD['dropoff'])} vs {sorted(RD['dropoff'])}")
+co_bad, co_dropped_co, co_dropped_iv = 0, set(), set()
+for _sg, _cos in DD["dropoff"]["cohorts"].items():
+    _rcos = RD["dropoff"]["cohorts"].get(_sg)
+    if _rcos is None or len(_rcos) != len(_cos):
+        co_bad += 1
+        continue
+    for _a, _b in zip(_cos, _rcos):
+        co_dropped_co |= set(_a) - set(_b)
+        if set(_b) - set(_a):
+            co_bad += 1
+        exp = {}
+        for _ck, _cv in _a.items():
+            if _ck in ALLOWED_DROP_COHORT:
+                continue
+            if _ck == "interviews":
+                _bivs = _b.get("interviews", [])
+                _rows = []
+                for _i, _ivr in enumerate(_cv):
+                    if _i < len(_bivs):
+                        co_dropped_iv |= set(_ivr) - set(_bivs[_i])
+                    _rows.append({k2: v2 for k2, v2 in _ivr.items() if k2 not in ALLOWED_DROP_COHORT_IV})
+                exp[_ck] = _rows
+            else:
+                exp[_ck] = _cv
+        if _j(exp) != _j(_b):
+            co_bad += 1
+chk("dropoff.cohorts identical to dashboard_data.json modulo the allowlist", co_bad == 0, f"{co_bad} bad")
+chk("dropoff.cohorts[] dropped keys == exactly {connect}", co_dropped_co == ALLOWED_DROP_COHORT,
+    f"{sorted(co_dropped_co)}")
+chk("dropoff.cohorts[].interviews[] dropped keys == exactly the allowlist",
+    co_dropped_iv == ALLOWED_DROP_COHORT_IV, f"{sorted(co_dropped_iv)}")
+
+# G4: flwMatrix round-trip — decode flwMatrixV2 back to rows and demand EXACT equality
+#     (same rows, same order, same s arrays, same u flags). Independent decoder, mirrors the JS one.
+def _decode_flw_matrix(rd):
+    CH, V2 = rd["flwMatrixCohorts"], rd["flwMatrixV2"]
+    ORD, W = rd["flwMatrixOrder"], rd["flwMatrixOrderW"]
+    per = []
+    for line in V2:
+        parts = line.split("|")
+        m = {}
+        for p in parts[1:]:
+            ci, _, body = p.partition(":")
+            u = 0
+            if body.endswith("u"):
+                u, body = 1, body[:-1]
+            m[int(ci)] = ([int(ch) for ch in body], u)
+        per.append((parts[0], m))
+    rows = []
+    for ci, cohort in enumerate(CH):
+        seq = ORD[ci]
+        for off in range(0, len(seq) - W + 1, W):
+            f, m = per[int(seq[off:off + W], 36)]
+            s, u = m[ci]
+            row = {"f": f, "c": cohort, "s": s}
+            if u:
+                row["u"] = 1
+            rows.append(row)
+    return rows
+
+
+try:
+    _rt = _decode_flw_matrix(RD)
+except Exception as _e:
+    _rt = None
+    print(f"    flwMatrixV2 decode raised: {_e!r}")
+chk("flwMatrixV2 decodes to the same row COUNT as flwMatrix",
+    _rt is not None and len(_rt) == len(DD["flwMatrix"]),
+    f"{len(_rt) if _rt is not None else 'ERR'} == {len(DD['flwMatrix'])}")
+if _rt is not None and len(_rt) == len(DD["flwMatrix"]):
+    _first_bad = next((i for i, (a, b) in enumerate(zip(_rt, DD["flwMatrix"])) if a != b), None)
+    chk("flwMatrixV2 round-trip EXACTLY equals flwMatrix (rows, order, s arrays, u flags)",
+        _first_bad is None,
+        "identical" if _first_bad is None else f"first mismatch at row {_first_bad}: {_rt[_first_bad]} vs {DD['flwMatrix'][_first_bad]}")
+else:
+    chk("flwMatrixV2 round-trip EXACTLY equals flwMatrix (rows, order, s arrays, u flags)", False, "count mismatch")
+chk("flwMatrixV2 round-trip byte-identical JSON", _rt is not None and _j(_rt) == _j(DD["flwMatrix"]), "")
+chk("flwMatrixV2 has one entry per UNIQUE FLW",
+    _rt is not None and len(RD["flwMatrixV2"]) == len({r["f"] for r in DD["flwMatrix"]}),
+    f"{len(RD['flwMatrixV2'])} == {len({r['f'] for r in DD['flwMatrix']})}")
+chk("flwMatrixCohorts == distinct cohorts in flwMatrix",
+    set(RD["flwMatrixCohorts"]) == {r["c"] for r in DD["flwMatrix"]}
+    and len(RD["flwMatrixCohorts"]) == len(set(RD["flwMatrixCohorts"])),
+    f"{len(RD['flwMatrixCohorts'])} cohorts")
+# separator safety — the encoding is only unambiguous while these hold
+chk("no '|' or ':' in any FLW id / cohort id (encoding separators stay unambiguous)",
+    not any(("|" in r["f"] or ":" in r["f"] or "|" in r["c"] or ":" in r["c"]) for r in DD["flwMatrix"]), "")
+chk("every flwMatrix state value is a single digit 0-9",
+    all(0 <= v <= 9 for r in DD["flwMatrix"] for v in r["s"]), "")
+
+# G5: the transform actually bought headroom
+_dd_kb = len((ROOT / "dashboard_data.json").read_text(encoding="utf-8").encode()) / 1024
+_rd_kb = len(raw_json.encode()) / 1024
+chk("render payload is smaller than the full dashboard payload", _rd_kb < _dd_kb,
+    f"{_rd_kb:.1f} KB vs {_dd_kb:.1f} KB (saved {_dd_kb - _rd_kb:.1f} KB); render {_render_kb:.1f} KB, "
+    f"headroom {512 - _render_kb:.1f} KB")
 
 print("\n" + "=" * 90)
 print(f"  TOTAL: {P} passed, {F} failed")

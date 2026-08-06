@@ -9,16 +9,18 @@ Run: .venv/Scripts/python.exe build_flw_docx.py  ->  docs/FLW_Retention_Analysis
 """
 # flake8: noqa: E501,E231  (string-heavy document template — long prose lines are intentional)
 import json
+import os
 
 from docx import Document
 from docx.shared import Pt, RGBColor
 
 FE = json.load(open("flw_analysis_payload.json", encoding="utf-8"))
-TODAY = (
-    json.load(open("dashboard_data.json", encoding="utf-8")).get("today", "")
-    if __import__("os").path.exists("dashboard_data.json")
-    else ""
-)
+if os.path.exists("_flw_today.json"):
+    TODAY = json.load(open("_flw_today.json", encoding="utf-8")).get("today", "")
+elif os.path.exists("dashboard_data.json"):
+    TODAY = json.load(open("dashboard_data.json", encoding="utf-8")).get("today", "")
+else:
+    TODAY = ""
 
 NAVY = RGBColor(0x1F, 0x38, 0x64)
 GREY = RGBColor(0x6B, 0x72, 0x80)
@@ -31,7 +33,7 @@ P = {t["k"]: t for t in FE["personas"]}  # persona -> {n,pct}
 T = {t["k"]: t for t in FE["tiers"]}
 CC = FE["crossCohort"]
 CCD = {d["k"]: d for d in CC["dist"]}  # ncohorts -> {n,pct}
-FI = FE["firstIv"]
+FI = FE.get("depthSplit") or FE["firstIv"]  # depthSplit = FIRST-session depth (firstIv was lifetime avg)
 OAD = FE["oneAndDone"]
 AR = FE["atRisk"]
 ST = {s["k"]: s for s in FE["byState"]}
@@ -124,9 +126,12 @@ li(
     "List Number",
 )
 li(
-    f"Re-using workers is our biggest engagement asset — and it compounds. Finish rate climbs with each additional "
-    f"cohort: **{CC['single']['finished']}% → {CC['multi']['finished']}%** (single → multi-cohort), and answer depth "
-    f"rises with it ({CC['single']['depth']} → {CC['multi']['depth']} words/session).",
+    f"Re-use is the norm, but it does not by itself raise finishing. Multi-cohort workers finish ≥1 schedule far more "
+    f"often ({CC['single']['finished']}% → {CC['multi']['finished']}%), but that measure is a maximum over cohorts, so "
+    f"more cohorts mechanically means more chances. On the like-for-like measure — the share of their own schedules "
+    f"they complete — it is **{CC['single'].get('finished_pc', 0)}% (single) vs {CC['multi'].get('finished_pc', 0)}% "
+    f"(multi)**, i.e. flat. What re-used workers do show is greater depth "
+    f"({CC['single']['depth']} → {CC['multi']['depth']} words/session).",
     "List Number",
 )
 li(
@@ -137,8 +142,12 @@ li(
     "List Number",
 )
 li(
-    f"The retention lever is the first interview. Workers with above-median answer depth finish at "
-    f"**{FI['hi']['finished']}%** vs **{FI['lo']['finished']}%** below.",
+    f"Depth at the first interview is associated with finishing, modestly. Splitting workers at the median "
+    f"first-session answer depth, the per-cohort finish rate is **{FI['hi'].get('finished_pc', 0)}%** (above median) "
+    f"vs **{FI['lo'].get('finished_pc', 0)}%** (below) — a {abs(FI['hi'].get('finished_pc', 0) - FI['lo'].get('finished_pc', 0))}-point gap. "
+    f"On the “finished ≥1 schedule” measure the same split reads {FI['hi']['finished']}% vs {FI['lo']['finished']}%, but "
+    f"the deeper group is also in more cohorts, which inflates that version. Treat this as an association worth "
+    f"testing, not a proven lever.",
     "List Number",
 )
 li(
@@ -151,7 +160,7 @@ para("Behavioral personas (rule-based segments over the worker's whole history):
 persona_desc = {
     "Champion": "Finishes, steady cadence, high depth — the backbone",
     "Steady finisher": "Completes their schedule reliably",
-    "Slow-but-finishing": "Gets there, but with long gaps",
+    "Partial progress": "≥50% of triggered interviews done, but no schedule finished yet",
     "One-and-done": "Started once and stopped — the real early-loss group",
     "Re-engager": "Went silent, then came back",
     "Early dropper": "Shallow start, left early",
@@ -164,36 +173,38 @@ table(
 _t = {k: T.get(k, {}).get("pct", 0) for k in ("Champion", "Solid", "Slipping", "At-risk", "Lost")}
 para(
     f"Engagement tiers (RFM blend of recency + completion + answer depth): {_t['Champion']+_t['Solid']}% "
-    f"Champion/Solid, {_t['Slipping']}% Slipping, {_t['At-risk']+_t['Lost']}% At-risk/Lost. “Slipping” is largely "
-    "benign — workers in finished short cohorts who are simply inactive now, not people who quit mid-schedule."
+    f"Champion/Solid, {_t['Slipping']}% Slipping, {_t['At-risk']+_t['Lost']}% At-risk/Lost. “Slipping” is mixed: most "
+    "are finishers from short cohorts who are simply inactive now, but it also contains a large share of the "
+    "one-and-done group, so it should not be read as uniformly benign. Recency is measured against the freshest "
+    "session in the dataset rather than the wall clock, so these tiers do not drift when a data pull runs late."
 )
 
-h("2. The cross-cohort story (the standout finding)", 1)
-para(
-    f"The multi-arm design re-uses the same workers across studies — **{multi_pct}%** are in ≥2 cohorts. That re-use "
-    "is the strongest engagement signal we have, and it is monotonic:"
-)
+h("2. The cross-cohort picture (and a measurement trap)", 1)
+para(f"The multi-arm design re-uses the same workers across studies — **{multi_pct}%** are in ≥2 cohorts:")
 table(["Cohorts per worker", "Workers", "Share"], [[d["k"], d["n"], f"{d['pct']}%"] for d in CC["dist"]])
 para(
-    f"Comparing single- vs multi-cohort workers: completion is flat ({CC['single']['completion']} vs "
-    f"{CC['multi']['completion']}) while **finishing rises {CC['single']['finished']}% → {CC['multi']['finished']}%** "
-    f"and **depth rises {CC['single']['depth']} → {CC['multi']['depth']} words/session** — repeat exposure builds "
-    "commitment and richer engagement, with no sign of fatigue."
+    f"It is tempting to read re-use as compounding engagement, because “finished ≥1 schedule” rises "
+    f"{CC['single']['finished']}% → {CC['multi']['finished']}% from single- to multi-cohort workers. That reading is "
+    "wrong. “Finished ≥1” is a maximum over a worker's cohorts, so a worker in three cohorts has three independent "
+    "chances to clear the bar; the rise is largely arithmetic."
+)
+para(
+    f"The two measures that are not distorted by cohort count both say the effect is flat: per-cohort finish rate is "
+    f"**{CC['single'].get('finished_pc', 0)}% (single) vs {CC['multi'].get('finished_pc', 0)}% (multi)**, and "
+    f"completion rate is {CC['single']['completion']} vs {CC['multi']['completion']}. The one real difference is "
+    f"**depth: {CC['single']['depth']} → {CC['multi']['depth']} words/session**. Re-use is operationally valuable — "
+    "these are known, trained, available workers who answer at greater length — but this data does not show that "
+    "re-using a worker makes them more likely to finish."
 )
 if FE.get("armCombos"):
     combos = ", ".join(f"{c['k']} ({c['n']})" for c in FE["armCombos"][:4])
     para(
-        f"Structurally, TRS is the gateway: almost every multi-arm worker started in Training (TRS) and was re-used "
-        f"into study arms — top combinations: {combos}. TRS is the program's on-ramp; workers who flow from it into "
-        "further arms become the most engaged core."
+        f"Structurally, TRS sits in almost every multi-arm worker's history — top combinations: {combos}. (The arm "
+        "set is unordered in this data, so we can say TRS is nearly always present, not that it always came first.)"
     )
 para(
-    "Implication: a stable, repeatedly-engaged worker panel is a competitive asset — deliberately re-invite proven "
-    "workers rather than defaulting to fresh single-exposure recruitment."
-)
-para(
-    "(Caveat: the raw “finished” share is partly mechanical for multi-cohort workers — more cohorts = more chances "
-    "to finish one — so completion and depth, which aren't subject to that bias, carry the cleaner signal; they agree.)",
+    "Implication: a stable, repeatedly-engaged worker panel is operationally valuable — known, trained, available "
+    "workers who answer at greater length. Just don't budget for a finish-rate gain from re-use itself.",
     italic=True,
     color=GREY,
     size=9,
@@ -266,17 +277,28 @@ li(
 h("6. The recoverable at-risk list", 1)
 _ar = ", ".join(f"{s['k']} ({s['n']})" for s in AR["byState"])
 para(
-    f"**{AR['n']} workers** started, haven't finished, and have been silent 14–60 days — recent enough to re-engage. "
-    f"Concentrated in {_ar}. A small, concrete outreach list; a targeted nudge here is high-yield."
+    f"**{AR['n']} workers** started, haven't finished, were offered a complete schedule, and have been silent "
+    f"14–60 days — recent enough to re-engage. Concentrated in {_ar}. "
+    + (
+        f"They are the recent slice of **{AR['ofUnfinished']}** unfinished workers overall, not the whole unfinished "
+        "population; the rest have been silent longer than 60 days. "
+        if AR.get("ofUnfinished")
+        else ""
+    )
+    + "Note this list moves with data freshness: it is defined off the newest session in the dataset."
 )
 
 h("7. Recommendations", 1)
 li(
-    "Make the first interview the priority — the strongest retention lever. Invest in prompt quality, length, and first-touch support, especially for first-time workers.",
+    "Test first-interview support as the leading candidate lever. Depth at interview 1 is the strongest early signal "
+    "we have, but the association is modest once cohort count is held constant — so run it as a trial with a "
+    "control group rather than a programme-wide bet.",
     "List Number",
 )
 li(
-    "Lean into worker re-use — re-inviting proven workers compounds engagement. Build a returning-worker panel rather than defaulting to fresh single-exposure recruitment.",
+    "Keep re-using proven workers for operational reasons (known, trained, available, and they answer at greater "
+    "length) — but do not forecast a finish-rate improvement from re-use; per-cohort finishing is flat across "
+    "single- and multi-cohort workers.",
     "List Number",
 )
 li(
@@ -307,5 +329,11 @@ li(
     "progression-depth conflates schedule lengths (§3); experience_years unreliable and excluded."
 )
 
-doc.save("docs/FLW_Retention_Analysis_Brief.docx")
-print(f"wrote docs/FLW_Retention_Analysis_Brief.docx  (N={N}, healthy={healthy}%, as of {TODAY})")
+_out = "docs/FLW_Retention_Analysis_Brief.docx"
+try:
+    doc.save(_out)
+except PermissionError:
+    _out = "docs/FLW_Retention_Analysis_Brief_UPDATED.docx"
+    doc.save(_out)
+    print("(canonical file was locked/open — wrote to _UPDATED variant instead)")
+print(f"wrote {_out}  (N={N}, healthy={healthy}%, as of {TODAY})")

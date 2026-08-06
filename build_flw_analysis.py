@@ -27,7 +27,7 @@ TIER_ORDER = ["Champion", "Solid", "Slipping", "At-risk", "Lost"]
 PERSONA_ORDER = [
     "Champion",
     "Steady finisher",
-    "Slow-but-finishing",
+    "Partial progress",
     "Re-engager",
     "Early dropper",
     "One-and-done",
@@ -70,21 +70,53 @@ def build_records():
         if r["is_completed"] == "Y":
             f["completed"].add((c, n))
 
-    def finished_any(f):
+    def cohort_finish(f):
+        """(#cohorts finished, #cohorts with a known design, #cohorts where the full schedule was offered).
+
+        finished_any (= finished >=1 cohort) is a MAX over cohorts, so it mechanically rises with the number
+        of cohorts an FLW was in — being in 3 cohorts gives 3 independent chances. Reporting it as evidence
+        that re-use "compounds engagement" is a bug, not a finding. We therefore also return the per-cohort
+        rate, which is the comparable quantity, plus how many of their cohorts actually offered the whole
+        schedule (an FLW can't "finish" a schedule the programme never finished triggering).
+        """
         comp = defaultdict(set)
         for c, n in f["completed"]:
             comp[c].add(n)
+        trig = defaultdict(set)
+        for c, n in f["trig"]:
+            trig[c].add(n)
+        fin = known = offered = 0
         for c in f["cohorts"]:
             sg = bm.cohort_to_sg(c)
-            if sg and len(comp.get(c, ())) >= len(DESIGN[sg]["topics"]):
-                return True
-        return False
+            if not sg:
+                continue
+            need = len(DESIGN[sg]["topics"])
+            known += 1
+            if len(trig.get(c, ())) >= need:
+                offered += 1
+            if len(comp.get(c, ())) >= need:
+                fin += 1
+        return fin, known, offered
+
+    # Recency is measured against the freshest session in the DATA, not date.today(): with a lagging OCS
+    # pull those differ, and every recency-derived number (RFM tier, at-risk pool) would silently degrade
+    # as the pipeline aged rather than as workers disengaged.
+    _all_dates = [s["date"] for f in flws.values() for s in f["sessions"].values() if s["date"]]
+    ASOF = max(_all_dates) if _all_dates else TODAY
 
     records = []
     for flw, f in flws.items():
         if not f["started"]:
             continue
         dates = sorted({s["date"] for s in f["sessions"].values() if s["date"]})
+        first_words = 0
+        if dates:
+            _first = [s for s in f["sessions"].values() if s["date"] == dates[0]]
+            first_words = round(sum(s["words"] for s in _first) / len(_first), 1) if _first else 0
+        n_fin, n_known, n_offered = cohort_finish(f)
+        max_design_len = max(
+            (len(DESIGN[bm.cohort_to_sg(c)]["topics"]) for c in f["cohorts"] if bm.cohort_to_sg(c)), default=0
+        )
         n_trig, n_started, n_completed, n_sess = (
             len(f["trig"]),
             len(f["started"]),
@@ -115,11 +147,18 @@ def build_records():
                 "progression_depth": max((n for (_c, n) in f["started"]), default=0),
                 "completion_rate": round(n_completed / n_trig, 3) if n_trig else 0,
                 "started_rate": round(n_started / n_trig, 3) if n_trig else 0,
-                "finished_any": finished_any(f),
+                "finished_any": n_fin > 0,
+                "cohorts_finished": n_fin,
+                "cohorts_known": n_known,
+                "cohorts_offered_full": n_offered,
+                "max_design_len": max_design_len,
+                # the comparable quantity: share of THIS FLW's cohorts they finished (no max-over-N inflation)
+                "finish_rate_per_cohort": round(n_fin / n_known, 3) if n_known else 0,
                 "n_sessions": n_sess,
                 "first_session": dates[0].isoformat() if dates else "",
                 "last_session": dates[-1].isoformat() if dates else "",
-                "recency_days": (TODAY - dates[-1]).days if dates else None,
+                "first_session_words": first_words,
+                "recency_days": (ASOF - dates[-1]).days if dates else None,
                 "max_gap_days": max(gaps) if gaps else 0,
                 "median_cadence_days": round(statistics.median(gaps), 1) if gaps else None,
                 "avg_words_per_session": round(words / n_sess, 1) if n_sess else 0,
@@ -148,7 +187,10 @@ def build_records():
         if reengaged:
             return "Re-engager"
         if cr >= 0.5:
-            return "Slow-but-finishing"
+            # NB reached only after both finished_any branches returned, so these FLWs have finished
+            # NOTHING. The old name "Slow-but-finishing" ("gets there eventually") described the exact
+            # opposite of what the branch selects.
+            return "Partial progress"
         if depth <= 2 and cr < 0.5:
             return "Early dropper"
         return "Lapsed"
@@ -194,33 +236,53 @@ def aggregate(records):
         c = Counter(x[key] for x in records)
         return [{"k": k, "n": c[k], "pct": round(100 * c[k] / N)} for k in order if c.get(k)]
 
+    def _row(k, v):
+        return {
+            "k": k,
+            "n": len(v),
+            "completion": round(sum(z["completion_rate"] for z in v) / len(v), 2),
+            "finished": round(100 * sum(z["finished_any"] for z in v) / len(v)),
+            # per-cohort finish rate: the version of "finished" that does NOT reward being in more cohorts
+            "finished_pc": round(100 * sum(z["finish_rate_per_cohort"] for z in v) / len(v)),
+            "depth": round(sum(z["avg_words_per_session"] for z in v) / len(v)),
+        }
+
     def crosscut(key, minn=20):
+        """Group by `key`. Buckets under `minn` are pooled into one honest residual row rather than
+        silently dropped — byType used to omit ~29 FLWs, so its bars didn't cover the population."""
         grp = defaultdict(list)
         for x in records:
-            if x[key]:
-                grp[x[key]].append(x)
-        rows = [
-            {
-                "k": k,
-                "n": len(v),
-                "completion": round(sum(z["completion_rate"] for z in v) / len(v), 2),
-                "finished": round(100 * sum(z["finished_any"] for z in v) / len(v)),
-                "depth": round(sum(z["avg_words_per_session"] for z in v) / len(v)),
-            }
-            for k, v in grp.items()
-            if len(v) >= minn
-        ]
-        return sorted(rows, key=lambda t: -t["finished"])
+            grp[x[key] or "(not recorded)"].append(x)
+        rows, small = [], []
+        for k, v in grp.items():
+            (rows if (len(v) >= minn and k != "(not recorded)") else small).append((k, v))
+        out = sorted([_row(k, v) for k, v in rows], key=lambda t: -t["finished"])
+        if small:
+            pooled = [z for _k, v in small for z in v]
+            r = _row("Other / not recorded", pooled)
+            r["pooled"] = sorted(k for k, _v in small)
+            r["residual"] = True  # render keeps it last + muted: it is coverage, never a finding
+            out.append(r)  # always LAST, never ranked — a 1-FLW bucket must not top the chart
+        return out
 
     depth_c = Counter(x["progression_depth"] for x in records)
-    survival = [
-        {
-            "d": d,
-            "reached": sum(v for k, v in depth_c.items() if k >= d),
-            "pct": round(100 * sum(v for k, v in depth_c.items() if k >= d) / N),
-        }
-        for d in range(1, max(depth_c) + 1)
-    ]
+    # `elig` = FLWs whose longest cohort schedule even HAS an interview d. Dividing by all N (the old
+    # behaviour) made the curve read as drop-off when most of the fall is simply "their cohort was 2
+    # interviews long" — e.g. Int>=3 was 39% of everyone but 64% of those who could reach it.
+    elig_c = Counter(x["max_design_len"] for x in records)
+    survival = []
+    for d in range(1, (max(depth_c) if depth_c else 0) + 1):
+        reached = sum(v for k, v in depth_c.items() if k >= d)
+        elig = sum(v for k, v in elig_c.items() if k >= d)
+        survival.append(
+            {
+                "d": d,
+                "reached": reached,
+                "elig": elig,
+                "pct": round(100 * reached / N),  # of everyone (kept for continuity)
+                "pct_elig": round(100 * reached / elig) if elig else None,  # of those who could reach it
+            }
+        )
 
     def grpstats(rs):
         n = len(rs) or 1
@@ -228,11 +290,15 @@ def aggregate(records):
             "n": len(rs),
             "completion": round(sum(x["completion_rate"] for x in rs) / n, 2),
             "finished": round(100 * sum(x["finished_any"] for x in rs) / n),
+            "finished_pc": round(100 * sum(x["finish_rate_per_cohort"] for x in rs) / n),
             "depth": round(sum(x["avg_words_per_session"] for x in rs) / n),
+            "first_depth": round(sum(x["first_session_words"] for x in rs) / n),
         }
 
-    dvals = sorted(x["avg_words_per_session"] for x in records if x["avg_words_per_session"] > 0)
-    med = statistics.median(dvals) if dvals else 0
+    # split on FIRST-session depth only (the lifetime-average median this replaced is gone: it mixed the
+    # outcome into the predictor)
+    fvals = sorted(x["first_session_words"] for x in records if x["first_session_words"] > 0)
+    fmed = statistics.median(fvals) if fvals else 0
 
     # ---- deep cuts (for the executive brief): who drops off, arm combos, recoverable at-risk ----
     def _pct_by(rs, key, top=1):
@@ -248,9 +314,18 @@ def aggregate(records):
         [x["avg_words_per_session"] for x in records if x["persona"] == "Champion" and x["avg_words_per_session"]]
         or [0]
     )
+    # "Recoverable at-risk": unfinished AND recently silent AND the programme actually finished offering
+    # them a schedule. Without the last condition ~44% of the pool were people the programme simply hadn't
+    # finished triggering — not lapsed workers, and not nudgeable.
     at_risk = [
-        x for x in records if not x["finished_any"] and x["recency_days"] is not None and 14 <= x["recency_days"] <= 60
+        x
+        for x in records
+        if not x["finished_any"]
+        and x["cohorts_offered_full"] > 0
+        and x["recency_days"] is not None
+        and 14 <= x["recency_days"] <= 60
     ]
+    unfinished_total = sum(1 for x in records if not x["finished_any"])
     combos = Counter(x["subgroups"] for x in records if x["n_cohorts"] > 1)
     return {
         "n_flws": len(records),
@@ -269,13 +344,21 @@ def aggregate(records):
             "multi": grpstats([x for x in records if x["n_cohorts"] > 1]),
             "single": grpstats([x for x in records if x["n_cohorts"] == 1]),
         },
-        "firstIv": {
-            "hi": grpstats([x for x in records if x["avg_words_per_session"] >= med]),
-            "lo": grpstats([x for x in records if x["avg_words_per_session"] < med]),
+        # Median split on the FIRST session's answer depth. The old `firstIv` key split on
+        # avg_words_per_session — the LIFETIME average over every interview in every cohort — so it was
+        # partly made of the very sessions whose existence is the outcome. First-session-only is the
+        # honest "does early depth predict finishing" test, and it reports the per-cohort rate alongside.
+        "depthSplit": {
+            "basis": "first session only",
+            "median": round(fmed, 1),
+            "hi": grpstats([x for x in records if x["first_session_words"] >= fmed]),
+            "lo": grpstats([x for x in records if x["first_session_words"] < fmed]),
         },
         "byState": crosscut("state"),
         "byType": crosscut("type_of_flw"),
-        "byLLO": crosscut("llos", minn=1),
+        # minn=20 (was 1): with minn=1 the single FLW who spans both partners published as its own
+        # "COWACDI|EHA — 100% finished" bar, and the brief quoted it.
+        "byLLO": crosscut("llos", minn=20),
         "coverage_lga": round(100 * sum(1 for x in records if x["lga"]) / N),
         # deep cuts for the executive brief
         "oneAndDone": {
@@ -288,9 +371,75 @@ def aggregate(records):
         },
         "champMedianDepth": round(champ_med_depth),
         "overallSingleCohortPct": round(100 * sum(1 for x in records if x["n_cohorts"] == 1) / N),
-        "atRisk": {"n": len(at_risk), "byState": _pct_by(at_risk, "state", 4)},
+        "atRisk": {
+            "n": len(at_risk),
+            "ofUnfinished": unfinished_total,
+            "byState": _pct_by(at_risk, "state", 4),
+        },
         "armCombos": [{"k": k, "n": v} for k, v in combos.most_common(5)],
+        "micro": micro(records),
     }
+
+
+def micro(records):
+    """Column-oriented per-FLW micro-data so the dashboard can cross-filter client-side.
+
+    One character per FLW per dimension (every dimension has <10 distinct values), plus two small numeric
+    columns. ~1.4 KB per categorical column for 1,441 FLWs — the whole block is ~12 KB, which is what buys
+    real drill-down instead of a static sheet. NO identifier is emitted: these are attributes only, so the
+    block cannot be re-linked to a person.
+    """
+    dims = [
+        ("state", lambda x: x["state"] or "(not recorded)"),
+        ("type", lambda x: x["type_of_flw"] or "(not recorded)"),
+        ("llo", lambda x: x["llos"] or "(not recorded)"),
+        ("tier", lambda x: x["tier"]),
+        ("persona", lambda x: x["persona"]),
+        ("nco", lambda x: str(min(x["n_cohorts"], 5)) + ("+" if x["n_cohorts"] > 5 else "")),
+        ("fin", lambda x: "Finished ≥1 schedule" if x["finished_any"] else "No schedule finished"),
+    ]
+    out = {"n": len(records), "dict": {}, "col": {}}
+    for name, fn in dims:
+        vals = [fn(x) for x in records]
+        # stable, frequency-ordered dictionary so the commonest value is index 0
+        order = [k for k, _ in Counter(vals).most_common()]
+        if len(order) > 10:  # keep one char per FLW; pool the tail
+            keep = order[:9]
+            order = keep + ["Other"]
+            idx = {k: i for i, k in enumerate(keep)}
+            vals = [v if v in idx else "Other" for v in vals]
+        idx = {k: i for i, k in enumerate(order)}
+        out["dict"][name] = order
+        out["col"][name] = "".join(str(idx[v]) for v in vals)
+
+    # Numeric columns as fixed-width base36 strings rather than JSON int arrays: an array of 1,441
+    # 3-digit ints costs ~5 KB in commas and quotes alone, the packed string costs 1,441*w chars.
+    def pack(vals, width):
+        cap = 36**width - 1
+        return "".join(_b36(min(max(int(v), 0), cap)).rjust(width, "0") for v in vals)
+
+    out["num"] = {}
+    for name, width, fn in [
+        ("depth", 3, lambda x: round(x["avg_words_per_session"])),  # words/session, 0..46655
+        ("fdepth", 3, lambda x: round(x["first_session_words"])),
+        ("pcf", 2, lambda x: round(100 * x["finish_rate_per_cohort"])),  # 0..100
+        ("deep", 1, lambda x: x["progression_depth"]),  # deepest interview reached, 0..35
+    ]:
+        out["num"][name] = {"w": width, "s": pack((fn(x) for x in records), width)}
+    return out
+
+
+_B36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+
+def _b36(n):
+    if n <= 0:
+        return "0"
+    s = ""
+    while n:
+        n, r = divmod(n, 36)
+        s = _B36[r] + s
+    return s
 
 
 CSV_COLS = [
@@ -313,6 +462,12 @@ CSV_COLS = [
     "completion_rate",
     "started_rate",
     "finished_any",
+    "cohorts_finished",
+    "cohorts_known",
+    "cohorts_offered_full",
+    "finish_rate_per_cohort",
+    "max_design_len",
+    "first_session_words",
     "n_sessions",
     "first_session",
     "last_session",
@@ -349,7 +504,9 @@ def main():
     print(
         f"CROSS-COHORT: dist={[(d['k'], d['pct']) for d in cc['dist']]} | multi={cc['multi']} | single={cc['single']}"
     )
-    print(f"FIRST-IV depth: hi={agg['firstIv']['hi']} lo={agg['firstIv']['lo']}")
+    ds = agg["depthSplit"]
+    print(f"FIRST-SESSION depth split (median {ds['median']}): hi={ds['hi']} lo={ds['lo']}")
+    print(f"MICRO: {agg['micro']['n']} FLWs, dims={list(agg['micro']['dict'])}")
     print("BY STATE:", [(s["k"], s["finished"]) for s in agg["byState"]])
     print("BY TYPE:", [(s["k"], s["finished"]) for s in agg["byType"]])
     print("BY LLO:", [(s["k"], s["finished"]) for s in agg["byLLO"]])

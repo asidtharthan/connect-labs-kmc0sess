@@ -6,6 +6,7 @@ import csv as _csv
 import glob
 import json
 import os
+import sys
 from collections import Counter, defaultdict
 from datetime import date, timedelta
 
@@ -471,3 +472,6 @@ print(f"\n  TOTAL: {passed}/{len(results)} checks passed")
 print(
     "  RESULT:", "ALL PASS — 200% reconciled" if passed == len(results) else f"*** {len(results)-passed} FAILURES ***"
 )
+# Exit non-zero so the orchestrator actually ABORTS on failure — this gate used to return 0 whatever
+# it printed, which made refresh_interviews_dashboard.py report "OK" on a failing audit and publish.
+sys.exit(1 if passed != len(results) else 0)

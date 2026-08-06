@@ -3,6 +3,7 @@ master (build_master_4src) and vs the audit_e2e-validated payload_agg.json. All 
 Run after build_dashboard_data.py.  UTF-8: run with PYTHONUTF8=1.
 """
 import json
+import sys
 from collections import defaultdict
 
 import build_master_4src as bm
@@ -141,10 +142,30 @@ for sg in SG_ORDER:
             bad += 1
             print(f"    MISMATCH {sg}.{k}: dash={cf[sg][k]} exp={v}")
 chk("connectFunnel every cell == independent recompute", bad == 0, f"{bad} mismatches / {len(SG_ORDER)*7}")
-mono = all(
-    cf[sg]["invited"] >= cf[sg]["accepted"] >= cf[sg]["learn_completed"] >= cf[sg]["claimed"] for sg in SG_ORDER
+# invited >= accepted >= learn_completed is guaranteed by the Connect flow, so it is a hard check and
+# names the offender (this used to be a bare `all(...)` that failed with an empty message).
+_hard = [
+    f"{sg}: invited={cf[sg]['invited']} accepted={cf[sg]['accepted']} learnC={cf[sg]['learn_completed']}"
+    for sg in SG_ORDER
+    if not (cf[sg]["invited"] >= cf[sg]["accepted"] >= cf[sg]["learn_completed"])
+]
+chk("connect funnel monotonic invited>=accepted>=learnC", not _hard, "; ".join(_hard))
+# learn_completed >= claimed is NOT guaranteed: Connect can record a claim with no completed-learn
+# timestamp. Verified in the raw snapshot (2026-08-07): ABT1-B 1 FLW, 2WT 3 FLWs claimed with a blank
+# completed_learn_date. So this is a tolerance check on a known source artifact — a handful is data,
+# a large gap means the learn leg genuinely broke.
+_CLAIM_OVER_LEARN_TOL = 5
+_soft = [
+    f"{sg}: claimed={cf[sg]['claimed']} > learnC={cf[sg]['learn_completed']} (+{cf[sg]['claimed'] - cf[sg]['learn_completed']})"
+    for sg in SG_ORDER
+    if cf[sg]["claimed"] - cf[sg]["learn_completed"] > _CLAIM_OVER_LEARN_TOL
+]
+_over = [sg for sg in SG_ORDER if cf[sg]["claimed"] > cf[sg]["learn_completed"]]
+chk(
+    f"claimed <= learnC within tolerance (+{_CLAIM_OVER_LEARN_TOL}; claim-without-learn-date is a known Connect artifact)",
+    not _soft,
+    "; ".join(_soft) or (f"{len(_over)} sg over by <= tol: {_over}" if _over else "0 over"),
 )
-chk("connect funnel monotonic invited>=accepted>=learnC>=claimed", mono)
 mono2 = all(cf[sg]["started"] >= cf[sg]["completed"] for sg in SG_ORDER)
 chk("started >= completed (all subgroups)", mono2)
 
@@ -387,9 +408,55 @@ for _k in ("tiers", "personas"):
     if _fe.get(_k) and sum(t["n"] for t in _fe[_k]) != _fe["n_flws"]:
         _fe_bad.append(f"{_k} counts != n_flws")
 for _cc in ("byState", "byType", "byLLO"):
-    if any(not (0 <= r["finished"] <= 100) or not (0 <= r["completion"] <= 1) for r in _fe.get(_cc, [])):
+    rows_ = _fe.get(_cc, [])
+    if any(not (0 <= r["finished"] <= 100) or not (0 <= r["completion"] <= 1) for r in rows_):
         _fe_bad.append(f"{_cc} out of range")
-chk("flwEngagement: n_flws==distinct started FLWs; tier/persona counts sum to n_flws & %~100; cross-cuts in range",
+    if any(not (0 <= r.get("finished_pc", 0) <= 100) for r in rows_):
+        _fe_bad.append(f"{_cc} finished_pc out of range")
+    # a pooled residual bucket is coverage, never a finding: it must be last and never outrank a real group
+    if rows_ and any(r.get("residual") for r in rows_[:-1]):
+        _fe_bad.append(f"{_cc} residual row is not last")
+    # every FLW must land in some bucket, so the bars describe the whole population
+    if rows_ and sum(r["n"] for r in rows_) != _fe.get("n_flws"):
+        _fe_bad.append(f"{_cc} covers {sum(r['n'] for r in rows_)} != n_flws {_fe.get('n_flws')}")
+# survival: reached must be bounded by the eligible base, and both curves monotone non-increasing
+_sv = _fe.get("survival", [])
+for i, s in enumerate(_sv):
+    if s.get("elig") is not None and s["reached"] > s["elig"]:
+        _fe_bad.append(f"survival d={s['d']} reached {s['reached']} > elig {s['elig']}")
+    if s.get("pct_elig") is not None and not (0 <= s["pct_elig"] <= 100):
+        _fe_bad.append(f"survival d={s['d']} pct_elig {s['pct_elig']} out of range")
+    if i and s["reached"] > _sv[i - 1]["reached"]:
+        _fe_bad.append(f"survival not monotone at d={s['d']}")
+_ds = _fe.get("depthSplit")
+if _ds and _ds["hi"]["n"] + _ds["lo"]["n"] != _fe.get("n_flws"):
+    _fe_bad.append(f"depthSplit halves {_ds['hi']['n']}+{_ds['lo']['n']} != n_flws {_fe.get('n_flws')}")
+# ---- micro block: the FLW-Retention tab computes its drill-down numbers from this client-side, so it
+# must agree with the aggregates it sits next to, or the tab silently contradicts the same page.
+_mi = _fe.get("micro")
+if _mi:
+    _n = _mi.get("n")
+    if _n != _fe.get("n_flws"):
+        _fe_bad.append(f"micro.n {_n} != n_flws {_fe.get('n_flws')}")
+    for _k, _col in (_mi.get("col") or {}).items():
+        if len(_col) != _n:
+            _fe_bad.append(f"micro.col[{_k}] len {len(_col)} != n {_n}")
+        _card = len(_mi["dict"].get(_k, []))
+        if _card and any(int(ch) >= _card for ch in _col):
+            _fe_bad.append(f"micro.col[{_k}] has an index outside its dictionary")
+    for _k, _spec in (_mi.get("num") or {}).items():
+        if len(_spec["s"]) != _n * _spec["w"]:
+            _fe_bad.append(f"micro.num[{_k}] packed len {len(_spec['s'])} != n*w {_n * _spec['w']}")
+    # cross-check one categorical dimension against its published aggregate
+    if _mi.get("dict", {}).get("state") and _fe.get("byState"):
+        _mc = {k: 0 for k in _mi["dict"]["state"]}
+        for ch in _mi["col"]["state"]:
+            _mc[_mi["dict"]["state"][int(ch)]] += 1
+        for r in _fe["byState"]:
+            if not r.get("residual") and r["k"] in _mc and _mc[r["k"]] != r["n"]:
+                _fe_bad.append(f"micro state {r['k']} n={_mc[r['k']]} != byState n={r['n']}")
+chk("flwEngagement: n_flws==distinct started FLWs; tier/persona counts sum to n_flws & %~100; cross-cuts in "
+    "range+complete; survival bounded by elig; micro block aligns with the aggregates",
     not _fe_bad, "; ".join(_fe_bad[:6]))
 
 print("=" * 80)
@@ -398,3 +465,7 @@ n_tot = len(results)
 print(f"  TOTAL: {n_pass}/{n_tot} checks passed")
 print(f"  RESULT: {'ALL PASS' if n_pass == n_tot else 'FAILURES PRESENT'}")
 print("=" * 80)
+# Exit non-zero so the orchestrator actually ABORTS on failure. Until 2026-08-07 this gate only
+# printed its verdict and returned 0, so refresh_interviews_dashboard.py logged "OK" and published
+# anyway — the 2026-08-07 run shipped v140 with 37/38 (a real monotonicity failure) unnoticed.
+sys.exit(1 if n_pass != n_tot else 0)
