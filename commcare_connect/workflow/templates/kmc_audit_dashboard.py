@@ -90,8 +90,10 @@ PIPELINE_SCHEMAS = [
                     "aggregation": "first",
                 },
                 {
+                    # form.visit_date is the pre-grp_kmc_visit (V0) shape: 100% of opp 675's
+                    # visits plus 74 (523) + 446 (524) old-shape rows carry it and nothing else.
                     "name": "visit_date",
-                    "path": "form.grp_kmc_visit.visit_date",
+                    "paths": ["form.grp_kmc_visit.visit_date", "form.visit_date"],
                     "aggregation": "first",
                     "transform": "date",
                 },
@@ -100,13 +102,19 @@ PIPELINE_SCHEMAS = [
                     "paths": [
                         "form.anthropometric.child_weight_visit",
                         "form.child_details.birth_weight_reg.child_weight_reg",
+                        # V0 shape (opp 675): visit weight, then registration birth weight
+                        "form.anthropometric.child_weight",
+                        "form.child_details.birth_weight",
                     ],
                     "aggregation": "first",
                     "transform": "float",
                 },
                 {
+                    # V0 shape: without this fallback opp 675 extracts ZERO visits (all 327 of
+                    # its follow-ups were read as registration rows) and 520 more are lost in
+                    # 523/524 — they vanish from every visit-denominated metric.
                     "name": "visit_number",
-                    "path": "form.grp_kmc_visit.visit_number",
+                    "paths": ["form.grp_kmc_visit.visit_number", "form.kmc_visit_number"],
                     "aggregation": "first",
                     "transform": "int",
                 },
@@ -132,10 +140,16 @@ PIPELINE_SCHEMAS = [
                     "aggregation": "first",
                 },
                 {
+                    # Four group-name shapes exist in production, not two. The last two below
+                    # recover 326 rows in 675 (65% of that opp) + 226 in 523/524. Deliberately
+                    # NOT falling back to form.case.update.* here: case properties carry forward
+                    # between visits, so a stale "yes" would forge danger-sign history.
                     "name": "danger_sign_positive",
                     "paths": [
                         "form.danger_signs_checklist.danger_sign_positive",
                         "form.child_details.Danger_Signs_Checklist.danger_sign_positive",
+                        "form.Danger_Signs_Checklist.danger_sign_positive",
+                        "form.child_details.danger_signs_checklist.danger_sign_positive",
                     ],
                     "aggregation": "first",
                 },
@@ -156,6 +170,8 @@ PIPELINE_SCHEMAS = [
                         "form.child_details.Danger_Signs_Checklist.temp_grp.svn_temperature",
                         "form.danger_signs_checklist.svn_temperature",
                         "form.child_details.Danger_Signs_Checklist.svn_temperature",
+                        "form.Danger_Signs_Checklist.svn_temperature",
+                        "form.child_details.danger_signs_checklist.svn_temperature",
                     ],
                     "aggregation": "first",
                     "transform": "float",
@@ -170,6 +186,8 @@ PIPELINE_SCHEMAS = [
                     "paths": [
                         "form.danger_signs_checklist.child_heart_rate",
                         "form.child_details.Danger_Signs_Checklist.child_heart_rate",
+                        "form.Danger_Signs_Checklist.child_heart_rate",
+                        "form.child_details.danger_signs_checklist.child_heart_rate",
                     ],
                     "aggregation": "first",
                     "transform": "float",
@@ -204,7 +222,8 @@ PIPELINE_SCHEMAS = [
                 },
                 {
                     "name": "child_dob",
-                    "paths": ["form.mothers_details.child_DOB", "form.child_DOB"],
+                    # opp 675 records DOB only as a case property (immutable, so no staleness risk)
+                    "paths": ["form.mothers_details.child_DOB", "form.child_DOB", "form.case.update.child_DOB"],
                     "aggregation": "first",
                     "transform": "date",
                 },
@@ -226,6 +245,13 @@ PIPELINE_SCHEMAS = [
                 {
                     "name": "kmc_wrap_check",
                     "path": "form.commodities_delivered.kmc_wrap_provided_check",
+                    "aggregation": "first",
+                },
+                # ---- V3 case-count fix (match Superset KMC_Cases_Optimized) ----
+                {"name": "form_name", "path": "form.@name", "aggregation": "first"},
+                {
+                    "name": "eligibility_status",
+                    "path": "form.child_eligibility.eligibility_status",
                     "aggregation": "first",
                 },
             ],
@@ -319,6 +345,9 @@ function groupCases(visitRows){
     var fus=[];
     for(i=0;i<rows.length;i++){ if(pint(rget(rows[i],"visit_number"))===null) continue; var vd=parseDate(rget(rows[i],"visit_date")); if(vd===null) continue; fus.push([vd,rows[i]]); }
     fus.sort(function(a,b){ return a[0]-b[0]; });
+    // Dedup duplicate/same-day resubmissions: one follow-up per visit_number (latest-dated after sort).
+    var _byVn={}; for(i=0;i<fus.length;i++){ _byVn[pint(rget(fus[i][1],"visit_number"))]=fus[i]; }
+    fus=Object.keys(_byVn).map(function(kk){return _byVn[kk];}); fus.sort(function(a,b){ return a[0]-b[0]; });
     var followups=fus.map(function(t){return t[1];});
     var followupDates=fus.map(function(t){return t[0];});
     var regRows=[]; for(i=0;i<rows.length;i++){ if(pint(rget(rows[i],"visit_number"))===null) regRows.push(rows[i]); }
@@ -327,15 +356,39 @@ function groupCases(visitRows){
     var isDeath=false; for(i=0;i<rows.length;i++){ if(low(rget(rows[i],"child_alive"))==="no"){ isDeath=true; break; } }
     var statusEntered={}; for(i=0;i<rows.length;i++){ var se=low(rget(rows[i],"kmc_status_entered")); if(se) statusEntered[se]=1; }
     var conclusionReason=null; for(i=0;i<rows.length;i++){ var cr0=low(rget(rows[i],"flw_program_conclusion_reason")); if(cr0){ conclusionReason=cr0; break; } }
+    // V3 phantom-case guard: the "Child Registration Form" keys to the mother case (id disjoint
+    // from the child's follow-up case), forming a reg-only 0-follow-up case. Exclude it from the
+    // follow-up-engagement metrics (low_avg_visits, flw_early_discharge) so it can't ~double their
+    // denominators. Still kept for enroll_ontime / kmc_wrap (which read reg-row data).
+    var isCrf=false; for(i=0;i<rows.length;i++){ if(low(rget(rows[i],"form_name"))==="child registration form"){ isCrf=true; break; } }
+    // Weight series (reg + follow-ups). Registration rows carry no grp_kmc_visit.visit_date, so
+    // without the reg_date fallback the enrolment weight — the birth anchor where neonatal weight
+    // loss shows up — never entered the series (5,799 points across the 11 opps). Only reg rows
+    // (visit_number null) fall back, so no row can be dated twice.
     var ws=[];
-    for(i=0;i<rows.length;i++){ var vd2=parseDate(rget(rows[i],"visit_date")); var w=readWeightG(rows[i]); if(vd2!==null&&w!==null&&w>=WMIN&&w<=WMAX) ws.push([vd2,w]); }
+    for(i=0;i<rows.length;i++){ var vd2=parseDate(rget(rows[i],"visit_date")); if(vd2===null&&pint(rget(rows[i],"visit_number"))===null) vd2=parseDate(rget(rows[i],"reg_date")); var w=readWeightG(rows[i]); if(vd2!==null&&w!==null&&w>=WMIN&&w<=WMAX) ws.push([vd2,w]); }
     ws.sort(function(a,b){ return a[0]-b[0]; });
     cases.push({case_id:cid,reg_date:regDate,discharge_date:dischargeDate,dob:dob,birth_location:birthLocation,
       followups:followups,followup_dates:followupDates,n_followup:followups.length,reg_rows:regRows,
-      last_visit_date:lastVisitDate,is_death:isDeath,status_entered:statusEntered,conclusion_reason:conclusionReason,weights:ws});
+      last_visit_date:lastVisitDate,is_death:isDeath,status_entered:statusEntered,conclusion_reason:conclusionReason,is_crf:isCrf,weights:ws});
   });
   return cases;
 }
+
+// Which of this FLW's opportunities actually ask for `field`? equipment_image and
+// kmc_wrap_check exist ONLY in the four V3 apps, but an FLW bucket merges app versions
+// (LLO + username), so a PIPN worker spans 524+874+1487. The old "0 populated -> N/A"
+// guard ran over the whole merged bucket, so one V3 visit unlocked the metric and then
+// every legacy visit counted as a violation (worst: 96.6% RED vs 4.4% true; 33 of 55
+// banded FLWs contaminated). Opportunities with zero populated values drop out.
+// tagged=false means the rows carry no opportunity_id at all -> callers must not scope.
+function fieldOpps(rows, field){
+  var opps={}, tagged=false, i, o;
+  for(i=0;i<rows.length;i++){ o=rget(rows[i],"opportunity_id"); if(o===null||o===undefined) continue; tagged=true;
+    var fv=rget(rows[i],field); if(fv!==null&&fv!=="") opps[String(o)]=1; }
+  return {opps:opps,tagged:tagged};
+}
+function inFieldOpps(row, fo){ return (!fo.tagged) || fo.opps[String(rget(row,"opportunity_id"))]===1; }
 
 function deriveMetrics(aggRow, visitRows, asOf){
   var totalCases=pint(rget(aggRow,"total_cases"))||0;
@@ -349,14 +402,21 @@ function deriveMetrics(aggRow, visitRows, asOf){
   var fus=[]; for(i=0;i<cs.length;i++) for(var j=0;j<cs[i].followups.length;j++) fus.push(cs[i].followups[j]);
   function ageDays(regMs){ return (asOf-regMs)/DAY_MS; }
 
-  var elig=cs.filter(function(c){ return c.reg_date!==null && ageDays(c.reg_date)>=60 && !c.is_death; });
+  // 1 low avg visits
+  var elig=cs.filter(function(c){ return c.reg_date!==null && ageDays(c.reg_date)>=60 && !c.is_death && !c.is_crf; });
   if(elig.length>=10){ var num=0; for(i=0;i<elig.length;i++) num+=elig[i].n_followup; var avg=num/elig.length; out.low_avg_visits=M(avg,ragLowBad(avg,5,3.0001),num,elig.length); }
   else out.low_avg_visits=NA();
 
-  var pool=cs.filter(function(c){ if(c.reg_date===null||ageDays(c.reg_date)<28) return false; for(var q=0;q<c.followup_dates.length;q++){ if((c.followup_dates[q]-c.reg_date)/DAY_MS>=28) return true; } return false; });
-  if(pool.length>=20){ var deaths=0; for(i=0;i<pool.length;i++) if(pool[i].is_death) deaths++; var rate=100.0*deaths/pool.length; out.mortality=M(rate,ragLowBad(rate,5,3.0001),deaths,pool.length); }
+  // 2 mortality
+  // register C3 verbatim: numerator = all deaths in cases reg>=28d; denominator = cases reg>=28d
+  // WITH a visit after day 28. Counting deaths only inside the pool was survivorship censoring
+  // (death stops visits), dropping 61-100% of real deaths -> false RED "under-reporting".
+  var reg28=cs.filter(function(c){ return c.reg_date!==null&&ageDays(c.reg_date)>=28; });
+  var pool=reg28.filter(function(c){ for(var q=0;q<c.followup_dates.length;q++){ if((c.followup_dates[q]-c.reg_date)/DAY_MS>=28) return true; } return false; });
+  if(pool.length>=20){ var deaths=0; for(i=0;i<reg28.length;i++) if(reg28[i].is_death) deaths++; var rate=100.0*deaths/pool.length; out.mortality=M(rate,ragLowBad(rate,5,3.0001),deaths,pool.length); }
   else out.mortality=NA();
 
+  // 3 enroll ontime
   var hUse=0,hOn=0,mUse=0,mOn=0;
   for(i=0;i<cs.length;i++){ var c=cs[i]; if(c.reg_date===null) continue;
     if(c.birth_location==="hospitalhealth_facility"&&c.discharge_date!==null){ hUse++; if(daysBetween(c.discharge_date,c.reg_date)<=3) hOn++; }
@@ -374,46 +434,63 @@ function deriveMetrics(aggRow, visitRows, asOf){
   var cwf=cs.filter(function(c){ return c.n_followup>=1; });
   var fuVisitTotal=0; for(i=0;i<cs.length;i++) fuVisitTotal+=cs[i].n_followup;
 
-  if(fuVisitTotal>=20&&cwf.length>0){ var zero=0; for(i=0;i<cwf.length;i++){ var anyd=false; for(j=0;j<cwf[i].followups.length;j++){ if(low(rget(cwf[i].followups[j],"danger_sign_positive"))==="yes"){ anyd=true; break; } } if(!anyd) zero++; } var pz=100.0*zero/cwf.length; out.zero_danger=M(pz,ragHighBad(pz,50,75),zero,cwf.length); }
+  // 4 zero danger
+  // gate on BOTH populations (register col K = 20 follow-up visits, Definition body = 20 cases)
+  if(fuVisitTotal>=20&&cwf.length>=20){ var zero=0; for(i=0;i<cwf.length;i++){ var anyd=false; for(j=0;j<cwf[i].followups.length;j++){ if(low(rget(cwf[i].followups[j],"danger_sign_positive"))==="yes"){ anyd=true; break; } } if(!anyd) zero++; } var pz=100.0*zero/cwf.length; out.zero_danger=M(pz,ragHighBad(pz,50,75),zero,cwf.length); }
   else out.zero_danger=NA();
 
-  if(fuVisitTotal>=30&&cwf.length>0){ var anyds=0; for(i=0;i<cwf.length;i++){ var hit=false; for(j=0;j<cwf[i].followups.length;j++){ if(low(rget(cwf[i].followups[j],"danger_sign_positive"))==="yes"){ hit=true; break; } } if(hit) anyds++; } var pd=100.0*anyds/cwf.length; var rg; if(pd<=5||pd>=90) rg="RED"; else if(pd<=10||pd>=60) rg="YELLOW"; else rg="GREEN"; out.danger_rate_cases=M(pd,rg,anyds,cwf.length); }
+  // 5 implausible danger (two-sided)
+  // both gates again (col K = 30 follow-up visits, Definition body = 10 cases)
+  if(fuVisitTotal>=30&&cwf.length>=10){ var anyds=0; for(i=0;i<cwf.length;i++){ var hit=false; for(j=0;j<cwf[i].followups.length;j++){ if(low(rget(cwf[i].followups[j],"danger_sign_positive"))==="yes"){ hit=true; break; } } if(hit) anyds++; } var pd=100.0*anyds/cwf.length; var rg; if(pd<=5||pd>=90) rg="RED"; else if(pd<=10||pd>=60) rg="YELLOW"; else rg="GREEN"; out.danger_rate_cases=M(pd,rg,anyds,cwf.length); }
   else out.danger_rate_cases=NA();
 
+  // 6 no referral after DS
   var dsv=fus.filter(function(v){ return low(rget(v,"danger_sign_positive"))==="yes"; });
   if(dsv.length>=5){ var noref=0; for(i=0;i<dsv.length;i++) if(low(rget(dsv[i],"child_referred"))!=="yes") noref++; var pn=100.0*noref/dsv.length; out.no_referral=M(pn,ragHighBad(pn,30,60),noref,dsv.length); }
   else out.no_referral=NA();
 
+  // weight pairs
   var lossPairs=0,totalPairs=0,gkg=[];
   for(i=0;i<cs.length;i++){ var ws=cs[i].weights; for(var p=1;p<ws.length;p++){ var w1=ws[p-1][1], w2=ws[p][1]; var days=daysBetween(ws[p-1][0],ws[p][0]); if(days<PAIR_MIN||days>PAIR_MAX) continue; totalPairs++; if(w2<w1*0.95) lossPairs++; if(w2>w1&&days>0) gkg.push((w2-w1)/days/(w1/1000.0)); } }
   if(totalPairs>=10){ var pl=100.0*lossPairs/totalPairs; out.weight_loss=M(pl,ragHighBad(pl,5,15),lossPairs,totalPairs); } else out.weight_loss=NA();
   if(gkg.length>=10){ var s=0; for(i=0;i<gkg.length;i++) s+=gkg[i]; var mean=s/gkg.length; out.weight_gain_gkgday=M(mean,ragHighBad(mean,25,40),null,gkg.length); } else out.weight_gain_gkgday=NA();
 
+  // follow-up weights
   var fw=[]; for(i=0;i<fus.length;i++){ var wg=readWeightG(fus[i]); if(wg!==null&&wg>=WMIN&&wg<=WMAX) fw.push(wg); }
   if(fw.length>=20){ var rr=0; for(i=0;i<fw.length;i++) if(rnd(fw[i])%100===0) rr++; var pr=100.0*rr/fw.length; out.rounded_weights=M(pr,ragHighBad(pr,20,60),rr,fw.length); } else out.rounded_weights=NA();
   if(fw.length>=20){ var modal=modalCount(fw.map(function(w){return rnd(w);})); var pm=100.0*modal/fw.length; out.modal_weight=M(pm,ragHighBad(pm,20,35.0001),modal,fw.length); } else out.modal_weight=NA();
 
+  // 11 flat weight
   var c3=cs.filter(function(c){ return c.weights.length>=3; });
   if(c3.length>=20){ var flat=0; for(i=0;i<c3.length;i++){ var wv=c3[i].weights.map(function(t){return t[1];}); var mx=Math.max.apply(null,wv), mn=Math.min.apply(null,wv); if((mx-mn)/wv[0]<=0.02) flat++; } var pfl=100.0*flat/c3.length; out.flat_weight=M(pfl,ragHighBad(pfl,2,5),flat,c3.length); } else out.flat_weight=NA();
 
+  // 12 gps within 200m
   var gcases=0, within=0;
   for(i=0;i<cs.length;i++){ var pts=[]; for(j=0;j<cs[i].followups.length;j++){ var gp=parseGps(rget(cs[i].followups[j],"gps")); if(gp!==null&&(gp[2]===null||gp[2]<=100)) pts.push(gp); } if(pts.length>=2){ gcases++; var dists=[]; for(var a=0;a<pts.length;a++) for(var b=a+1;b<pts.length;b++) dists.push(haversineM(pts[a],pts[b])); if(median(dists)<200) within++; } }
   if(gcases>=20){ var pg=100.0*within/gcases; out.gps_within_200m=M(pg,ragLowBad(pg,50.0001,25),within,gcases); } else out.gps_within_200m=NA();
 
+  // 13/14 hr/temp copycat
   var hrs=[]; for(i=0;i<fus.length;i++){ var hv=pf(rget(fus[i],"heart_rate")); if(hv!==null) hrs.push(hv); }
   if(hrs.length>=10){ var ht=modalCount(hrs); var ph=100.0*ht/hrs.length; out.hr_copycat=M(ph,ragHighBad(ph,20,74.9999),ht,hrs.length); } else out.hr_copycat=NA();
   var temps=[]; for(i=0;i<fus.length;i++){ var tv=pf(rget(fus[i],"temperature")); if(tv!==null) temps.push(tv); }
   if(temps.length>=10){ var tt=modalCount(temps); var pt=100.0*tt/temps.length; out.temp_copycat=M(pt,ragHighBad(pt,50,84.9999),tt,temps.length); } else out.temp_copycat=NA();
 
+  // 15 spo2
   var sp=[]; for(i=0;i<fus.length;i++){ var sv=pf(rget(fus[i],"spo2_level")); if(sv!==null) sp.push(sv); }
   if(sp.length>=20){ var bad=0; for(i=0;i<sp.length;i++) if(sp[i]<70||sp[i]>100) bad++; var ps=100.0*bad/sp.length; out.spo2_implausible=M(ps,ragHighBad(ps,3,5),bad,sp.length); } else out.spo2_implausible=NA();
 
-  if(fus.length>=20){ var miss=0,present=0; for(i=0;i<fus.length;i++){ var ei=rget(fus[i],"equipment_image"); if(ei===null||ei==="") miss++; else present++; } if(present===0){ out.image_missing=NA(); } else { var pimg=100.0*miss/fus.length; out.image_missing=M(pimg,ragHighBad(pimg,5,20),miss,fus.length); } } else out.image_missing=NA();
+  // 16 equipment image missing
+  var _ifo=fieldOpps(visitRows,"equipment_image");
+  var fusImg=fus.filter(function(v){ return inFieldOpps(v,_ifo); });
+  if(fusImg.length>=20){ var miss=0,present=0; for(i=0;i<fusImg.length;i++){ var ei=rget(fusImg[i],"equipment_image"); if(ei===null||ei==="") miss++; else present++; } if(present===0){ out.image_missing=NA(); } else { var pimg=100.0*miss/fusImg.length; out.image_missing=M(pimg,ragHighBad(pimg,5,20),miss,fusImg.length); } } else out.image_missing=NA();
 
-  var e60=cs.filter(function(c){ return c.reg_date!==null&&ageDays(c.reg_date)>=60; });
+  // 17 flw early discharge
+  var e60=cs.filter(function(c){ return c.reg_date!==null&&ageDays(c.reg_date)>=60&&!c.is_crf; });
   if(e60.length>=10){ var early=0; for(i=0;i<e60.length;i++){ var cc=e60[i]; var cr=cc.conclusion_reason; if(cc.status_entered["parents_discontinued"]||cr==="caregiver_unavailable"||cr==="family_relocated"||(cr==="svn_recovered_or_met_discharge_criteria"&&cc.n_followup<4)) early++; } var ped=100.0*early/e60.length; out.flw_early_discharge=M(ped,ragHighBad(ped,5,15),early,e60.length); } else out.flw_early_discharge=NA();
 
-  var regCases=cs.filter(function(c){ return c.reg_rows.length>0; });
+  // 18 kmc wrap missing at reg
+  var _wfo=fieldOpps(visitRows,"kmc_wrap_check");
+  var regCases=cs.filter(function(c){ if(c.reg_rows.length===0) return false; for(var q=0;q<c.reg_rows.length;q++){ if(inFieldOpps(c.reg_rows[q],_wfo)) return true; } return false; });
   if(regCases.length>=20){ var bd=0,presentW=0; for(i=0;i<regCases.length;i++){ var wrap=null; for(j=0;j<regCases[i].reg_rows.length;j++){ var wv=low(rget(regCases[i].reg_rows[j],"kmc_wrap_check")); if(wv!==null){ wrap=wv; break; } } if(wrap!==null) presentW++; if(wrap!=="yes") bd++; } if(presentW===0){ out.kmc_wrap_missing=NA(); } else { var pw=100.0*bd/regCases.length; out.kmc_wrap_missing=M(pw,ragHighBad(pw,15,40),bd,regCases.length); } } else out.kmc_wrap_missing=NA();
 
   out._excluded=false; out._total_cases=totalCases;
@@ -429,33 +506,37 @@ var P1_ORDER = ["low_avg_visits","mortality","enroll_ontime","zero_danger","no_r
 var P2_ORDER = ["danger_rate_cases","weight_loss","weight_gain_gkgday","modal_weight","flat_weight","image_missing","kmc_wrap_missing"];
 var META = {
   low_avg_visits:{label:"Visits/case",unit:"dec",bands:"G>=5  Y 3-5  R<=3",desc:"Avg follow-up visits per non-mortality case enrolled >=60 days ago. Min 10 cases."},
-  mortality:{label:"Mortality",unit:"pct",bands:"R<=3%  Y 3-5%  G>=5%",desc:"Deaths / cases reg>=28d w/ a visit after day 28. LOW = under-reporting concern. Min 20 cases."},
+  mortality:{label:"Mortality",unit:"pct",bands:"R<=3%  Y 3-5%  G>=5%",desc:"All deaths among cases reg>=28d, over cases reg>=28d with a visit after day 28 (register C3). LOW = under-reporting concern. Min 20 cases."},
   enroll_ontime:{label:"Enroll on-time",unit:"pct",bands:"G>=50  Y 30-49  R<30",desc:"% enrolled on time: hospital reg<=discharge+3d; home reg<=DOB+7d. Min 10 cases."},
-  zero_danger:{label:"Zero danger",unit:"pct",bands:"G<50  Y 50-75  R>75",desc:"% cases with NO danger sign ever recorded. Min 20 follow-up visits."},
+  zero_danger:{label:"Zero danger",unit:"pct",bands:"G<50  Y 50-75  R>75",desc:"% cases with NO danger sign ever recorded. Min 20 follow-up visits AND 20 visited cases."},
   no_referral:{label:"No referral",unit:"pct",bands:"G<30  Y 30-60  R>60",desc:"% danger-sign-positive visits with no referral. Min 5 DS+ visits."},
-  rounded_weights:{label:"Rounded wt",unit:"pct",bands:"G<20  Y 20-59  R>60",desc:"% follow-up weights that are exact 100g multiples. Min 20 weights."},
+  rounded_weights:{label:"Rounded wt",unit:"pct",bands:"G<20  Y 20-60  R>60",desc:"% follow-up weights that are exact 100g multiples. Analog 100g dial scales round by construction. Min 20 weights."},
   gps_within_200m:{label:"GPS <200m",unit:"pct",bands:"G>50  Y 25-50  R<25",desc:"% cases whose same-case follow-up GPS points are within a 200m median. Higher is better. Min 20 cases."},
   hr_copycat:{label:"HR copycat",unit:"pct",bands:"G<20  Y 20-74  R>=75",desc:"% of heart-rate readings that are the single modal value. Min 10 readings."},
   temp_copycat:{label:"Temp copycat",unit:"pct",bands:"G<50  Y 50-84  R>=85",desc:"% of temperature readings that are the single modal value. Min 10 readings."},
   spo2_implausible:{label:"SpO2 impl.",unit:"pct",bands:"G<3  Y 3-5  R>5",desc:"% SpO2 readings outside 70-100. Min 20 readings."},
-  flw_early_discharge:{label:"Early discharge",unit:"pct",bands:"G<5  Y 5-15  R>15",desc:"% cases reg>=60d early-discharged for FLW reasons with <4 visits. Min 10 cases."},
-  danger_rate_cases:{label:"Danger rate",unit:"pct",bands:"G 10-60  R 0-5 or 90-100",desc:"% cases with any danger sign. Two-sided: implausibly low OR high. Min 30 follow-up visits."},
+  flw_early_discharge:{label:"Early discharge",unit:"pct",bands:"G<5  Y 5-15  R>15",desc:"% cases reg>=60d discharged for parent-discontinued / caregiver-unavailable / family-relocated, or clinically discharged before visit 4. Min 10 cases."},
+  danger_rate_cases:{label:"Danger rate",unit:"pct",bands:"G 10-60  Y 5-10 or 60-89  R 0-5 or 90-100",desc:"% cases with any danger sign. Two-sided: implausibly low OR high. Min 30 follow-up visits AND 10 visited cases."},
   weight_loss:{label:"Weight loss",unit:"pct",bands:"G<5  Y 5-15  R>15",desc:"% consecutive weight pairs with a >5% drop. Min 10 pairs."},
   weight_gain_gkgday:{label:"Weight gain",unit:"gkg",bands:"G<25  Y 25-40  R>40",desc:"Avg daily weight gain (g/kg/day) over increasing pairs. Min 10 pairs."},
   modal_weight:{label:"Modal wt",unit:"pct",bands:"G<20  Y 20-35  R>35",desc:"% of weights that are the single most-frequent value (across cases). Min 20 weights."},
   flat_weight:{label:"Flat wt",unit:"pct",bands:"G<2  Y 2-5  R>5",desc:"% cases (>=3 weights) whose weight range is <=2% of the first weight. Min 20 cases."},
-  image_missing:{label:"Equip image",unit:"pct",bands:"G<5  Y 5-20  R>20",desc:"% follow-up visits with no equipment image captured. N/A where the app lacks the field. Min 20 visits."},
-  kmc_wrap_missing:{label:"KMC wrap",unit:"pct",bands:"G<15  Y 15-40  R>40",desc:"% cases where the KMC wrap was not provided at registration. N/A where the app lacks the field. Min 20 cases."}
+  image_missing:{label:"Equip image",unit:"pct",bands:"G<5  Y 5-20  R>20",desc:"% follow-up visits with no equipment image captured. Counts only visits from opportunities whose app asks for it (V3). N/A where the app lacks the field. Min 20 such visits."},
+  kmc_wrap_missing:{label:"KMC wrap",unit:"pct",bands:"G<15  Y 15-40  R>40",desc:"% cases where the KMC wrap was not provided at registration. Counts only cases from opportunities whose app asks for it (V3). N/A where the app lacks the field. Min 20 such cases."}
 };
 
 // register "Tier / Category" grouping — tells a program head WHAT KIND of problem a red is.
 var CAT = {
-  mortality:"Fraud / data integrity", rounded_weights:"Fraud / data integrity", modal_weight:"Fraud / data integrity",
+  mortality:"Fraud / data integrity", modal_weight:"Fraud / data integrity",
   flat_weight:"Fraud / data integrity", gps_within_200m:"Fraud / data integrity", hr_copycat:"Fraud / data integrity",
   temp_copycat:"Fraud / data integrity", spo2_implausible:"Fraud / data integrity",
   zero_danger:"Clinical quality & skill", danger_rate_cases:"Clinical quality & skill", no_referral:"Clinical quality & skill",
   weight_loss:"Clinical quality & skill", weight_gain_gkgday:"Clinical quality & skill", image_missing:"Clinical quality & skill",
   kmc_wrap_missing:"Clinical quality & skill",
+  // register row 10 puts rounded weights under Clinical Quality & Skill ("Possible - estimation",
+  // "Yes - measurement technique"), NOT fraud: 100g analog dial scales (EHA/BERI Salter, NAMA KINLee)
+  // round by construction, so filing it as fabrication mislabels whole LLOs.
+  rounded_weights:"Clinical quality & skill",
   low_avg_visits:"Model adherence", enroll_ontime:"Model adherence", flw_early_discharge:"Model adherence"
 };
 var CAT_ORDER = ["Fraud / data integrity","Clinical quality & skill","Model adherence"];
@@ -473,6 +554,22 @@ function fmtVal(v, unit){ if(v===null||v===undefined) return null; if(unit==="pc
 function fmtSub(m){ if(m.hosp_pct!==undefined||m.home_pct!==undefined){ var parts=[]; if(m.hosp_pct!==null&&m.hosp_pct!==undefined) parts.push("Hosp "+m.hosp_pct.toFixed(0)+"%"); if(m.home_pct!==null&&m.home_pct!==undefined) parts.push("Home "+m.home_pct.toFixed(0)+"%"); if(parts.length) return parts.join(" · "); } if(m.den===null||m.den===undefined) return null; if(m.num===null||m.num===undefined) return "n="+m.den; return m.num+" / "+m.den; }
 
 function lloFor(oppId){ var m=OPP_META[oppId]; return m?m.llo:("opp_"+oppId); }
+// ---- V3 case-count correction (mirrors Superset KMC_Cases_Optimized; UI-only, not the parity core) ----
+// A 'Child Registration Form' row's beneficiary_case_id can only have come from case.@case_id (V3 CRF rows
+// carry no child_case_id/kmc_beneficiary_case_id), so guarding that form = Superset's "V3 dual-case fix".
+function correctedCaseId(row){ if(low(rget(row,"form_name"))==="child registration form") return null; return rget(row,"beneficiary_case_id"); }
+function correctedCaseCount(rows, opp){
+  var s={}, i, cc, fn, elig;
+  for(i=0;i<rows.length;i++){
+    cc=correctedCaseId(rows[i]); if(!cc) continue;
+    fn=low(rget(rows[i],"form_name"));
+    // Superset eligibility filter: count a 'Register KMC Beneficiary' reg only if eligible (or opp 675).
+    elig=(fn!=="register kmc beneficiary")||(low(rget(rows[i],"eligibility_status"))==="eligible")||(String(rows[i].opportunity_id||opp)==="675");
+    if(elig) s[String(cc)]=1;
+  }
+  return Object.keys(s).length;
+}
+
 function buildMasterRows(flwRows, visitRows, nameByUser, asOf, winStartMs, winEndMs){
   nameByUser=nameByUser||{};
   var winActive = (winStartMs!==null && winStartMs!==undefined && winEndMs!==null && winEndMs!==undefined);
@@ -483,9 +580,10 @@ function buildMasterRows(flwRows, visitRows, nameByUser, asOf, winStartMs, winEn
   for(i=0;i<sorted.length;i++){ r=sorted[i]; var uname=r.username; if(!uname) continue; var llo=lloFor(r.opportunity_id); var bkey=llo+"|"+uname;
     var b=buckets[bkey]; if(!b){ b=buckets[bkey]={username:uname,llo:llo,flw_name:null,agg_total_cases:0,visit_rows:[],opportunity_ids:[],opportunity_breakdown:[]}; }
     if(!b.flw_name) b.flw_name=nameByUser[uname]||r.flw_name||null;
-    var oc=parseInt(r.total_cases,10)||0, ov=parseInt(r.kmc_visit_count,10)||0;
-    b.agg_total_cases+=oc;
     var vs=visitsByOppUser[r.opportunity_id+"|"+uname]||[]; for(var j=0;j<vs.length;j++) b.visit_rows.push(vs[j]);
+    // total_cases = distinct corrected+eligible case-ids (fixes the V3 double-count; aggregated pipeline value ignored)
+    var oc=correctedCaseCount(vs, r.opportunity_id), ov=parseInt(r.kmc_visit_count,10)||0;
+    b.agg_total_cases+=oc;
     b.opportunity_ids.push(r.opportunity_id);
     b.opportunity_breakdown.push({opportunity_id:r.opportunity_id,name:(OPP_META[r.opportunity_id]||{}).name||("Opp "+r.opportunity_id),total_cases:oc,kmc_visit_count:ov});
   }
@@ -554,6 +652,18 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
   var _filter = React.useState("any_red"); var filter=_filter[0], setFilter=_filter[1];
   var _llo = React.useState("all"); var lloFilter=_llo[0], setLloFilter=_llo[1];
   var _ver = React.useState("all"); var verFilter=_ver[0], setVerFilter=_ver[1];
+  // Version slice: when a specific app version is picked, rebuild each FLW's
+  // metrics from ONLY that version's opportunity rows/visits (mirrors the date-
+  // window re-derivation) so flag counts reflect the version, not the all-version
+  // merge. No-op when "all". Reassigns `scoped` so cards + Overview + table agree.
+  var vScoped = React.useMemo(function(){
+    if (verFilter === "all") return scoped;
+    var _fR = flwRows.filter(function(r){ return verFor(r.opportunity_id) === verFilter; });
+    var _vR = visitRows.filter(function(v){ return verFor(v.opportunity_id) === verFilter; });
+    var _mr = buildMasterRows(_fR, _vR, nameByUser, asOf, winStartMs, winEndMs);
+    return winActive ? _mr.filter(function(r){ return r.in_window; }) : _mr;
+  }, [scoped, flwRows, visitRows, nameByUser, asOf, winStartMs, winEndMs, winActive, verFilter]);
+  scoped = vScoped;
   var _search = React.useState(""); var search=_search[0], setSearch=_search[1];
   var _sortKey = React.useState("red"); var sortKey=_sortKey[0], setSortKey=_sortKey[1];
   var _sortAsc = React.useState(false); var sortAsc=_sortAsc[0], setSortAsc=_sortAsc[1];
