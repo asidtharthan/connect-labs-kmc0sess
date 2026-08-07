@@ -53,6 +53,27 @@
         "data_kb": 225.4,
         "headroom_kb": 153.7
       }
+    },
+    {
+      "id": "cp-0004",
+      "label": "post re-audit: live-calibrated floors, stall deadlock fixed, unknown-schedule regression fixed",
+      "tag": "cp-0004-post-re-audit-live-calibrated-floors-sta",
+      "created_utc": "2026-08-07 17:40 UTC",
+      "git_sha": "ba3b095e3b56618f11c18259ffb6ded4d45fca49",
+      "git_subject": "fix(interviews): act on the adversarial re-audit \u2014 floors, stall deadlock, unknown-schedule regression",
+      "branch": "fix/dashboard-audit-2026-08-07",
+      "note": "Adversarial re-audit found the 7-state reclassification EXACT (0 counterexamples / 13,042 cells) but caught that local hq_pull_full was 39% stale and the guard floors were calibrated on it. Floors now live-derived + dynamic. Tier 3 no longer deadlocks. Ready to merge+publish.",
+      "live_render_version": 140,
+      "verified": {
+        "pipeline_ok": true,
+        "gate_6a": "27/27",
+        "gate_6b": "39/39",
+        "gate_brutal": "196/196",
+        "render_kb": 358.9,
+        "code_kb": 133.5,
+        "data_kb": 225.4,
+        "headroom_kb": 153.1
+      }
     }
   ]
 }
