@@ -41,34 +41,29 @@ PIPELINE_SCHEMAS = [
                     "name": "total_cases",
                     "paths": ["form.child_case_id", "form.kmc_beneficiary_case_id", "form.case.@case_id"],
                     "aggregation": "count_distinct",
-                    "description": "Distinct beneficiary case IDs",
+                    # NAIVE count — do not trust it. In the V3 apps the 'Child Registration Form'
+                    # keys to the mother case, an id disjoint from the child's visit rows, so this
+                    # over-counts by +81% (1487) to +94% (1790). Dropping form.case.@case_id is NOT
+                    # the fix: it would also drop legitimately registered-never-visited V1/V2 cases.
+                    # The dashboard IGNORES this value and recomputes via correctedCaseCount().
+                    "description": "Distinct beneficiary case IDs (NAIVE — V3 double-counts; render recomputes)",
                 },
                 {
                     "name": "kmc_visit_count",
-                    "path": "form.grp_kmc_visit.visit_number",
+                    # form.kmc_visit_number is the V0 shape — without it opp 675 reports 0 visits
+                    # and 520 rows in 523/524 are invisible in the per-opportunity breakdown.
+                    "paths": ["form.grp_kmc_visit.visit_number", "form.kmc_visit_number"],
                     "aggregation": "count",
                     "description": "KMC visits where visit_number is populated",
                 },
-                {
-                    "name": "danger_visit_count",
-                    "paths": [
-                        "form.danger_signs_checklist.danger_sign_positive",
-                        "form.child_details.Danger_Signs_Checklist.danger_sign_positive",
-                    ],
-                    "aggregation": "count",
-                    "description": "Visits where danger-sign checklist filled",
-                },
-                {
-                    "name": "danger_positive_count",
-                    "paths": [
-                        "form.danger_signs_checklist.danger_sign_positive",
-                        "form.child_details.Danger_Signs_Checklist.danger_sign_positive",
-                    ],
-                    "aggregation": "count",
-                    "filter_path": "form.danger_signs_checklist.danger_sign_positive",
-                    "filter_value": "yes",
-                    "description": "Visits where any danger sign positive",
-                },
+                # danger_visit_count / danger_positive_count REMOVED (2026-08-07). Both were unread
+                # by the render (which recomputes danger from the visit-level pipeline) and both were
+                # wrong: they modelled 2 of the 4 danger_signs_checklist group spellings, and
+                # danger_positive_count's filter_path takes a single path while the counted
+                # expression COALESCEd across all of them — so the numerator counted visit-form rows
+                # against a visit+registration denominator, undercounting by 28% (874) to 97% (1739).
+                # filter_path has no multi-path form, so the field cannot be made correct; a wrong
+                # published field is worse than no field.
             ],
             "histograms": [],
             "filters": {},
