@@ -28,6 +28,9 @@ class Command(BaseCommand):
         parser.add_argument("--opp-id", type=int, default=1236)
         parser.add_argument("--access-token")
         parser.add_argument("--out", default="raw_eha/eha_user_visits_raw.csv")
+        parser.add_argument(
+            "--images", action="store_true", help="append ?images=true (adds blob_id-bearing images column)"
+        )
 
     def _resolve_token(self) -> str | None:
         try:
@@ -59,6 +62,8 @@ class Command(BaseCommand):
         out = Path(opts["out"])
         out.parent.mkdir(parents=True, exist_ok=True)
         url = f"{settings.CONNECT_PRODUCTION_URL}/export/opportunity/{opp}/user_visits/"
+        if opts.get("images"):
+            url += "?images=true"
         headers = {"Authorization": f"Bearer {token}", "Accept-Encoding": "gzip, deflate"}
         self.stderr.write(f"Downloading {url} ...")
 
@@ -72,7 +77,7 @@ class Command(BaseCommand):
                         nbytes += len(chunk)
         except httpx.HTTPStatusError as e:
             self.stderr.write(
-                self.style.ERROR(f"HTTP {e.response.status_code} — token likely expired; re-login at /labs/login/.")
+                self.style.ERROR(f"HTTP {e.response.status_code} — token likely expired, re-login at /labs/login/.")
             )
             sys.exit(3)
 
@@ -81,5 +86,5 @@ class Command(BaseCommand):
             reader = csvmod.reader(f)
             header = next(reader, [])
             rows = sum(1 for _ in reader)
-        self.stderr.write(self.style.SUCCESS(f"Saved {nbytes:,} bytes to {out.resolve()}"))
+        self.stderr.write(self.style.SUCCESS(f"Saved {nbytes:,} bytes to {out.resolve()}"))  # noqa: E231
         self.stderr.write(f"Rows: {rows} | Columns ({len(header)}): {header}")
