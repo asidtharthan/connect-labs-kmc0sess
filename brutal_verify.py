@@ -355,6 +355,9 @@ for row in snap:
 
 
 def status_for(flw, cohort, sg, topic):
+    # Deliberately a SEPARATE implementation from topic_status_lib — a gate that imports the code under
+    # test proves nothing. Mirrors the 7-state model: available-* means "asked, no session";
+    # not-triggered means "never asked" (no master row).
     topics = DESIGN[sg]["topics"]
     if topic not in topics: return "not-applicable"
     n = topics.index(topic) + 1
@@ -362,21 +365,30 @@ def status_for(flw, cohort, sg, topic):
     if m and m["is_completed"] == "Y": return "completed"
     if m and m["is_started"] == "Y": return "started-not-completed"
     td = train_date.get(cohort)
-    if not td: return "available-not-started"
     cad = DESIGN[sg]["cadence"]
-    if TODAY < td + timedelta(days=(n - 1) * cad): return "not-available-yet"
-    if n < len(topics) and TODAY >= td + timedelta(days=n * cad): return "available-missed-overdue"
-    return "available-not-started"
+    if m:
+        if td and n < len(topics) and TODAY >= td + timedelta(days=n * cad): return "available-missed-overdue"
+        return "available-not-started"
+    if td and TODAY < td + timedelta(days=(n - 1) * cad): return "not-available-yet"
+    return "not-triggered"
 
 
 APPLICABLE = [t["code"] for t in DD["topicStatus"]]
+# universe = Connect-claimed ∪ anyone with a master row in that cohort. Claimed-only used to drop 210
+# started / 182 completed interviews out of the matrix while table1/table2 still counted them.
+cohort_universe = {c: set(v) for c, v in cohort_claimed.items()}
+for r in R:   # R = the independently re-derived master rows
+    c = r["cohort_id"]
+    if c in cohort_sg:
+        cohort_universe.setdefault(c, set()).add(r["connect_id"])
 ts_rec = defaultdict(lambda: defaultdict(int))
 for c, sg in cohort_sg.items():
-    for flw in cohort_claimed[c]:
+    for flw in cohort_universe.get(c, ()):
         for tc in APPLICABLE:
             ts_rec[tc][status_for(flw, c, sg, tc)] += 1
 ts_bad = 0
-STATES6 = ["not-applicable", "not-available-yet", "available-not-started", "available-missed-overdue", "started-not-completed", "completed"]
+STATES6 = ["not-applicable", "not-available-yet", "available-not-started", "available-missed-overdue",
+           "started-not-completed", "completed", "not-triggered"]
 for row in DD["topicStatus"]:
     tc = row["code"]
     for s in STATES6:
@@ -384,12 +396,21 @@ for row in DD["topicStatus"]:
             ts_bad += 1; print(f"    topicStatus {tc}.{s}: {row[s]} vs {ts_rec[tc][s]}")
     if row["total"] != sum(ts_rec[tc][s] for s in STATES6): ts_bad += 1
     if row["applicable"] != row["total"] - row["not-applicable"]: ts_bad += 1
-chk("topicStatus 6-state counts (claimed universe recompute)", ts_bad == 0, f"{ts_bad} bad")
+chk("topicStatus 7-state counts (claimed ∪ interviewed universe recompute)", ts_bad == 0, f"{ts_bad} bad")
 
 # D-flwMatrix
-claimed_pairs = sum(len(v) for v in cohort_claimed.values())
-chk("flwMatrix rows == claimed (FLW,cohort) pairs (raw snapshot)", len(DD["flwMatrix"]) == claimed_pairs,
-    f"{len(DD['flwMatrix'])} == {claimed_pairs}")
+claimed_pairs = sum(len(v) for v in cohort_universe.values())
+chk("flwMatrix rows == (claimed ∪ interviewed) (FLW,cohort) pairs (raw snapshot)",
+    len(DD["flwMatrix"]) == claimed_pairs, f"{len(DD['flwMatrix'])} == {claimed_pairs}")
+# the whole point of widening the universe: no started/completed interview may sit outside the matrix
+_t2_ist = sum(t["ist"] for t in DD["table2"])
+_t2_icmp = sum(t["icmp"] for t in DD["table2"])
+_mat_ist = sum(sum(1 for x in r["s"] if x in (4, 5)) for r in DD["flwMatrix"])
+_mat_icmp = sum(r["s"].count(5) for r in DD["flwMatrix"])
+chk("no started interview falls outside the matrix (Σtable2.ist == flwMatrix started cells)",
+    _t2_ist == _mat_ist, f"{_t2_ist} == {_mat_ist}")
+chk("no completed interview falls outside the matrix (Σtable2.icmp == flwMatrix completed cells)",
+    _t2_icmp == _mat_icmp, f"{_t2_icmp} == {_mat_icmp}")
 mat_completed = sum(r["s"].count(5) for r in DD["flwMatrix"])
 mat_started = sum(sum(1 for x in r["s"] if x in (4, 5)) for r in DD["flwMatrix"])
 ts_completed = sum(t["completed"] for t in DD["topicStatus"])
@@ -560,6 +581,34 @@ _rd_kb = len(raw_json.encode()) / 1024
 chk("render payload is smaller than the full dashboard payload", _rd_kb < _dd_kb,
     f"{_rd_kb:.1f} KB vs {_dd_kb:.1f} KB (saved {_dd_kb - _rd_kb:.1f} KB); render {_render_kb:.1f} KB, "
     f"headroom {512 - _render_kb:.1f} KB")
+
+# ==================================================================================================
+sec("H. REGRESSION GUARD — day-over-day absolutes (the only NON-relative layer)")
+# Sections A-G are all RELATIVE: they re-derive every expectation from the same sources the dashboard
+# was built from, so a source that silently returns FEWER rows passes all of them — the dashboard just
+# shrinks and the gates shrink with it. regression_guard compares today against _run_history.json
+# (persisted between CI runs by actions/cache) plus absolute floors that hold with no history at all.
+#   Tier 1  hard monotonic, tolerance 0: counts.*, table1 per-ROLL + Overall, connectFunnel per sg,
+#           the A/B arm-PAIR sums, and raw source row counts.
+#   Tier 2  per-ARM table3 rows, which legitimately wobble (one FLW can sit in both arms of a pair —
+#           root-caused 2026-07-28): fail only on a drop greater than max(3, 2%).
+#   Tier 3  counts.started identical for 3 consecutive runs == a frozen source; plus
+#           unmappedCohorts == [] and connectPendingSubgroups == [].
+# History tiers are gated on INTERVIEWS_STRICT_FRESHNESS (same switch as the freshness asserts above),
+# so a local no-credential build on static source stays green. Floors always apply. A missing or empty
+# history is not a failure — the run just seeds it.
+import regression_guard as _rg  # noqa: E402  (local module, deliberately imported late)
+
+_rg_hist = _rg.load_history()
+print(f"    history: {len(_rg_hist)} prior run(s)"
+      + (f", most recent {_rg_hist[-1].get('date')} ({_rg_hist[-1].get('git_sha')})" if _rg_hist
+         else " — none yet, this run seeds it and the history tiers are skipped"))
+_rg_fails = _rg.check(DD, _rg_hist)
+chk("no day-over-day regression (monotonic counters, arm tolerance, stall, absolute floors)",
+    not _rg_fails,
+    (f"{len(_rg_fails)} violation(s): " + " | ".join(_rg_fails[:8])
+     + (f" | ...and {len(_rg_fails) - 8} more" if len(_rg_fails) > 8 else ""))
+    if _rg_fails else f"checked against {len(_rg_hist)} run(s) of history")
 
 print("\n" + "=" * 90)
 print(f"  TOTAL: {P} passed, {F} failed")

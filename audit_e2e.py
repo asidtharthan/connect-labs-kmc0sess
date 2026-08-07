@@ -35,9 +35,12 @@ n_trig = sum(len(v) for v in bm.triggers_by_flw_iv.values())
 n_wel = sum(len(v) for v in bm.welcome_flws_by_key.values())
 sessions = json.loads(open("_ocs_state_cache.json").read())
 n_tagged = sum(1 for s in sessions if s.get("pid") and s.get("interview") and str(s["interview"]).strip())
+# Matrix universe = Connect-claimed ∪ anyone holding a master row in that cohort. Claimed-only used to
+# leave 210 started / 182 completed interviews outside the grid while table1/table2 still counted them
+# (2026-08-07 audit). Independent of topic_status_lib on purpose — this is the gate's own derivation.
 claimed_pairs = {
     (c, f) for c in bm.cohort_flws for f in bm.cohort_flws[c] if bm.cohort_flw_meta[(c, f)].get("date_claimed")
-}
+} | {(r["cohort_id"], r["connect_id"]) for r in bm.rows if bm.cohort_to_sg(r["cohort_id"])}
 print(
     f"  triggers={n_trig}  welcome-keys={n_wel}  ocs_sessions={len(sessions)} tagged={n_tagged}  claimed_pairs={len(claimed_pairs)}"
 )
@@ -129,6 +132,9 @@ for r in bm.rows:
 
 
 def status_for(flw, cohort, topic):
+    """Independent re-implementation of the 7-state model (deliberately NOT importing
+    topic_status_lib — a gate that calls the code under test proves nothing).
+    available-* = the bot sent it and got no session; not-triggered = it was never sent."""
     sg = bm.cohort_to_sg(cohort)
     topics = bm.SUBGROUP_DESIGN[sg]["topics"]
     if topic not in topics:
@@ -140,14 +146,14 @@ def status_for(flw, cohort, topic):
     if m and m["is_started"] == "Y":
         return "started-not-completed"
     td = bm.cohort_info.get(cohort, {}).get("training_date")
-    if not td:
-        return "available-not-started"
     cad = bm.SUBGROUP_DESIGN[sg]["cadence"]
-    if TODAY < td + timedelta(days=(n - 1) * cad):
+    if m:
+        if td and n < len(topics) and TODAY >= td + timedelta(days=n * cad):
+            return "available-missed-overdue"
+        return "available-not-started"
+    if td and TODAY < td + timedelta(days=(n - 1) * cad):
         return "not-available-yet"
-    if n < len(topics) and TODAY >= td + timedelta(days=n * cad):
-        return "available-missed-overdue"
-    return "available-not-started"
+    return "not-triggered"
 
 
 grid = {}
@@ -203,11 +209,12 @@ def status_v2(flw, cohort, topic):
         return "completed"
     if started:
         return "started-not-completed"
-    if td is None:
-        return "available-not-started"
-    if not avail:
+    triggered = bool(m)          # a master row exists only where a trigger form does
+    if triggered:
+        return "available-missed-overdue" if overdue else "available-not-started"
+    if td is not None and not avail:
         return "not-available-yet"
-    return "available-missed-overdue" if overdue else "available-not-started"
+    return "not-triggered"
 
 
 mism = sum(1 for k, v in grid.items() if status_v2(k[1], k[0], k[2]) != v)
@@ -220,13 +227,14 @@ chk(
 distinct_states = set(grid.values())
 chk(
     "C",
-    "every cell exactly one of the 6 states",
+    "every cell exactly one of the 7 states",
     distinct_states
     <= set(
         bm.__dict__.get("STATES", [])
         or [
             "not-applicable",
             "not-available-yet",
+            "not-triggered",
             "available-not-started",
             "available-missed-overdue",
             "started-not-completed",

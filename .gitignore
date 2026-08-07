@@ -397,6 +397,9 @@ docs/interviews_master_v3_render.js
 _ocs_words_cache.json
 _untrained_flw.json
 _interview_schedule.json
+# regression_guard day-over-day baseline — persisted between CI runs by actions/cache, never by git
+# (a committed copy would silently become a stale baseline that no run ever refreshes)
+_run_history.json
 
 # versioned Connect snapshots (participant data — archived locally, tracked via docs/connect_snapshot_manifest.csv)
 connect_snapshots/

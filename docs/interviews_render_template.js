@@ -93,26 +93,29 @@ function WorkflowUI(props) {
   // not "nobody invited" — flagged in the UI so the 0s aren't misread.
   var CONNECT_PENDING = DATA.connectPendingSubgroups || [];
   function connPending(sg) { return CONNECT_PENDING.indexOf(sg) >= 0; }
-  // 6 states in the spec order (Notes doc): not-applicable -> completed
-  var STATES = ["not-applicable", "not-available-yet", "available-not-started", "available-missed-overdue", "started-not-completed", "completed"];
-  var STATES5 = ["not-available-yet", "available-not-started", "available-missed-overdue", "started-not-completed", "completed"];
+  // Wire format for flwMatrix cells — INDEX ORDER IS APPEND-ONLY (completed must stay 5). See
+  // topic_status_lib.py. "not-triggered" (6) was added 2026-08-07: it separates "the bot never sent
+  // this interview" from "we sent it and the FLW didn't respond", which the old model conflated.
+  var STATES = ["not-applicable", "not-available-yet", "available-not-started", "available-missed-overdue", "started-not-completed", "completed", "not-triggered"];
+  var STATES5 = ["not-available-yet", "available-not-started", "available-missed-overdue", "started-not-completed", "completed", "not-triggered"];
   // Topic-completion display order: completed (left/first) → not-available-yet; not-applicable parked last.
   // Used by the stacked bar, its legend, the detail table + drilldown, and the heatmap so they all read the same way.
-  var BAR_ORDER = ["completed", "started-not-completed", "available-not-started", "available-missed-overdue", "not-available-yet", "not-applicable"];
-  var BAR_ORDER5 = ["completed", "started-not-completed", "available-not-started", "available-missed-overdue", "not-available-yet"];
+  var BAR_ORDER = ["completed", "started-not-completed", "available-not-started", "available-missed-overdue", "not-triggered", "not-available-yet", "not-applicable"];
+  var BAR_ORDER5 = ["completed", "started-not-completed", "available-not-started", "available-missed-overdue", "not-triggered", "not-available-yet"];
   var STATE_LABEL = { "not-applicable": "Not applicable", "not-available-yet": "Not available yet",
     "available-not-started": "Available, not started", "available-missed-overdue": "Window passed, not started",
-    "started-not-completed": "Started, not completed", "completed": "Completed" };
+    "started-not-completed": "Started, not completed", "completed": "Completed",
+    "not-triggered": "Never sent (no trigger)" };
   var STATE_COLOR = { "not-applicable": "#e5e7eb", "not-available-yet": "#6366f1",
     "available-not-started": "#f59e0b", "available-missed-overdue": "#b91c1c",
-    "started-not-completed": "#06b6d4", "completed": "#16a34a" };
+    "started-not-completed": "#06b6d4", "completed": "#16a34a",
+    "not-triggered": "#94a3b8" };   // slate: a pipeline gap, deliberately not alarm-red like a real miss
   var STATE_DEF = {
     "not-applicable": "topic isn't part of this cohort's design",
     "not-available-yet": "in the cohort, but not yet released per today's date, the topic's place in the schedule, and the cohort's training date",
     "available-not-started": "due per the schedule, not yet started (the next topic isn't due yet)",
-    "available-missed-overdue":
-      "the scheduled window has passed with no session — this is a SCHEDULE-DATE test, not proof the FLW ignored a prompt: " +
-      "as of 2026-08-07 roughly 4 in 5 of these slots had no trigger form at all, so most are un-triggered rather than declined",
+    "available-missed-overdue": "the bot DID send this interview, the scheduled window has since passed, and no session exists — a genuine non-response",
+    "not-triggered": "the schedule says this interview was due but NO trigger form was ever sent — a pipeline gap, not an FLW choice. Until 2026-08-07 these slots were counted as 'missed/overdue', which blamed the FLW",
     "started-not-completed": "FLW responded with ≥1 message but did not complete the session",
     "completed": "FLW completed the interview",
   };
@@ -127,7 +130,7 @@ function WorkflowUI(props) {
   // Maximally-distinct categorical palette (D3 category10) so every subgroup line is unambiguous.
   var SG_COLOR = { "TRS": "#1f77b4", "TRE": "#17becf", "ABT1-A": "#2ca02c", "ABT1-B": "#d62728", "ABT2-A": "#9467bd", "ABT2-B": "#8c564b", "PANEL": "#e377c2", "ABT3-A": "#f58231", "ABT3-B": "#bcbd22", "2WT": "#334155", "EXT": "#c51b8a" };
   // FLW × Topic matrix cell glyphs, indexed by STATES order (0 not-applicable … 5 completed)
-  var CELL_GLYPH = ["", "·", "○", "!", "◐", "✓"];
+  var CELL_GLYPH = ["", "·", "○", "!", "◐", "✓", "–"];   // index 6 = not-triggered (never sent)
   var MATRIX_TOPIC_ORDER = ["A", "B", "C", "D", "E", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "8S", "8L", "10S", "10L", "11S", "11L", "13L", "99"];
   // GiveWell thematic grouping: pool related topics into one bar. Static + forward-looking
   // (already includes topics that get data later, e.g. ABT3 8S/8L/10S/10L/11S/11L/13L, 2WT 14).
@@ -143,7 +146,9 @@ function WorkflowUI(props) {
   // Pool DATA.topicStatus rows into theme bars (interview-level sum). Topics not in a theme stay
   // individual. Returns the SAME row shape (+ a `label`) so the charts reuse their existing code.
   function groupedTopicStatus(rows) {
-    var STATE6 = ["not-applicable", "not-available-yet", "available-not-started", "available-missed-overdue", "started-not-completed", "completed"];
+    // derive from STATES, not a second hardcoded list: when "not-triggered" was added, a literal list
+    // here left that key undefined on every pooled row and the theme bars charted NaN
+    var STATE6 = STATES;
     var byKey = {}, order = [];
     rows.forEach(function (t) {
       var theme = TOPIC_GROUP[t.code];
@@ -1072,7 +1077,12 @@ function WorkflowUI(props) {
             {tableSub === "topiccomplete" && (
               <div className="space-y-4">
                 <p className="text-xs text-gray-400 px-1">Per-FLW status by topic, across all claimed FLWs (each topic stacks to 100%). Click a topic to break it down by cohort.</p>
-                <p className="text-xs text-gray-400 px-1">Each bar counts <span className="font-medium text-gray-500">enrollment slots</span> for that topic (claimed FLW × cohort — the completion-rate base), not unique FLWs. It includes people enrolled but not yet started, and counts anyone in two cohorts twice, so a bar can exceed the Overview unique-FLW total.</p>
+                <p className="text-xs text-gray-400 px-1">Each bar counts <span className="font-medium text-gray-500">enrollment slots</span> for that topic (FLW × cohort — the completion-rate base), not unique FLWs. It includes people enrolled but not yet started, and counts anyone in two cohorts twice, so a bar can exceed the Overview unique-FLW total.</p>
+                <p className="text-xs px-1 text-gray-500">
+                  <b>% base:</b> {naMode === "exclude"
+                    ? <span>share of <b>applicable</b> slots — the topic row, its by-cohort rows and the chart all use the same base.</span>
+                    : <span>the topic row shows share of <b>all</b> slots (including cohorts where the topic isn't in the design), while its by-cohort rows show share of <b>applicable</b> slots. Switch <i>Not applicable</i> to <i>Exclude</i> to put everything on one base.</span>}
+                </p>
                 <div className="flex flex-wrap items-center gap-2 px-1">
                   <span className="text-xs text-gray-400">Group:</span>
                   {subBtn(topicGroupMode, "topic", setTopicGroupMode, "By topic")}
@@ -1120,13 +1130,21 @@ function WorkflowUI(props) {
                         var open = !!topicExp[t.code];
                         var has = (DATA.topicStatusCohort[t.code] || []).length > 0;
                         function p(s, tot) { return tcMode === "count" ? s : (tot ? Math.round(1000 * s / tot) / 10 + "%" : "—"); }
+                        // The parent row used to divide by t.total (EVERY slot, including cohorts where the
+                        // topic isn't in the design) while the cohort rows below it divide by the applicable
+                        // base — so one screen showed 41.0% and 94.5% for the same topic. The parent now
+                        // follows the same Not-applicable mode as the chart, which makes all three agree in
+                        // Exclude mode; in Include mode the base is stated in the header instead.
+                        var pTot = naMode === "exclude" ? (t.applicable || 0) : t.total;
                         var rows = [];
                         rows.push(
                           <tr key={t.code} className={"hover:bg-gray-50 " + (has ? "cursor-pointer" : "")}
                             onClick={has ? function () { var n = Object.assign({}, topicExp); n[t.code] = !open; setTopicExp(n); } : null}>
                             <td className={td + " font-medium"}>{has ? (open ? "▾ " : "▸ ") : ""}{t.code} · {TOPIC_NAMES[t.code] || t.code}</td>
                             {BAR_ORDER.map(function (s) {
-                              return <td key={s} className={td + " text-right" + (s === "completed" ? " text-green-700 font-medium" : " text-gray-600")}>{p(t[s], t.total)}</td>;
+                              // in Exclude mode "not applicable" is outside the base, so a % of it is meaningless
+                              var cell = (naMode === "exclude" && s === "not-applicable" && tcMode !== "count") ? "—" : p(t[s], pTot);
+                              return <td key={s} className={td + " text-right" + (s === "completed" ? " text-green-700 font-medium" : " text-gray-600")}>{cell}</td>;
                             })}
                           </tr>
                         );

@@ -324,6 +324,21 @@ def main():
         print("\nABORT: --push requested but publish FAILED (see step 8) — failing the job so it is not "
               "silently left un-published. Most likely the MCP_BEARER token expired; re-mint it.", flush=True)
         sys.exit(1)
+    # 9: record this run in the regression-guard history — ONLY after a confirmed publish. This file
+    # (_run_history.json) is the baseline tomorrow's brutal_verify section H compares against, and it
+    # survives between CI runs via the `run-history-` actions/cache step. Recording BEFORE the gate
+    # would let a degraded run overwrite the good baseline and launder the regression into the new
+    # normal — which is the exact failure this guard exists to stop.
+    if pushed_version:
+        try:
+            import regression_guard
+
+            regression_guard.record(json.load(open(DATA_JSON, encoding="utf-8")))
+        except Exception as e:
+            # never fail an already-published run over bookkeeping
+            print(f"  (regression history NOT recorded: {e!r})", flush=True)
+    else:
+        print("\n=== 9. regression history: skipped (nothing was published this run) ===", flush=True)
     print("\nDONE.", flush=True)
 
 

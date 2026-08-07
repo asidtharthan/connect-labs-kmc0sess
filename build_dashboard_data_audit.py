@@ -8,12 +8,15 @@ from collections import defaultdict
 
 import build_master_4src as bm
 
+# the states a topic can be in when it IS part of the cohort's design (i.e. everything but
+# not-applicable). "not-triggered" joined the model on 2026-08-07 — see topic_status_lib.
 STATES_NA = [
     "completed",
     "started-not-completed",
     "available-missed-overdue",
     "available-not-started",
     "not-available-yet",
+    "not-triggered",
 ]
 
 dd = json.loads(open("dashboard_data.json", encoding="utf-8").read())
@@ -73,7 +76,7 @@ ts_ok = True
 ts_bad = 0
 pay_ts = {t["code"]: t for t in pay["topic_status"]}
 _ORDER6 = ["not-applicable", "not-available-yet", "available-not-started", "available-missed-overdue",
-           "started-not-completed", "completed"]
+           "started-not-completed", "completed", "not-triggered"]
 claimed_pairs = dd["counts"]["claimed_pairs"] if "claimed_pairs" in dd["counts"] else pay["counts"]["claimed_pairs"]
 for t in dd["topicStatus"]:
     p = pay_ts[t["code"]]
@@ -87,11 +90,11 @@ for t in dd["topicStatus"]:
     if t["applicable"] != t["total"] - t["not-applicable"]:
         ts_ok = False
         ts_bad += 1
-    # every claimed (cohort,flw) gets exactly one of the 6 states per topic -> total == claimed_pairs (constant)
+    # every (cohort,flw) in the universe gets exactly one state per topic -> total == claimed_pairs
     if t["total"] != claimed_pairs:
         ts_ok = False
         ts_bad += 1
-chk("topicStatus 6 states==payload, total==Σstates==claimed_pairs, applicable==total-NA", ts_ok, f"{ts_bad} bad")
+chk("topicStatus 7 states==payload, total==Σstates==universe pairs, applicable==total-NA", ts_ok, f"{ts_bad} bad")
 # per-cohort topic breakdown: every cohort row's total == its 5 applicable-state sum; cohorts only where topic applies
 tsc_bad = 0
 for tc, rows_c in dd["topicStatusCohort"].items():
@@ -101,7 +104,7 @@ for tc, rows_c in dd["topicStatusCohort"].items():
         sg = bm.cohort_to_sg(rc["cohort"])
         if tc not in bm.SUBGROUP_DESIGN[sg]["topics"]:
             tsc_bad += 1
-chk("topicStatusCohort: row total==Σ5states & topic applicable in cohort", tsc_bad == 0, f"{tsc_bad} bad")
+chk("topicStatusCohort: row total==Σ applicable states & topic applicable in cohort", tsc_bad == 0, f"{tsc_bad} bad")
 # cross-check: Σ per-cohort totals for a topic == that topic's applicable count
 xc_bad = 0
 tsmap = {t["code"]: t for t in dd["topicStatus"]}
@@ -282,16 +285,18 @@ print("=" * 80)
 print("F. NEW FEATURES — FLW×Topic matrix (4), de-impact (8), completed-of-base (6)")
 print("=" * 80)
 fm = dd.get("flwMatrix", [])
-chk("flwMatrix row count == claimed (FLW,cohort) pairs", len(fm) == claimed_pairs, f"{len(fm)} == {claimed_pairs}")
+chk("flwMatrix row count == (claimed ∪ interviewed) (FLW,cohort) pairs", len(fm) == claimed_pairs,
+    f"{len(fm)} == {claimed_pairs}")
 cell_bad = 0
 for r in fm:
     _rsg = r.get("g") or bm.cohort_info.get(r["c"], {}).get("subgroup")   # flwMatrix rows now drop g; derive from cohort
     topics = bm.SUBGROUP_DESIGN.get(_rsg, {}).get("topics", [])
     if len(r["s"]) != len(topics):
         cell_bad += 1
-    if any((not isinstance(x, int)) or x < 1 or x > 5 for x in r["s"]):
-        cell_bad += 1  # cells for in-design topics are always states 1..5 (never not-applicable)
-chk("flwMatrix: cells align to subgroup topics & are states 1..5", cell_bad == 0, f"{cell_bad} bad rows")
+    # in-design topics are never state 0 (not-applicable); 6 = not-triggered joined the model 2026-08-07
+    if any((not isinstance(x, int)) or x < 1 or x > 6 for x in r["s"]):
+        cell_bad += 1
+chk("flwMatrix: cells align to subgroup topics & are in-design states (1..6)", cell_bad == 0, f"{cell_bad} bad rows")
 m_comp = sum(1 for r in fm for x in r["s"] if x == 5)
 ts_comp = sum(t["completed"] for t in dd["topicStatus"])
 chk("flwMatrix completed cells == Σ topicStatus completed", m_comp == ts_comp, f"{m_comp} == {ts_comp}")

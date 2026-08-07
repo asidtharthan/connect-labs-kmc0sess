@@ -10,6 +10,7 @@ from datetime import date as _date, timedelta as _timedelta
 
 import build_master_4src as bm
 import build_flw_analysis as bfa  # per-FLW cross-cohort rollup (import-safe; reuses cached bm)
+import topic_status_lib as _tsl  # shared slot-state rule (also used by build_payload_agg)
 
 STATES_NA = [
     "completed",
@@ -75,15 +76,9 @@ for sg in SG_ORDER:
                         "status": _line_st.get(sg, []),       # per-point release status (items A1/A2)
                         "active": _line_active.get(sg, False)})  # still triggering -> dotted line
 
-# ---- topicStatus reshaped: all 6 states (incl not-applicable) + total (for %-stack to 100) ----
-ORDER6 = [
-    "not-applicable",
-    "not-available-yet",
-    "available-not-started",
-    "available-missed-overdue",
-    "started-not-completed",
-    "completed",
-]
+# ---- topicStatus reshaped: every state (incl not-applicable) + total (for %-stack to 100) ----
+# sourced from topic_status_lib so a new state can never be silently dropped on the way to the render
+ORDER6 = list(_tsl.STATES)
 topic_status = []
 for t in payload["topic_status"]:
     total = sum(t[s] for s in ORDER6)
@@ -150,9 +145,7 @@ for r in rows_sorted[:GRANULAR_N]:
 # aligned to SUBGROUP_DESIGN[sg] topic order. Short keys keep the embed small (verified well under
 # the 512 KB render limit). `u` (untrained) is filled from _untrained_flw.json when present (item 1).
 _TODAY = _date.today()
-_STATE_IDX = {s: i for i, s in enumerate(
-    ["not-applicable", "not-available-yet", "available-not-started",
-     "available-missed-overdue", "started-not-completed", "completed"])}
+_STATE_IDX = _tsl.STATE_IDX
 _untrained = {}
 if os.path.exists("_untrained_flw.json"):
     _untrained = json.load(open("_untrained_flw.json", encoding="utf-8"))
@@ -171,30 +164,24 @@ for _r in bm.rows:
 
 
 def _status_idx(flw, cohort, sg, topic, topics):
-    if topic not in topics:
-        return 0  # not-applicable
-    n = topics.index(topic) + 1
-    m = _mlook.get((flw, cohort, topic))
-    if m and m["is_completed"] == "Y":
-        return _STATE_IDX["completed"]
-    if m and m["is_started"] == "Y":
-        return _STATE_IDX["started-not-completed"]
-    td = bm.cohort_info.get(cohort, {}).get("training_date")
-    if not td:
-        return _STATE_IDX["available-not-started"]
-    cad = bm.SUBGROUP_DESIGN[sg]["cadence"]
-    if _TODAY < td + _timedelta(days=(n - 1) * cad):
-        return _STATE_IDX["not-available-yet"]
-    if n < len(topics) and _TODAY >= td + _timedelta(days=n * cad):
-        return _STATE_IDX["available-missed-overdue"]
-    return _STATE_IDX["available-not-started"]
+    # shared with build_payload_agg via topic_status_lib so the matrix and the topic bars can't diverge
+    return _tsl.status_idx(
+        topic,
+        topics,
+        _mlook.get((flw, cohort, topic)),
+        bm.cohort_info.get(cohort, {}).get("training_date"),
+        bm.SUBGROUP_DESIGN[sg]["cadence"],
+        _TODAY,
+    )
 
 
 flw_matrix = []
+_interviewed = _tsl.interviewed_index(bm.rows)
 for _cohort, _info in bm.cohort_info.items():
     _sg = _info["subgroup"]
     _topics = bm.SUBGROUP_DESIGN[_sg]["topics"]
-    _claimed = [f for f in bm.cohort_flws[_cohort] if bm.cohort_flw_meta[(_cohort, f)].get("date_claimed")]
+    # claimed ∪ anyone with a master row here, so an interview that happened is never outside the matrix
+    _claimed = sorted(_tsl.universe_for(_cohort, bm.cohort_flws, bm.cohort_flw_meta, _interviewed))
     for _flw in _claimed:
         # drop per-row "g" (subgroup) — re-derived in the render from cohortSG below; and omit "u" when 0
         # (render treats a missing u as untrained=false). Both shrink this, the largest DATA key (~59%).
