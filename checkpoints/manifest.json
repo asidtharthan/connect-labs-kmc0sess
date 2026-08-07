@@ -1,0 +1,37 @@
+{
+  "checkpoints": [
+    {
+      "id": "cp-0001",
+      "label": "last known-good live state (render v140, pre-audit)",
+      "tag": "cp-0001-last-known-good-live-state-render-v140-p",
+      "created_utc": "2026-08-07 16:40 UTC",
+      "git_sha": "73f814761dfa33efb67571c0895f50440f146ddb",
+      "git_subject": "docs(interviews): reconcile FLW exec brief (.md + .docx) to live v140 numbers",
+      "branch": "fix/dashboard-audit-2026-08-07",
+      "note": "The state stakeholders were using before the audit. Gates were ADVISORY at this commit, so its 6b was actually failing 37/38 in CI while still publishing \u2014 recorded here as the rollback floor, not as a clean bill of health.",
+      "live_render_version": 140,
+      "verified": null
+    },
+    {
+      "id": "cp-0002",
+      "label": "audit fixes: blocking gates, blank-chart fix, corrected FLW stats, interactive tab, 42% smaller payload",
+      "tag": "cp-0002-audit-fixes-blocking-gates-blank-chart-f",
+      "created_utc": "2026-08-07 16:41 UTC",
+      "git_sha": "205d5ff6b12d9c0930d76319dd61155d4468ca46",
+      "git_subject": "fix(interviews): make the CI gates blocking, fix a blank chart, correct FLW stats, cut the payload 42%",
+      "branch": "fix/dashboard-audit-2026-08-07",
+      "note": "PR #69. Gates are now able to fail the job (this is the change that matters most). Programme-level numbers on all other tabs are byte-identical to cp-0001; only the FLW Retention tab's metric DEFINITIONS changed, plus labels.",
+      "live_render_version": 140,
+      "verified": {
+        "pipeline_ok": true,
+        "gate_6a": "27/27",
+        "gate_6b": "39/39",
+        "gate_brutal": "193/193",
+        "render_kb": 351.0,
+        "code_kb": 130.8,
+        "data_kb": 220.2,
+        "headroom_kb": 161.0
+      }
+    }
+  ]
+}
