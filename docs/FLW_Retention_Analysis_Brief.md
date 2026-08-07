@@ -16,9 +16,11 @@
 > 1. **§2 / exec-summary #2 — "re-use compounds engagement, finish rate 44% → 88%" is not supported.**
 >    "Finished" here means *finished at least one* of a worker's cohort schedules. That is a maximum over cohorts, so
 >    a worker in three cohorts gets three independent chances to clear the bar and the rate rises even if nothing
->    about them changed. On the like-for-like measure — the share of *their own* schedules a worker completes — the
->    single- vs multi-cohort difference is **flat**, and completion rate (0.88 vs 0.89) already said so. The
->    genuine difference between the two groups is **answer depth**, not finishing.
+>    about them changed. On the like-for-like measure — the share of *their own* schedules a worker completes —
+>    the live figures are **44% (single) vs 61% (multi)**: a real 17-point difference, but roughly 60% of the
+>    44-point headline gap was arithmetic rather than behaviour. Completion rate (0.88 vs 0.89) is flat. And
+>    "was re-invited" is itself an outcome of how a worker performed the first time, so even the residual gap
+>    is not evidence that re-use *causes* finishing.
 > 2. **§4 / exec-summary #4 — "first-interview depth predicts finishing, 88% vs 68%" overstates a real but modest
 >    effect.** The split was computed on each worker's *lifetime* average answer depth across every interview, not
 >    their first interview, so the predictor partly contained the outcome. Re-run on the first session only and

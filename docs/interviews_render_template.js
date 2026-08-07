@@ -1766,7 +1766,12 @@ function WorkflowUI(props) {
               {/* Cross-cohort: the honest version */}
               <div className="rounded border border-purple-200 bg-purple-50 px-3 py-2 text-xs text-gray-700">
                 <b>⭐ Most FLWs work across several cohorts — but re-use does not by itself raise finishing.</b>{" "}
-                {cc.multi.n} FLWs ({100 - (cc.single.n ? Math.round(100 * cc.single.n / N) : 0)}%) span ≥2 cohorts. They finish ≥1 schedule far more often ({cc.multi.finished}% vs {cc.single.finished}%) — but that comparison is <b>mechanical</b>: "finished ≥1" is a max over cohorts, so being in three cohorts gives three chances. On the like-for-like measure — the share of <i>their own</i> schedules they complete — multi-cohort FLWs are <b>{cc.multi.finished_pc}%</b> vs <b>{cc.single.finished_pc}%</b> for single-cohort, i.e. flat. Depth is the one place they differ ({cc.multi.depth} vs {cc.single.depth} words/session).
+                {cc.multi.n} FLWs ({100 - (cc.single.n ? Math.round(100 * cc.single.n / N) : 0)}%) span ≥2 cohorts. They finish ≥1 schedule far more often ({cc.multi.finished}% vs {cc.single.finished}%) — but that comparison is <b>mechanical</b>: "finished ≥1" is a max over cohorts, so being in three cohorts gives three chances. On the like-for-like measure — the share of <i>their own</i> schedules they complete — multi-cohort FLWs are <b>{cc.multi.finished_pc}%</b> vs <b>{cc.single.finished_pc}%</b> for single-cohort: {(function () {
+                  var g = (cc.multi.finished_pc || 0) - (cc.single.finished_pc || 0), a = Math.abs(g);
+                  var raw = (cc.multi.finished || 0) - (cc.single.finished || 0);
+                  if (a <= 3) return <span>essentially flat, so the headline gap is almost entirely arithmetic</span>;
+                  return <span>a real <b>{g > 0 ? "+" : "−"}{a} point</b> difference, but roughly {Math.max(0, Math.round(100 * (raw - g) / (raw || 1)))}% of the {raw}-point headline gap is arithmetic rather than behaviour</span>;
+                })()}. They also answer at greater length ({cc.multi.depth} vs {cc.single.depth} words/session). Neither measure establishes that re-using a worker <i>causes</i> them to finish more — being re-invited is itself an outcome of how they performed the first time.
               </div>
 
               {dimOK ? (
