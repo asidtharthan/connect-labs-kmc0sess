@@ -74,6 +74,27 @@
         "data_kb": 225.4,
         "headroom_kb": 153.1
       }
+    },
+    {
+      "id": "cp-0005",
+      "label": "DEPLOYED \u2014 live render v142, all audit work merged",
+      "tag": "cp-0005-deployed-live-render-v142-all-audit-work",
+      "created_utc": "2026-08-07 18:18 UTC",
+      "git_sha": "2ba286b8ffbac015c8ee77d07407192a80743356",
+      "git_subject": "fix(interviews): stop asserting \"flat\" \u2014 compute the cross-cohort verdict from the data (#70)",
+      "branch": "main",
+      "note": "Merged PRs #69 + #70 to main, published v142 via workflow_dispatch. First run with genuinely complete data (all 12 HQ domains): master_rows 9930, started 9393. Universe fix VERIFIED on live data \u2014 matrix started/completed cells now equal counts exactly (the 210/182 gap is closed). Regression guard seeded and made its first day-over-day comparison.",
+      "live_render_version": 142,
+      "verified": {
+        "pipeline_ok": true,
+        "gate_6a": "27/27",
+        "gate_6b": "39/39",
+        "gate_brutal": "196/196",
+        "render_kb": 359.6,
+        "code_kb": 134.2,
+        "data_kb": 225.4,
+        "headroom_kb": 152.4
+      }
     }
   ]
 }
