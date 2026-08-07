@@ -25,6 +25,10 @@ on:
         description: 'Full OCS re-scan (state+words) to self-heal — slower + many more OCS requests; leave off for normal incremental runs'
         type: boolean
         default: false
+      allow_regression:
+        description: 'Regression-guard escape hatch: comma-separated metric names (or "all") to waive for THIS run only. Use when a change legitimately lowers counts (e.g. a new test-account exclusion). Leave blank normally.'
+        type: string
+        default: ''
 
 concurrency:
   group: refresh-interviews
@@ -42,7 +46,10 @@ jobs:
       PYTHONUTF8: '1'
       PYTHONIOENCODING: 'utf-8'
       INTERVIEWS_CONNECT_SNAPSHOT: '1'
-      INTERVIEWS_STRICT_FRESHNESS: '1' # enforce brutal_verify freshness asserts (CI always live-pulls)
+      INTERVIEWS_STRICT_FRESHNESS: '1' # enforce brutal_verify freshness asserts + regression_guard history tiers (CI always live-pulls)
+      # Regression-guard escape hatch. Empty on the scheduled run; set only via workflow_dispatch when a
+      # deliberate, reviewed change legitimately lowers a monotonic counter. Every use is logged loudly.
+      INTERVIEWS_ALLOW_REGRESSION: ${{ inputs.allow_regression }}
       MCP_URL: 'https://labs.connect.dimagi.com/mcp/'
       MCP_BEARER: ${{ secrets.MCP_BEARER }}
       HQ_API_KEY: ${{ secrets.HQ_API_KEY }}
@@ -73,6 +80,22 @@ jobs:
           key: ocs-cache-${{ github.run_id }}
           restore-keys: |
             ocs-cache-
+      # Carry the regression-guard run history between daily runs. Same rolling-key idiom as the OCS
+      # cache above: each run saves under a unique key and restores the most recent prior one.
+      # `_run_history.json` is the ONLY persisted record of what yesterday's numbers were — every other
+      # gate re-derives its expectations from the same (possibly degraded) sources the dashboard was
+      # built from, so without this the pipeline cannot tell "the programme is smaller today" from
+      # "a source silently returned fewer rows". It holds aggregate counts only (no participant data),
+      # and is written by refresh_interviews_dashboard.py only AFTER a successful publish. A cache miss
+      # is harmless: the guard falls back to its absolute floors and re-seeds the history this run.
+      - name: Restore regression-guard run history (day-over-day baseline)
+        uses: actions/cache@v4
+        with:
+          path: |
+            _run_history.json
+          key: run-history-${{ github.run_id }}
+          restore-keys: |
+            run-history-
       - name: Reassemble Connect snapshot from secrets (FALLBACK if the headless pull fails)
         env:
           CONNECT_SNAP_1: ${{ secrets.CONNECT_SNAP_1 }}

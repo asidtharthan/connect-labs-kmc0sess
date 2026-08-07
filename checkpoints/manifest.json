@@ -1,0 +1,79 @@
+{
+  "checkpoints": [
+    {
+      "id": "cp-0001",
+      "label": "last known-good live state (render v140, pre-audit)",
+      "tag": "cp-0001-last-known-good-live-state-render-v140-p",
+      "created_utc": "2026-08-07 16:40 UTC",
+      "git_sha": "73f814761dfa33efb67571c0895f50440f146ddb",
+      "git_subject": "docs(interviews): reconcile FLW exec brief (.md + .docx) to live v140 numbers",
+      "branch": "fix/dashboard-audit-2026-08-07",
+      "note": "The state stakeholders were using before the audit. Gates were ADVISORY at this commit, so its 6b was actually failing 37/38 in CI while still publishing \u2014 recorded here as the rollback floor, not as a clean bill of health.",
+      "live_render_version": 140,
+      "verified": null
+    },
+    {
+      "id": "cp-0002",
+      "label": "audit fixes: blocking gates, blank-chart fix, corrected FLW stats, interactive tab, 42% smaller payload",
+      "tag": "cp-0002-audit-fixes-blocking-gates-blank-chart-f",
+      "created_utc": "2026-08-07 16:41 UTC",
+      "git_sha": "205d5ff6b12d9c0930d76319dd61155d4468ca46",
+      "git_subject": "fix(interviews): make the CI gates blocking, fix a blank chart, correct FLW stats, cut the payload 42%",
+      "branch": "fix/dashboard-audit-2026-08-07",
+      "note": "PR #69. Gates are now able to fail the job (this is the change that matters most). Programme-level numbers on all other tabs are byte-identical to cp-0001; only the FLW Retention tab's metric DEFINITIONS changed, plus labels.",
+      "live_render_version": 140,
+      "verified": {
+        "pipeline_ok": true,
+        "gate_6a": "27/27",
+        "gate_6b": "39/39",
+        "gate_brutal": "193/193",
+        "render_kb": 351.0,
+        "code_kb": 130.8,
+        "data_kb": 220.2,
+        "headroom_kb": 161.0
+      }
+    },
+    {
+      "id": "cp-0003",
+      "label": "four follow-ups: not-triggered state, widened universe, single % base, regression guard",
+      "tag": "cp-0003-four-follow-ups-not-triggered-state-wide",
+      "created_utc": "2026-08-07 17:07 UTC",
+      "git_sha": "baa9a4828ad3d854a2463650666eee0f834fd0f9",
+      "git_subject": "fix(interviews): not-triggered state, widened matrix universe, one % base, day-over-day guard",
+      "branch": "fix/dashboard-audit-2026-08-07",
+      "note": "PR #69 head, awaiting merge+publish. Gates 6a 27/27 / 6b 39/39 / brutal 196/196 (+section H regression guard). Numbers that MOVE vs cp-0002: missed-overdue 5467->426 (92% were never sent), matrix rows 3326->3407 recovering 163 started/138 completed, topic parent-row % base now follows the N/A toggle.",
+      "live_render_version": 140,
+      "verified": {
+        "pipeline_ok": true,
+        "gate_6a": "27/27",
+        "gate_6b": "39/39",
+        "gate_brutal": "196/196",
+        "render_kb": 358.3,
+        "code_kb": 132.8,
+        "data_kb": 225.4,
+        "headroom_kb": 153.7
+      }
+    },
+    {
+      "id": "cp-0004",
+      "label": "post re-audit: live-calibrated floors, stall deadlock fixed, unknown-schedule regression fixed",
+      "tag": "cp-0004-post-re-audit-live-calibrated-floors-sta",
+      "created_utc": "2026-08-07 17:40 UTC",
+      "git_sha": "ba3b095e3b56618f11c18259ffb6ded4d45fca49",
+      "git_subject": "fix(interviews): act on the adversarial re-audit \u2014 floors, stall deadlock, unknown-schedule regression",
+      "branch": "fix/dashboard-audit-2026-08-07",
+      "note": "Adversarial re-audit found the 7-state reclassification EXACT (0 counterexamples / 13,042 cells) but caught that local hq_pull_full was 39% stale and the guard floors were calibrated on it. Floors now live-derived + dynamic. Tier 3 no longer deadlocks. Ready to merge+publish.",
+      "live_render_version": 140,
+      "verified": {
+        "pipeline_ok": true,
+        "gate_6a": "27/27",
+        "gate_6b": "39/39",
+        "gate_brutal": "196/196",
+        "render_kb": 358.9,
+        "code_kb": 133.5,
+        "data_kb": 225.4,
+        "headroom_kb": 153.1
+      }
+    }
+  ]
+}

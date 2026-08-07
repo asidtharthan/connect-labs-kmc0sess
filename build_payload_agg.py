@@ -7,6 +7,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
 import build_master_4src as bm
+import topic_status_lib as tsl
 
 TODAY = date.today()  # drives status time-gating; dynamic so the daily job gates against the real date
 # Canonical topic order; include every topic ANY subgroup design uses (auto-picks up 12/13/C from the
@@ -332,14 +333,8 @@ t2 = [
 ]
 
 # ---- topic-status distribution (per topic + per subgroup) for stacked bars ----
-STATES = [
-    "not-applicable",
-    "not-available-yet",
-    "available-not-started",
-    "available-missed-overdue",
-    "started-not-completed",
-    "completed",
-]
+# STATES + the status rule live in topic_status_lib so build_dashboard_data.py cannot drift from this.
+STATES = tsl.STATES
 mlook = {}
 
 
@@ -355,32 +350,24 @@ for r in bm.rows:
 
 def status_for(flw, cohort, topic):
     sg = bm.cohort_to_sg(cohort)
-    topics = bm.SUBGROUP_DESIGN[sg]["topics"]
-    if topic not in topics:
-        return "not-applicable"
-    n = topics.index(topic) + 1
-    m = mlook.get((flw, cohort, topic))
-    if m and m["is_completed"] == "Y":
-        return "completed"
-    if m and m["is_started"] == "Y":
-        return "started-not-completed"
-    td = bm.cohort_info.get(cohort, {}).get("training_date")
-    if not td:
-        return "available-not-started"
-    cad = bm.SUBGROUP_DESIGN[sg]["cadence"]
-    if TODAY < td + timedelta(days=(n - 1) * cad):
-        return "not-available-yet"
-    if n < len(topics) and TODAY >= td + timedelta(days=n * cad):
-        return "available-missed-overdue"
-    return "available-not-started"
+    return tsl.status_for(
+        topic,
+        bm.SUBGROUP_DESIGN[sg]["topics"],
+        mlook.get((flw, cohort, topic)),
+        bm.cohort_info.get(cohort, {}).get("training_date"),
+        bm.SUBGROUP_DESIGN[sg]["cadence"],
+        TODAY,
+    )
 
 
 topic_status = defaultdict(lambda: defaultdict(int))
 sg_status = defaultdict(lambda: defaultdict(int))
 topic_status_cohort = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))  # topic -> cohort -> state -> n
+_interviewed = tsl.interviewed_index(bm.rows)
 for cohort, info in bm.cohort_info.items():
     sg = info["subgroup"]
-    claimed = [f for f in bm.cohort_flws[cohort] if bm.cohort_flw_meta[(cohort, f)].get("date_claimed")]
+    # claimed ∪ anyone with a master row here — see topic_status_lib.universe_for
+    claimed = sorted(tsl.universe_for(cohort, bm.cohort_flws, bm.cohort_flw_meta, _interviewed))
     for flw in claimed:
         for topic in TOPICS:
             st = status_for(flw, cohort, topic)
@@ -391,8 +378,9 @@ for cohort, info in bm.cohort_info.items():
 topic_status_out = [
     {"code": tc, "name": bm.TOPIC_NAMES[tc], **{s: topic_status[tc][s] for s in STATES}} for tc in APPLICABLE
 ]
-# per-cohort topic status (for the by-cohort drilldown); only the 5 applicable states (topic is in the cohort)
-STATES5 = ["completed", "started-not-completed", "available-missed-overdue", "available-not-started", "not-available-yet"]
+# per-cohort topic status (for the by-cohort drilldown); the applicable states (topic IS in the cohort)
+STATES5 = ["completed", "started-not-completed", "available-missed-overdue", "available-not-started",
+           "not-available-yet", "not-triggered"]
 topic_status_cohort_out = {}
 for tc in APPLICABLE:
     rows_c = []
@@ -668,11 +656,11 @@ payload = {
         "cohorts": len(bm.cohort_info),
         "flws": len({c["flw"] for c in cells}),
         "master_rows": len(bm.rows),
+        # matrix universe = claimed ∪ interviewed (topic_status_lib.universe_for). Kept under the old
+        # key name so downstream consumers don't break; it is the flwMatrix row count either way.
         "claimed_pairs": sum(
-            1
+            len(tsl.universe_for(cohort, bm.cohort_flws, bm.cohort_flw_meta, _interviewed))
             for cohort in bm.cohort_info
-            for f in bm.cohort_flws[cohort]
-            if bm.cohort_flw_meta[(cohort, f)].get("date_claimed")
         ),
     },
     "funnel": funnel,

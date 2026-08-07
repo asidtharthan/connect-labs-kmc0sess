@@ -7,6 +7,33 @@
 
 ---
 
+> ## ⚠️ Correction notice — 2026-08-07 (read before citing §2 or §4)
+>
+> A statistical audit of this analysis found that two of its headline claims are artifacts of how "finished" was
+> measured. **Do not circulate §2 or §4 in their current form.** Both the dashboard tab and the brief generator have
+> been corrected; this document regenerates with the corrected figures on the next data refresh.
+>
+> 1. **§2 / exec-summary #2 — "re-use compounds engagement, finish rate 44% → 88%" is not supported.**
+>    "Finished" here means *finished at least one* of a worker's cohort schedules. That is a maximum over cohorts, so
+>    a worker in three cohorts gets three independent chances to clear the bar and the rate rises even if nothing
+>    about them changed. On the like-for-like measure — the share of *their own* schedules a worker completes — the
+>    single- vs multi-cohort difference is **flat**, and completion rate (0.88 vs 0.89) already said so. The
+>    genuine difference between the two groups is **answer depth**, not finishing.
+> 2. **§4 / exec-summary #4 — "first-interview depth predicts finishing, 88% vs 68%" overstates a real but modest
+>    effect.** The split was computed on each worker's *lifetime* average answer depth across every interview, not
+>    their first interview, so the predictor partly contained the outcome. Re-run on the first session only and
+>    against the per-cohort finish rate, the gap is roughly **5 points**, not 20. Worth testing as a lever; not
+>    established as one.
+>
+> Two further wording corrections: the persona previously called **"Slow-but-finishing"** has finished *nothing* by
+> construction (it is reachable only after both "finished" branches fail) and is now **"Partial progress"**; and
+> **"Slipping is largely benign"** is not accurate — that tier also holds a large share of the one-and-done group.
+>
+> Method note: engagement recency is now measured against the freshest session in the dataset rather than the wall
+> clock, so these figures no longer drift when a data pull runs late.
+
+---
+
 ## Why this analysis exists
 
 Every other view of this program is **cohort-level** — how a study arm performed. This one looks at the program **through the worker**: one row per unique FLW, their interview history stitched across every cohort and arm they touched. That matters because **most workers are re-used across studies** — so the worker's cumulative experience, not any single cohort, drives whether they stay engaged. This lens tells us who the program retains, when it loses people, and what to do about it.

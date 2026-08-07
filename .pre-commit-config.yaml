@@ -1,4 +1,4 @@
-exclude: '^docs/|/migrations/|^(audit_e2e|build_master_4src|build_payload_agg|build_dashboard_data|build_dashboard_data_audit|brutal_verify|pull_hq_full_payloads|pull_ocs_state|pull_ocs_words|refresh_interviews_dashboard|setup_dashboard_secrets)\.py$'
+exclude: '^docs/|/migrations/|^(audit_e2e|build_master_4src|build_payload_agg|build_dashboard_data|build_dashboard_data_audit|build_render_data|brutal_verify|pull_hq_full_payloads|pull_ocs_state|pull_ocs_words|refresh_interviews_dashboard|setup_dashboard_secrets)\.py$'
 default_stages: [pre-commit]
 
 repos:

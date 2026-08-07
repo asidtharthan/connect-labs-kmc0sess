@@ -43,6 +43,10 @@ function WorkflowUI(props) {
   var odd = React.useState(null); var openDD = odd[0], setOpenDD = odd[1];   // which filter dropdown is open (one at a time)
   var ddq = React.useState({}); var ddQuery = ddq[0], setDdQuery = ddq[1];   // per-dropdown in-list search text
   var gso = React.useState({ key: "", dir: "asc" }); var gSort = gso[0], setGSort = gso[1];   // sessions table sort
+  // FLW Retention tab: cross-filter selection {dim: [values]} + which outcome the panels rank by.
+  var flwf = React.useState({}); var flwSel = flwf[0], setFlwSel = flwf[1];
+  var flwm = React.useState("pc");
+  var flwMetric = flwm[0], setFlwMetric = flwm[1];   // pc = per-cohort finish rate | any = finished >=1 schedule
   var dimp = React.useState(false);
   var deImpact = dimp[0], setDeImpact = dimp[1];   // item 8: raw vs de-impacted (penult/last artifact)
   var lvm = React.useState("pct");
@@ -89,24 +93,29 @@ function WorkflowUI(props) {
   // not "nobody invited" — flagged in the UI so the 0s aren't misread.
   var CONNECT_PENDING = DATA.connectPendingSubgroups || [];
   function connPending(sg) { return CONNECT_PENDING.indexOf(sg) >= 0; }
-  // 6 states in the spec order (Notes doc): not-applicable -> completed
-  var STATES = ["not-applicable", "not-available-yet", "available-not-started", "available-missed-overdue", "started-not-completed", "completed"];
-  var STATES5 = ["not-available-yet", "available-not-started", "available-missed-overdue", "started-not-completed", "completed"];
+  // Wire format for flwMatrix cells — INDEX ORDER IS APPEND-ONLY (completed must stay 5). See
+  // topic_status_lib.py. "not-triggered" (6) was added 2026-08-07: it separates "the bot never sent
+  // this interview" from "we sent it and the FLW didn't respond", which the old model conflated.
+  var STATES = ["not-applicable", "not-available-yet", "available-not-started", "available-missed-overdue", "started-not-completed", "completed", "not-triggered"];
+  var STATES5 = ["not-available-yet", "available-not-started", "available-missed-overdue", "started-not-completed", "completed", "not-triggered"];
   // Topic-completion display order: completed (left/first) → not-available-yet; not-applicable parked last.
   // Used by the stacked bar, its legend, the detail table + drilldown, and the heatmap so they all read the same way.
-  var BAR_ORDER = ["completed", "started-not-completed", "available-not-started", "available-missed-overdue", "not-available-yet", "not-applicable"];
-  var BAR_ORDER5 = ["completed", "started-not-completed", "available-not-started", "available-missed-overdue", "not-available-yet"];
+  var BAR_ORDER = ["completed", "started-not-completed", "available-not-started", "available-missed-overdue", "not-triggered", "not-available-yet", "not-applicable"];
+  var BAR_ORDER5 = ["completed", "started-not-completed", "available-not-started", "available-missed-overdue", "not-triggered", "not-available-yet"];
   var STATE_LABEL = { "not-applicable": "Not applicable", "not-available-yet": "Not available yet",
-    "available-not-started": "Available, not started", "available-missed-overdue": "Available, missed/overdue",
-    "started-not-completed": "Started, not completed", "completed": "Completed" };
+    "available-not-started": "Available, not started", "available-missed-overdue": "Window passed, not started",
+    "started-not-completed": "Started, not completed", "completed": "Completed",
+    "not-triggered": "Never sent (no trigger)" };
   var STATE_COLOR = { "not-applicable": "#e5e7eb", "not-available-yet": "#6366f1",
     "available-not-started": "#f59e0b", "available-missed-overdue": "#b91c1c",
-    "started-not-completed": "#06b6d4", "completed": "#16a34a" };
+    "started-not-completed": "#06b6d4", "completed": "#16a34a",
+    "not-triggered": "#94a3b8" };   // slate: a pipeline gap, deliberately not alarm-red like a real miss
   var STATE_DEF = {
     "not-applicable": "topic isn't part of this cohort's design",
     "not-available-yet": "in the cohort, but not yet released per today's date, the topic's place in the schedule, and the cohort's training date",
-    "available-not-started": "available for the FLW to trigger from the app, but not yet started",
-    "available-missed-overdue": "the FLW missed this topic's window — the next topic is already available",
+    "available-not-started": "due per the schedule, not yet started (the next topic isn't due yet)",
+    "available-missed-overdue": "the bot DID send this interview, the scheduled window has since passed, and no session exists — a genuine non-response",
+    "not-triggered": "the schedule says this interview was due but NO trigger form was ever sent — a pipeline gap, not an FLW choice. Until 2026-08-07 these slots were counted as 'missed/overdue', which blamed the FLW",
     "started-not-completed": "FLW responded with ≥1 message but did not complete the session",
     "completed": "FLW completed the interview",
   };
@@ -121,7 +130,7 @@ function WorkflowUI(props) {
   // Maximally-distinct categorical palette (D3 category10) so every subgroup line is unambiguous.
   var SG_COLOR = { "TRS": "#1f77b4", "TRE": "#17becf", "ABT1-A": "#2ca02c", "ABT1-B": "#d62728", "ABT2-A": "#9467bd", "ABT2-B": "#8c564b", "PANEL": "#e377c2", "ABT3-A": "#f58231", "ABT3-B": "#bcbd22", "2WT": "#334155", "EXT": "#c51b8a" };
   // FLW × Topic matrix cell glyphs, indexed by STATES order (0 not-applicable … 5 completed)
-  var CELL_GLYPH = ["", "·", "○", "!", "◐", "✓"];
+  var CELL_GLYPH = ["", "·", "○", "!", "◐", "✓", "–"];   // index 6 = not-triggered (never sent)
   var MATRIX_TOPIC_ORDER = ["A", "B", "C", "D", "E", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "8S", "8L", "10S", "10L", "11S", "11L", "13L", "99"];
   // GiveWell thematic grouping: pool related topics into one bar. Static + forward-looking
   // (already includes topics that get data later, e.g. ABT3 8S/8L/10S/10L/11S/11L/13L, 2WT 14).
@@ -137,7 +146,9 @@ function WorkflowUI(props) {
   // Pool DATA.topicStatus rows into theme bars (interview-level sum). Topics not in a theme stay
   // individual. Returns the SAME row shape (+ a `label`) so the charts reuse their existing code.
   function groupedTopicStatus(rows) {
-    var STATE6 = ["not-applicable", "not-available-yet", "available-not-started", "available-missed-overdue", "started-not-completed", "completed"];
+    // derive from STATES, not a second hardcoded list: when "not-triggered" was added, a literal list
+    // here left that key undefined on every pooled row and the theme bars charted NaN
+    var STATE6 = STATES;
     var byKey = {}, order = [];
     rows.forEach(function (t) {
       var theme = TOPIC_GROUP[t.code];
@@ -212,7 +223,11 @@ function WorkflowUI(props) {
           x: byDay ? { type: "linear", beginAtZero: true, title: { display: true, text: "Days since first interview" } } : { title: { display: true, text: "Interview #" } } } }
     });
     return function () { if (lineInst.current) { lineInst.current.destroy(); lineInst.current = null; } };
-  }, [activeTab, deImpact, hidSg, lineMode, denomMode]);
+    // funView MUST be a dep: the canvas only exists while funView==="retention", so switching to
+    // "engagement" and back remounts a fresh canvas while lineInst still points at the destroyed one —
+    // without this the flagship retention chart came back as a blank 380px hole until some other
+    // toggle happened to re-run the effect.
+  }, [activeTab, funView, deImpact, hidSg, lineMode, denomMode]);
 
   // ---- stacked bar chart (Table View > Topic completion) ----
   React.useEffect(function () {
@@ -226,7 +241,8 @@ function WorkflowUI(props) {
     var excl = tcMode === "pct" && naMode === "exclude";
     var barStates = (isCount || excl) ? BAR_ORDER5 : BAR_ORDER;
     var tsRows = topicRowsFor(DATA.topicStatus, topicGroupMode);
-    var maxApp = Math.max.apply(null, tsRows.map(function (t) { return t.applicable || 0; })) || 1;
+    // length-guarded: Math.max.apply(null, []) === -Infinity, which is truthy, so `|| 1` never fires
+    var maxApp = tsRows.length ? Math.max.apply(null, tsRows.map(function (t) { return t.applicable || 0; })) || 1 : 1;
     barInst.current = new window.Chart(barRef.current.getContext("2d"), {
       type: "bar",
       data: { labels: tsRows.map(function (t) { return t.label || (t.code + " · " + (TOPIC_NAMES[t.code] || t.code)); }),
@@ -235,9 +251,9 @@ function WorkflowUI(props) {
             data: tsRows.map(function (t) { if (isCount) return t[st] || 0; var denom = excl ? (t.applicable || 0) : (t.total || 0); return denom ? Math.round(1000 * t[st] / denom) / 10 : 0; }),
             backgroundColor: STATE_COLOR[st] }; }) },
       options: { responsive: true, maintainAspectRatio: false, indexAxis: "y",
-        plugins: { title: { display: true, text: (topicGroupMode === "theme" ? "FLW status distribution by THEME (related topics pooled)" : "FLW status distribution by topic") + (isCount ? " — # of applicable FLWs" : (excl ? " — % of applicable FLWs (stacks to 100%)" : " — % of claimed FLWs (stacks to 100%)")) }, legend: { position: "bottom", title: { display: true, text: "⇄ Toggle: click any status in the legend below to show / hide it in the chart", color: "#4f46e5", font: { weight: "bold", size: 11 } } },
+        plugins: { title: { display: true, text: (topicGroupMode === "theme" ? "FLW status distribution by THEME (related topics pooled)" : "FLW status distribution by topic") + (isCount ? " — # of applicable slots" : (excl ? " — % of applicable slots (stacks to 100%)" : " — % of all slots (incl. cohorts the topic isn't in)")) }, legend: { position: "bottom", title: { display: true, text: "⇄ Toggle: click any status in the legend below to show / hide it in the chart", color: "#4f46e5", font: { weight: "bold", size: 11 } } },
           tooltip: { callbacks: { label: function (ctx) { return ctx.dataset.label + ": " + ctx.parsed.x + (isCount ? "" : "%"); } } } },
-        scales: { x: { stacked: true, max: isCount ? maxApp : 100, title: { display: true, text: isCount ? "# of FLWs the topic applies to" : "% of claimed FLWs" } }, y: { stacked: true, ticks: { autoSkip: false, font: { size: 10 } } } } }
+        scales: { x: { stacked: true, max: isCount ? maxApp : 100, title: { display: true, text: isCount ? "# of slots the topic applies to" : (excl ? "% of applicable slots" : "% of all slots") } }, y: { stacked: true, ticks: { autoSkip: false, font: { size: 10 } } } } }
     });
     return function () { if (barInst.current) { barInst.current.destroy(); barInst.current = null; } };
   }, [activeTab, tableSub, topicChart, tcMode, topicGroupMode, naMode]);
@@ -289,7 +305,10 @@ function WorkflowUI(props) {
     var st = ce.started, fin = ce.finished, N = st.length, tot = st[N - 1] || 1;
     var thr = Math.max(2, (thrPct / 100) * tot), last = 0;
     for (var n = 1; n < N; n++) { if ((st[n] - st[n - 1]) + (fin[n] - fin[n - 1]) >= thr) last = n; }
-    return Math.max(last, 1);   // always keep >= 2 points
+    // keep >= 2 points, but never index past the last week: a 1-week series (every newly onboarded
+    // cohort passes through one, and per-LLO splits are shorter than the parent) would otherwise
+    // return 1 for N===1 and blow up the whole render at full.weeks[aEnd].
+    return Math.min(Math.max(last, 1), Math.max(N - 1, 0));
   }
   // Return a copy of an engagement series sliced to weeks [0..endIdx].
   function sliceCe(ce, endIdx) {
@@ -428,7 +447,7 @@ function WorkflowUI(props) {
           var nf = full.weeks.length - 1;
           var started = full.total_started, finished = full.finished_pct[nf], drop = full.drop_pct[nf];
           var activeNow = full.active[nf];
-          var endTxt = (function () { var p = full.weeks[aEnd].split("-"); return MON[parseInt(p[1], 10) - 1] + " " + parseInt(p[2], 10); })();
+          var endTxt = full.weeks[aEnd] ? fmtWk(full.weeks[aEnd]) : "";   // guarded; was an inline copy of fmtWk
           var kpi = [
             { label: "Started interviewing", val: started, sub: "unique FLWs", color: "#1565C0" },
             { label: "Finished", val: finished + "%", sub: "completed all interviews", color: "#00695C" },
@@ -561,7 +580,10 @@ function WorkflowUI(props) {
   }
 
   var c = DATA.counts;
-  var maxIv = Math.max.apply(null, (DATA.dropoff.subgroups || []).map(function (s) { return s.interviews.length; }));
+  // Math.max.apply(null, []) is -Infinity, which is truthy — so a `|| 1` guard would NOT rescue it and
+  // Array.apply(null, {length: -Infinity}) throws, blanking the whole dashboard. Check length first.
+  var _ivLens = (DATA.dropoff.subgroups || []).map(function (s) { return s.interviews.length; });
+  var maxIv = _ivLens.length ? Math.max.apply(null, _ivLens) : 1;
   // ---- Full Retention Table: build a flat matrix (for copy/CSV export) ----
   function retentionMatrix() {
     var cols = ["Subgroup", "Cohorts", "Invited", "Accepted", "Started Learn", "Completed Learn", "Claimed", "FLW Reg", "# Initiated"];
@@ -616,7 +638,9 @@ function WorkflowUI(props) {
       var topics = SUBGROUP_DESIGN[r.g] || [], cb = {};
       topics.forEach(function (t, i) { cb[t] = r.s[i]; });
       var row = [r.f, r.c, r.g];
-      MTOPICS.forEach(function (t) { row.push(t in cb ? STATE_LABEL[STATES[cb[t]]] : ""); });
+      // cb[t] == null (not `t in cb`): if a design gains a topic before the matrix builder catches up,
+      // the key exists with an undefined value and `in` would let it through as the string "undefined".
+      MTOPICS.forEach(function (t) { row.push(cb[t] == null ? "" : STATE_LABEL[STATES[cb[t]]]); });
       rows.push(row);
     });
     return rows;
@@ -656,7 +680,42 @@ function WorkflowUI(props) {
       });
   var gq = gSearch.trim().toLowerCase();
   // ---- per-(FLW × cohort) × topic matrix + a connect_id lookup for filtering both tables ----
-  var FM = DATA.flwMatrix || [];
+  // flwMatrix arrives compact (payload-size trim): flwMatrixV2 = one string per unique FLW,
+  //   "<f>|<cohortIdx>:<stateDigits>[u]|<cohortIdx>:<stateDigits>[u]…"
+  // cohortIdx indexes flwMatrixCohorts; stateDigits is one digit per topic; a trailing "u" is the
+  // untrained flag. flwMatrixOrder[cohortIdx] is a run of fixed-width (flwMatrixOrderW) base36
+  // indices into flwMatrixV2 that restores the ORIGINAL row order (the matrix table paginates and
+  // exports in array order, so order is user-visible). Falls back to the old uncompressed
+  // DATA.flwMatrix when flwMatrixV2 is absent, so this render works with old and new payloads.
+  var FM = (function () {
+    if (!DATA.flwMatrixV2) return DATA.flwMatrix || [];
+    var CH = DATA.flwMatrixCohorts || [], V2 = DATA.flwMatrixV2;
+    var ORD = DATA.flwMatrixOrder || [], W = DATA.flwMatrixOrderW || 3;
+    var per = [];
+    for (var i = 0; i < V2.length; i++) {
+      var parts = V2[i].split("|"), cells = {};
+      for (var j = 1; j < parts.length; j++) {
+        var p = parts[j], k = p.indexOf(":");
+        var body = p.slice(k + 1), u = 0;
+        if (body.charAt(body.length - 1) === "u") { u = 1; body = body.slice(0, -1); }
+        var st = [];
+        for (var q = 0; q < body.length; q++) st.push(+body.charAt(q));
+        cells[p.slice(0, k)] = { s: st, u: u };
+      }
+      per.push({ f: parts[0], cells: cells });
+    }
+    var rows = [];
+    for (var ci = 0; ci < CH.length; ci++) {
+      var seq = ORD[ci] || "";
+      for (var off = 0; off + W <= seq.length; off += W) {
+        var e = per[parseInt(seq.substr(off, W), 36)], cell = e.cells[ci];
+        var row = { f: e.f, c: CH[ci], s: cell.s };
+        if (cell.u) row.u = 1;
+        rows.push(row);
+      }
+    }
+    return rows;
+  })();
   var CSG = DATA.cohortSG || {};   // cohort -> subgroup (flwMatrix rows drop their own g to save payload; re-derive here)
   var flwInfo = {};   // connect_id -> { g: subgroup, cohorts: {cohort:1}, u: untrained }
   var cohortSG = {};  // cohort id -> subgroup (global, for session-level subgroup filtering)
@@ -769,7 +828,7 @@ function WorkflowUI(props) {
         <div className="flex justify-between items-start">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Connect Interviews Labs Dashboard</h1>
-            <p className="text-xs text-gray-400 mt-1">Data as of {DATA.built_at || DATA.today || "—"} · auto-refreshes daily ~06:00 UTC</p>
+            <p className="text-xs text-gray-400 mt-1">Data as of {DATA.built_at || DATA.today || "—"} · auto-refreshes daily ~04:40 UTC</p>
           </div>
           <button onClick={function () { window.location.reload(); }}
             title="Data is rebuilt by the daily job; this just reloads the page — it does not pull new data on click."
@@ -811,7 +870,10 @@ function WorkflowUI(props) {
         {activeTab === "overview" && (
           <div className="p-4 space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-              {[["Cohorts", c.cohorts], ["Unique FLWs", c.flws], ["Interviews started", c.started],
+              {/* "FLWs reached" not "Unique FLWs": counts.flws is the TRIGGERED universe (1,449), which is
+                  looser than the FLW Retention tab's 1,441 "started ≥1 interview". Naming the base stops the
+                  two tabs reading as a contradiction. */}
+              {[["Cohorts", c.cohorts], ["FLWs reached", c.flws], ["Interviews started", c.started],
                 ["Interviews completed", c.completed], ["% completed", pctOf(c.completed, c.started)]].map(function (kv) {
                 return (
                   <div key={kv[0]} className="bg-gray-50 rounded-lg p-3">
@@ -959,7 +1021,7 @@ function WorkflowUI(props) {
                 {gView === "matrix" && (
                   <div>
                     <div className="px-1 pb-1 text-xs text-gray-500">
-                      {matFiltered.length} FLW×cohort rows{anyFilter ? " matching" : ""} · one row per claimed FLW, one column per topic — hover a cell for its status.
+                      {matFiltered.length} FLW×cohort rows{anyFilter ? " matching" : ""} · one row per FLW × cohort in the matrix universe, one column per topic — hover a cell for its status.
                     </div>
                     <div className="flex flex-wrap gap-x-3 gap-y-1 px-1 pb-2 text-xs text-gray-500">
                       {STATES5.map(function (s) {
@@ -984,7 +1046,7 @@ function WorkflowUI(props) {
                                 <td className={td}>{r.c}</td>
                                 <td className={td + " text-gray-500"}>{r.g}</td>
                                 {MTOPICS.map(function (t) {
-                                  if (!(t in cb)) return <td key={t} className="px-2 py-1 text-center text-gray-200">·</td>;
+                                  if (cb[t] == null) return <td key={t} className="px-2 py-1 text-center text-gray-200">·</td>;
                                   var code = cb[t];
                                   var _sid = sessByKey[r.f + "|" + t];
                                   var _cell = _sid
@@ -1014,8 +1076,13 @@ function WorkflowUI(props) {
 
             {tableSub === "topiccomplete" && (
               <div className="space-y-4">
-                <p className="text-xs text-gray-400 px-1">Per-FLW status by topic, across all claimed FLWs (each topic stacks to 100%). Click a topic to break it down by cohort.</p>
-                <p className="text-xs text-gray-400 px-1">Each bar counts <span className="font-medium text-gray-500">enrollment slots</span> for that topic (claimed FLW × cohort — the completion-rate base), not unique FLWs. It includes people enrolled but not yet started, and counts anyone in two cohorts twice, so a bar can exceed the Overview unique-FLW total.</p>
+                <p className="text-xs text-gray-400 px-1">Per-FLW status by topic, across every FLW × cohort slot (each topic stacks to 100%). Click a topic to break it down by cohort.</p>
+                <p className="text-xs text-gray-400 px-1">Each bar counts <span className="font-medium text-gray-500">enrollment slots</span> for that topic (FLW × cohort — the completion-rate base), not unique FLWs. It includes people enrolled but not yet started, and counts anyone in two cohorts twice, so a bar can exceed the Overview unique-FLW total.</p>
+                <p className="text-xs px-1 text-gray-500">
+                  <b>% base:</b> {naMode === "exclude"
+                    ? <span>share of <b>applicable</b> slots — the topic row, its by-cohort rows and the chart all use the same base.</span>
+                    : <span>the topic row shows share of <b>all</b> slots (including cohorts where the topic isn't in the design), while its by-cohort rows show share of <b>applicable</b> slots. Switch <i>Not applicable</i> to <i>Exclude</i> to put everything on one base.</span>}
+                </p>
                 <div className="flex flex-wrap items-center gap-2 px-1">
                   <span className="text-xs text-gray-400">Group:</span>
                   {subBtn(topicGroupMode, "topic", setTopicGroupMode, "By topic")}
@@ -1034,7 +1101,7 @@ function WorkflowUI(props) {
                   )}
                 </div>
                 {topicChart === "stacked" && tcMode === "pct" && naMode === "exclude" && (
-                  <p className="text-xs text-gray-400 px-1">Excludes “not applicable”: the 5 real statuses rescale to <span className="font-medium text-gray-500">100% of the interviews that apply</span>.</p>
+                  <p className="text-xs text-gray-400 px-1">Excludes “not applicable”: the remaining statuses rescale to <span className="font-medium text-gray-500">100% of the interviews that apply</span>.</p>
                 )}
                 {topicGroupMode === "theme" && (
                   <p className="text-xs text-gray-400 px-1">Related topics pooled into themes (interview-level sum): <span className="font-medium text-gray-500">Malaria</span> = B,1,2,10,10S,10L,14 · <span className="font-medium text-gray-500">Water &amp; Diarrhea</span> = D,11,11S,11L · <span className="font-medium text-gray-500">Community &amp; FLW Profile</span> = E,12 · <span className="font-medium text-gray-500">Antibiotics &amp; ACT Use</span> = 8,8S,8L · <span className="font-medium text-gray-500">Medicine Quality</span> = 9,13,13L. Topics not in a theme stay individual.</p>
@@ -1063,13 +1130,21 @@ function WorkflowUI(props) {
                         var open = !!topicExp[t.code];
                         var has = (DATA.topicStatusCohort[t.code] || []).length > 0;
                         function p(s, tot) { return tcMode === "count" ? s : (tot ? Math.round(1000 * s / tot) / 10 + "%" : "—"); }
+                        // The parent row used to divide by t.total (EVERY slot, including cohorts where the
+                        // topic isn't in the design) while the cohort rows below it divide by the applicable
+                        // base — so one screen showed 41.0% and 94.5% for the same topic. The parent now
+                        // follows the same Not-applicable mode as the chart, which makes all three agree in
+                        // Exclude mode; in Include mode the base is stated in the header instead.
+                        var pTot = naMode === "exclude" ? (t.applicable || 0) : t.total;
                         var rows = [];
                         rows.push(
                           <tr key={t.code} className={"hover:bg-gray-50 " + (has ? "cursor-pointer" : "")}
                             onClick={has ? function () { var n = Object.assign({}, topicExp); n[t.code] = !open; setTopicExp(n); } : null}>
                             <td className={td + " font-medium"}>{has ? (open ? "▾ " : "▸ ") : ""}{t.code} · {TOPIC_NAMES[t.code] || t.code}</td>
                             {BAR_ORDER.map(function (s) {
-                              return <td key={s} className={td + " text-right" + (s === "completed" ? " text-green-700 font-medium" : " text-gray-600")}>{p(t[s], t.total)}</td>;
+                              // in Exclude mode "not applicable" is outside the base, so a % of it is meaningless
+                              var cell = (naMode === "exclude" && s === "not-applicable" && tcMode !== "count") ? "—" : p(t[s], pTot);
+                              return <td key={s} className={td + " text-right" + (s === "completed" ? " text-green-700 font-medium" : " text-gray-600")}>{cell}</td>;
                             })}
                           </tr>
                         );
@@ -1138,10 +1213,13 @@ function WorkflowUI(props) {
               <span className="text-xs font-medium text-gray-600">Denominator:</span>
               {subBtn(denomMode, "init", setDenomMode, "# Initiated")}
               {subBtn(denomMode, "prev", setDenomMode, "Reached prev interview")}
-              <span className="text-gray-400" style={{ fontSize: "10px" }} title="# Initiated: % Started = started ÷ FLWs who initiated (constant base) — later interviews look low because many FLWs haven't reached them.\nReached prev interview: denominator = FLWs who STARTED the previous interview, so each point is 'of those who got here, how many started this one' — later interviews no longer collapse.">ℹ</span>
+              <span className="text-gray-400" style={{ fontSize: "10px" }} title={"# Initiated: % Started = started ÷ FLWs who initiated (constant base) — later interviews look low because many FLWs haven't reached them.\nReached prev interview: denominator = FLWs who STARTED the previous interview, so each point is 'of those who got here, how many started this one' — later interviews no longer collapse."}>ℹ</span>
               <span className="mx-1 text-gray-300">|</span>
               <span className="text-xs font-medium text-gray-600">X-axis:</span>
-              {subBtn(lineMode, "pct", setLineMode, "By interview #")}
+              {/* in prev-denominator mode the chart is forced onto the interview-# axis, so show that
+                  option as active even though lineMode is preserved for when the user switches back —
+                  otherwise neither option looks selected. */}
+              {subBtn(denomMode === "prev" ? "pct" : lineMode, "pct", setLineMode, "By interview #")}
               {denomMode === "prev"
                 ? <span className="text-gray-300 line-through" title="Calendar-day view isn't available with the reached-prev denominator">By calendar day</span>
                 : subBtn(lineMode, "time", setLineMode, "By calendar day")}
@@ -1153,7 +1231,7 @@ function WorkflowUI(props) {
                 <span className="inline-flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
                   <span title={"FLWs removed from the last interview's Started (started last but not penultimate, triggered back-to-back):\n" + Object.keys(DATA.deimpact || {}).sort().map(function (sg) { return "  " + sg + ": " + DATA.deimpact[sg].count; }).join("\n") + "\n  Total: " + Object.keys(DATA.deimpact || {}).reduce(function (a, sg) { return a + DATA.deimpact[sg].count; }, 0)}
                     className="cursor-help font-bold border border-amber-400 rounded-full w-4 h-4 inline-flex items-center justify-center shrink-0">ℹ</span>
-                  Removes FLWs who started only the LAST interview (skipped the penultimate — triggered back-to-back) from the last interview's Started, revealing the true decline. Hover ℹ for per-subgroup counts. Affects the line chart &amp; drop-off %Started below.
+                  Removes FLWs who started only the LAST interview (skipped the penultimate — triggered back-to-back) from the last interview's Started, revealing the true decline. Hover ℹ for per-subgroup counts. Affects {denomMode === "prev" ? "the drop-off %Started table below only — the reached-prev line chart has its own denominator and is not de-impacted" : "the line chart & drop-off %Started below"}.
                 </span>
               ) : null}
             </div>
@@ -1249,7 +1327,13 @@ function WorkflowUI(props) {
                               {cos.map(function (co) {
                                 return (
                                   <div key={co.cohort}>
-                                    <div className="text-xs font-medium text-gray-500 mb-1">{co.cohort} — {co.interviews.length} interview{co.interviews.length === 1 ? "" : "s"}</div>
+                                    <div className="text-xs font-medium text-gray-500 mb-1">
+                                      {co.cohort} — {co.interviews.length} interview{co.interviews.length === 1 ? "" : "s"}
+                                      {/* de-impact is only computed at subgroup level, so these rows stay RAW.
+                                          Say so, otherwise the parent row's Started looks like it disagrees with
+                                          the sum of its own children (e.g. ABT1-B Int 4: 131 vs 171). */}
+                                      {deImpact ? <span className="ml-2 text-amber-700 font-normal">· raw (de-impact applies to the subgroup row above, not per-cohort)</span> : null}
+                                    </div>
                                     <table className="min-w-full border border-gray-200 rounded-md overflow-hidden">
                                       <thead className="bg-white"><tr>
                                         <th className={th + " text-left"}>Int</th><th className={th + " text-left"}>Topic</th>
@@ -1462,7 +1546,7 @@ function WorkflowUI(props) {
 
             {bdSub === "ab" && (
               <div className="overflow-x-auto">
-                <p className="text-xs text-gray-400 px-1 py-1">A/B experimental arms (ABT1 &amp; ABT2 only). % Completed = completed ÷ started.</p>
+                <p className="text-xs text-gray-400 px-1 py-1">A/B experimental arms ({(DATA.table3 || []).filter(function (r) { return r.key !== "Overall"; }).map(function (r) { return r.key; }).join(", ")}; Overall = their sum). % Completed = completed ÷ started.</p>
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50"><tr>
                     <th className={th + " text-left"}>Arm</th><th className={th + " text-right"}>FLWs Started</th>
@@ -1494,7 +1578,7 @@ function WorkflowUI(props) {
           if (!FE.n_flws) return <div className="p-6 text-sm text-gray-500">FLW-level analysis not available in this build.</div>;
           var N = FE.n_flws;
           var TIER_COLOR = { Champion: "#065f46", Solid: "#2E7D32", Slipping: "#F9A825", "At-risk": "#EF6C00", Lost: "#C62828" };
-          var PERSONA_COLOR = { Champion: "#065f46", "Steady finisher": "#2E7D32", "Slow-but-finishing": "#F9A825", "Re-engager": "#1565C0", "Early dropper": "#EF6C00", "One-and-done": "#C62828", Lapsed: "#9ca3af" };
+          var PERSONA_COLOR = { Champion: "#065f46", "Steady finisher": "#2E7D32", "Partial progress": "#F9A825", "Re-engager": "#1565C0", "Early dropper": "#EF6C00", "One-and-done": "#C62828", Lapsed: "#9ca3af" };
           var healthy = (FE.tiers || []).filter(function (t) { return t.k === "Champion" || t.k === "Solid"; }).reduce(function (a, t) { return a + t.pct; }, 0);
           var cc = FE.crossCohort || { multi: {}, single: {}, dist: [] };
           // horizontal bar row
@@ -1518,71 +1602,225 @@ function WorkflowUI(props) {
               </div>
             );
           };
+          // ---- interactive cross-filter over the per-FLW micro block ------------------------------
+          // FE.micro carries one character per FLW per dimension (no identifier), so the whole tab can
+          // re-slice client-side: click any bar and every other panel re-computes for that segment.
+          var M = FE.micro;
+          var DIMS = [["state", "State"], ["llo", "Partner (LLO)"], ["type", "Cadre"],
+                      ["tier", "Engagement tier"], ["persona", "Behavioural persona"],
+                      ["nco", "Cohorts they were in"], ["fin", "Finished a schedule?"]];
+          var DIM_COLOR = { state: "#1565C0", llo: "#6d28d9", type: "#00695C", tier: "#0f766e", persona: "#b45309", nco: "#7c3aed", fin: "#065f46" };
+          function unpackNum(spec) {
+            var out = [], i, w = spec.w, s = spec.s;
+            for (i = 0; i < s.length; i += w) out.push(parseInt(s.substr(i, w), 36));
+            return out;
+          }
+          var NUM = {}, dimOK = !!(M && M.n && M.col && M.dict);
+          if (dimOK) { Object.keys(M.num || {}).forEach(function (k) { NUM[k] = unpackNum(M.num[k]); }); }
+          var selKeys = Object.keys(flwSel).filter(function (k) { return (flwSel[k] || []).length; });
+          var filtered = selKeys.length > 0;
+          // mask, optionally ignoring one dimension's own filter (so you can still see/deselect its
+          // other values — standard cross-filter behaviour)
+          function maskFor(skipDim) {
+            var m = [], i, j, ok, k;
+            for (i = 0; i < (dimOK ? M.n : 0); i++) {
+              ok = true;
+              for (j = 0; j < selKeys.length; j++) {
+                k = selKeys[j];
+                if (k === skipDim) continue;
+                if (flwSel[k].indexOf(+M.col[k].charAt(i)) < 0) { ok = false; break; }
+              }
+              m.push(ok);
+            }
+            return m;
+          }
+          var MASK = dimOK ? maskFor(null) : [];
+          function median(a) { if (!a.length) return 0; var b = a.slice().sort(function (x, y) { return x - y; }); var h = b.length >> 1; return b.length % 2 ? b[h] : Math.round((b[h - 1] + b[h]) / 2); }
+          var FIN_IDX = dimOK ? (M.dict.fin || []).indexOf("Finished ≥1 schedule") : -1;
+          function stats(mask) {
+            var n = 0, fin = 0, pcf = 0, fd = [], dp = [], deep = [], i;
+            for (i = 0; i < mask.length; i++) {
+              if (!mask[i]) continue;
+              n++;
+              if (FIN_IDX >= 0 && +M.col.fin.charAt(i) === FIN_IDX) fin++;
+              pcf += (NUM.pcf || [])[i] || 0;
+              fd.push((NUM.fdepth || [])[i] || 0);
+              dp.push((NUM.depth || [])[i] || 0);
+              deep.push((NUM.deep || [])[i] || 0);
+            }
+            return { n: n, any: n ? Math.round(100 * fin / n) : 0, pc: n ? Math.round(pcf / n) : 0,
+                     fdepth: median(fd), depth: median(dp), deep: median(deep) };
+          }
+          var SEL = dimOK ? stats(MASK) : { n: N, any: 0, pc: 0, fdepth: 0, depth: 0, deep: 0 };
+          var ALL = dimOK ? stats(MASK.map(function () { return true; })) : SEL;
+          function toggle(dim, idx) {
+            var cur = (flwSel[dim] || []).slice(), at = cur.indexOf(idx);
+            if (at >= 0) cur.splice(at, 1); else cur.push(idx);
+            var next = {}; Object.keys(flwSel).forEach(function (k) { next[k] = flwSel[k]; });
+            next[dim] = cur; setFlwSel(next);
+          }
+          // one dimension panel: bar length = share of the current selection, right-hand chip = outcome
+          function panel(dim, title) {
+            var dictv = M.dict[dim] || [], col = M.col[dim];
+            var sub = maskFor(dim), i, v;
+            var cnt = dictv.map(function () { return 0; }), tot = 0;
+            var finc = dictv.map(function () { return 0; }), pcs = dictv.map(function () { return 0; });
+            for (i = 0; i < M.n; i++) {
+              if (!sub[i]) continue;
+              v = +col.charAt(i); cnt[v]++; tot++;
+              if (FIN_IDX >= 0 && +M.col.fin.charAt(i) === FIN_IDX) finc[v]++;
+              pcs[v] += (NUM.pcf || [])[i] || 0;
+            }
+            // baseline share of each value across ALL FLWs, for the lift badge
+            var base = dictv.map(function () { return 0; });
+            for (i = 0; i < M.n; i++) base[+col.charAt(i)]++;
+            var rows = dictv.map(function (label, idx) {
+              return { label: label, idx: idx, n: cnt[idx], share: tot ? 100 * cnt[idx] / tot : 0,
+                       baseShare: 100 * base[idx] / M.n,
+                       any: cnt[idx] ? Math.round(100 * finc[idx] / cnt[idx]) : 0,
+                       pc: cnt[idx] ? Math.round(pcs[idx] / cnt[idx]) : 0 };
+            }).filter(function (r) { return r.n > 0 || (flwSel[dim] || []).indexOf(r.idx) >= 0; });
+            rows.sort(function (a, b) { return b.n - a.n; });
+            var maxShare = Math.max.apply(null, rows.map(function (r) { return r.share; }).concat([1]));
+            return (
+              <div key={dim} className="rounded border border-gray-200 bg-white px-3 py-2">
+                <div className="flex items-baseline justify-between mb-1">
+                  <div className="text-xs font-semibold text-gray-700">{title}</div>
+                  {(flwSel[dim] || []).length
+                    ? <button className="text-indigo-600 hover:underline" style={{ fontSize: "10px" }}
+                        onClick={function () { var nx = {}; Object.keys(flwSel).forEach(function (k) { nx[k] = flwSel[k]; }); nx[dim] = []; setFlwSel(nx); }}>clear</button>
+                    : <span className="text-gray-300" style={{ fontSize: "10px" }}>click to filter</span>}
+                </div>
+                {rows.map(function (r) {
+                  var on = (flwSel[dim] || []).indexOf(r.idx) >= 0;
+                  var lift = r.baseShare > 0 ? r.share / r.baseShare : 1;
+                  var showLift = filtered && r.n > 0 && (lift >= 1.3 || lift <= 0.77);
+                  var out = flwMetric === "pc" ? r.pc : r.any;
+                  return (
+                    <div key={r.idx} onClick={function () { toggle(dim, r.idx); }}
+                      title={r.label + " — " + r.n + " FLWs (" + Math.round(r.share) + "% of selection, " + Math.round(r.baseShare) + "% of all). Click to " + (on ? "remove" : "apply") + " this filter."}
+                      className={"flex items-center gap-2 py-0.5 cursor-pointer rounded " + (on ? "bg-indigo-50" : "hover:bg-gray-50")}
+                      style={{ fontSize: "11px" }}>
+                      <div className={"text-right truncate " + (on ? "text-indigo-700 font-semibold" : "text-gray-700")} style={{ width: "118px", flexShrink: 0 }}>
+                        {on ? "✓ " : ""}{r.label}
+                      </div>
+                      <div className="flex-1 bg-gray-100 rounded h-3.5 relative" style={{ minWidth: "60px" }}>
+                        <div className="h-3.5 rounded" style={{ width: Math.max(1, 100 * r.share / maxShare) + "%", backgroundColor: DIM_COLOR[dim] || "#1565C0", opacity: on ? 1 : 0.75 }}></div>
+                      </div>
+                      {showLift
+                        ? <span className={"font-semibold " + (lift >= 1.3 ? "text-rose-600" : "text-gray-400")} style={{ width: "34px", fontSize: "10px" }} title="over/under-represented vs this group's share of all FLWs">
+                            {lift >= 1.3 ? "×" + (Math.round(lift * 10) / 10) : "×" + (Math.round(lift * 10) / 10)}
+                          </span>
+                        : <span style={{ width: "34px" }}></span>}
+                      <div className="text-gray-600 text-right" style={{ width: "62px", flexShrink: 0 }}>{r.n} · {Math.round(r.share)}%</div>
+                      <div className="text-right font-medium" style={{ width: "34px", flexShrink: 0, color: out >= 70 ? "#065f46" : out >= 50 ? "#F9A825" : "#C62828" }}>{out}%</div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          }
+          var chips = [];
+          selKeys.forEach(function (k) {
+            (flwSel[k] || []).forEach(function (idx) {
+              chips.push(
+                <button key={k + idx} onClick={function () { toggle(k, idx); }}
+                  className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 hover:bg-indigo-200" style={{ fontSize: "10px" }}
+                  title="remove this filter">
+                  {(M.dict[k] || [])[idx]} ✕
+                </button>
+              );
+            });
+          });
+          var ds = FE.depthSplit || null;
           return (
             <div className="p-4 space-y-4">
               <div className="text-xs bg-indigo-50 border border-indigo-100 rounded px-3 py-2 text-gray-700">
-                <b>Per-FLW, cross-cohort.</b> One row per unique FLW who started interviewing, with their timeline unioned across every cohort/arm they were part of ({FE.coverage_lga}% have demographics). Engagement tier is an RFM-style blend of recency, completion and answer depth.
+                <b>Per-FLW, cross-cohort.</b> One row per unique FLW who started interviewing, with their timeline unioned across every cohort/arm they were part of ({FE.coverage_lga}% have demographics).
+                {dimOK ? <span> <b>Click any bar to drill in</b> — every other panel re-computes for that segment, and <span className="text-rose-600 font-semibold">×N</span> marks a group that is over-represented in your selection versus the programme as a whole.</span> : null}
               </div>
+
+              {dimOK ? (
+                <div className="flex flex-wrap items-center gap-2 px-1">
+                  <span className="text-xs font-medium text-gray-600">Showing:</span>
+                  {chips.length ? chips : <span className="text-xs text-gray-400">all {N.toLocaleString()} FLWs</span>}
+                  {filtered
+                    ? <button onClick={function () { setFlwSel({}); }} className="px-2 py-0.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-100" style={{ fontSize: "10px" }}>reset</button>
+                    : null}
+                  <span className="mx-1 text-gray-300">|</span>
+                  <span className="text-xs font-medium text-gray-600">Right-hand %:</span>
+                  {subBtn(flwMetric, "pc", setFlwMetric, "Per-cohort finish")}
+                  {subBtn(flwMetric, "any", setFlwMetric, "Finished ≥1")}
+                </div>
+              ) : null}
+
               <div className="flex flex-wrap gap-2 px-1">
-                {card(N.toLocaleString(), "FLWs analysed", "started ≥1 interview", "#1565C0", "k1")}
-                {card(healthy + "%", "Healthy engagers", "Champion + Solid tier", "#065f46", "k2")}
-                {card((cc.dist.filter(function (d) { return d.k !== "1"; }).reduce(function (a, d) { return a + d.pct; }, 0)) + "%", "In multiple cohorts", "re-used across arms", "#6d28d9", "k3")}
-                {card((FE.byState[0] && FE.byState[0].finished) + "%", "Best state finish", (FE.byState[0] && FE.byState[0].k) || "", "#2E7D32", "k4")}
+                {card(SEL.n.toLocaleString(), filtered ? "FLWs in selection" : "FLWs analysed",
+                      filtered ? Math.round(100 * SEL.n / (M.n || 1)) + "% of all " + N.toLocaleString() : "started ≥1 interview", "#1565C0", "k1")}
+                {card(SEL.pc + "%", "Per-cohort finish rate", filtered ? "all FLWs: " + ALL.pc + "%" : "of the schedules they were in", "#065f46", "k2")}
+                {card(SEL.any + "%", "Finished ≥1 schedule", filtered ? "all FLWs: " + ALL.any + "%" : "rises with # cohorts — see note", "#2E7D32", "k3")}
+                {card(SEL.fdepth, "Median first-session words", filtered ? "all FLWs: " + ALL.fdepth : "answer depth at interview 1", "#6d28d9", "k4")}
+                {card(SEL.deep, "Median deepest interview", filtered ? "all FLWs: " + ALL.deep : "furthest interview reached", "#b45309", "k5")}
               </div>
 
-              {/* Cross-cohort headline */}
+              {/* Cross-cohort: the honest version */}
               <div className="rounded border border-purple-200 bg-purple-50 px-3 py-2 text-xs text-gray-700">
-                <b>⭐ Cross-cohort is the norm — and re-use builds engagement, it doesn't fatigue it.</b> {cc.multi.n} FLWs ({100 - (cc.single.n ? Math.round(100 * cc.single.n / N) : 0)}%) span ≥2 cohorts. Multi-cohort FLWs engage <b>deeper</b> (<b>{cc.multi.depth}</b> vs {cc.single.depth} words/session) at the same completion rate ({cc.multi.completion} vs {cc.single.completion}). <span className="text-gray-500">(Their higher "finished" share is partly mechanical — more cohorts = more chances to finish one — so depth is the cleaner signal.)</span>
+                <b>⭐ Most FLWs work across several cohorts — but re-use does not by itself raise finishing.</b>{" "}
+                {cc.multi.n} FLWs ({100 - (cc.single.n ? Math.round(100 * cc.single.n / N) : 0)}%) span ≥2 cohorts. They finish ≥1 schedule far more often ({cc.multi.finished}% vs {cc.single.finished}%) — but that comparison is <b>mechanical</b>: "finished ≥1" is a max over cohorts, so being in three cohorts gives three chances. On the like-for-like measure — the share of <i>their own</i> schedules they complete — multi-cohort FLWs are <b>{cc.multi.finished_pc}%</b> vs <b>{cc.single.finished_pc}%</b> for single-cohort, i.e. flat. Depth is the one place they differ ({cc.multi.depth} vs {cc.single.depth} words/session).
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <div className="text-sm font-semibold text-gray-700 mb-1">Engagement tier</div>
-                  {(FE.tiers || []).map(function (t) { return bar(t.k, t.pct, TIER_COLOR[t.k] || "#9ca3af", t.n + " · " + t.pct + "%", t.k); })}
+              {dimOK ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {DIMS.filter(function (d) { return (M.dict[d[0]] || []).length > 1; }).map(function (d) { return panel(d[0], d[1]); })}
                 </div>
-                <div>
-                  <div className="text-sm font-semibold text-gray-700 mb-1">Behavioral persona</div>
-                  {(FE.personas || []).map(function (t) { return bar(t.k, t.pct, PERSONA_COLOR[t.k] || "#9ca3af", t.n + " · " + t.pct + "%", t.k); })}
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-700 mb-1">Finish rate by state</div>
+                    {(FE.byState || []).map(function (s) { return bar(s.k + " (n=" + s.n + ")", s.finished, "#1565C0", s.finished + "%", "st" + s.k); })}
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold text-gray-700 mb-1">Finish rate by FLW type</div>
+                    {(FE.byType || []).map(function (s) { return bar(s.k + " (n=" + s.n + ")", s.finished, "#00695C", s.finished + "%", "ty" + s.k); })}
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold text-gray-700 mb-1">Finish rate by LLO</div>
+                    {(FE.byLLO || []).map(function (s) { return bar(s.k + " (n=" + s.n + ")", s.finished, "#6d28d9", s.finished + "%", "llo" + s.k); })}
+                  </div>
                 </div>
-              </div>
+              )}
 
+              {/* Early depth */}
+              {ds ? (
+                <div className="rounded border border-gray-200 bg-white px-3 py-2">
+                  <div className="text-sm font-semibold text-gray-700 mb-1">Does answer depth at the FIRST interview predict finishing?</div>
+                  <p className="text-gray-500 text-xs mb-2">FLWs split at the median first-session answer depth ({ds.median} words). Read the per-cohort rate, not "finished ≥1": the deeper group is also in more cohorts, which inflates the ≥1 measure.</p>
+                  <div className="flex flex-wrap gap-2">
+                    {card(ds.hi.finished_pc + "%", "Above-median depth", "per-cohort finish · n=" + ds.hi.n + " · " + ds.hi.first_depth + " words", "#065f46", "fi1")}
+                    {card(ds.lo.finished_pc + "%", "Below-median depth", "per-cohort finish · n=" + ds.lo.n + " · " + ds.lo.first_depth + " words", "#C62828", "fi2")}
+                    {card(ds.hi.finished + "% / " + ds.lo.finished + "%", "Same split, \"finished ≥1\"", "the inflated version, for comparison", "#9ca3af", "fi3")}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* How deep FLWs get */}
               <div>
-                <div className="text-sm font-semibold text-gray-700 mb-1">How deep FLWs get (share reaching each interview)</div>
-                <p className="text-gray-400 mb-1" style={{ fontSize: "10px" }}>Deepest interview reached across an FLW's cohorts. NB: most FLWs are in 2-interview cohorts, so the Int≥3 step reflects who was in a longer-schedule cohort, not only drop-off — see the retention chart for true per-stage survival.</p>
-                {(FE.survival || []).map(function (s) { return bar("reached Int≥" + s.d, s.pct, "#1565C0", s.reached + " · " + s.pct + "%", "sv" + s.d); })}
-              </div>
-
-              {/* First-interview predictor */}
-              <div className="rounded border border-gray-200 bg-white px-3 py-2">
-                <div className="text-sm font-semibold text-gray-700 mb-1">Early engagement depth predicts finishing</div>
-                <p className="text-gray-500 text-xs mb-2">FLWs split at the median answer-depth. Deeper early engagement → much higher completion (the strongest lever in the retention literature).</p>
-                <div className="flex flex-wrap gap-2">
-                  {card((FE.firstIv.hi.finished) + "%", "Above-median depth finish", "n=" + FE.firstIv.hi.n + " · " + FE.firstIv.hi.depth + " words/session", "#065f46", "fi1")}
-                  {card((FE.firstIv.lo.finished) + "%", "Below-median depth finish", "n=" + FE.firstIv.lo.n + " · " + FE.firstIv.lo.depth + " words/session", "#C62828", "fi2")}
-                </div>
-              </div>
-
-              {/* Cross-cuts */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <div className="text-sm font-semibold text-gray-700 mb-1">Finish rate by state</div>
-                  {(FE.byState || []).map(function (s) { return bar(s.k + " (n=" + s.n + ")", s.finished, "#1565C0", s.finished + "%", "st" + s.k); })}
-                </div>
-                <div>
-                  <div className="text-sm font-semibold text-gray-700 mb-1">Finish rate by FLW type</div>
-                  {(FE.byType || []).map(function (s) { return bar(s.k + " (n=" + s.n + ")", s.finished, "#00695C", s.finished + "%", "ty" + s.k); })}
-                </div>
-                <div>
-                  <div className="text-sm font-semibold text-gray-700 mb-1">Finish rate by LLO</div>
-                  {(FE.byLLO || []).map(function (s) { return bar(s.k + " (n=" + s.n + ")", s.finished, "#6d28d9", s.finished + "%", "llo" + s.k); })}
-                </div>
+                <div className="text-sm font-semibold text-gray-700 mb-1">How deep FLWs get</div>
+                <p className="text-gray-400 mb-1" style={{ fontSize: "10px" }}>Share reaching each interview, as a % of the FLWs whose schedule even <i>contains</i> that interview (a 2-interview TRS worker is not a drop-out at interview 3). The grey number is the old "% of everyone" reading.</p>
+                {(FE.survival || []).map(function (s) {
+                  var p = (s.pct_elig == null ? s.pct : s.pct_elig);
+                  return bar("reached Int≥" + s.d, p, "#1565C0",
+                    s.reached + " / " + (s.elig == null ? N : s.elig) + " · " + p + "%", "sv" + s.d);
+                })}
               </div>
 
               <Legend title="How this is built">
                 <div><b>Grain:</b> one row per unique FLW (deduped across cohorts); metrics union their sessions across every arm.</div>
-                <div><b>Tier (RFM):</b> Recency (days since last interview) + completion rate + answer depth (words/session), each scored 1–5.</div>
-                <div><b>Persona:</b> rule-based behavioral segment (Champion / Steady finisher / Slow-but-finishing / Re-engager / Early dropper / One-and-done / Lapsed).</div>
-                <div><b>Finished:</b> completed all scheduled interviews in ≥1 of their cohorts. Full per-FLW detail is in the flw_analysis.csv export.</div>
+                <div><b>Per-cohort finish rate:</b> of all the cohort schedules an FLW was enrolled in, the share they completed. This is the comparable measure — unlike "finished ≥1 schedule", it does not go up simply because someone was in more cohorts.</div>
+                <div><b>Tier (RFM):</b> Recency + completion rate + answer depth, each scored 1–5. Recency is measured against the freshest session in the dataset, not the wall clock, so a lagging data pull cannot push everyone into a worse tier.</div>
+                <div><b>Persona:</b> rule-based behavioural segment. "Partial progress" means ≥50% of triggered interviews done but <i>no</i> schedule finished (it was previously labelled "Slow-but-finishing", which described the opposite of what it selects).</div>
+                <div><b>Drill-down:</b> the tab holds one character per FLW per dimension — attributes only, no identifier — so filtering happens in your browser. "×N" is the group's share of your selection divided by its share of all FLWs.</div>
+                <div><b>Not shown here:</b> full per-FLW detail lives in the flw_analysis.csv export.</div>
               </Legend>
             </div>
           );
