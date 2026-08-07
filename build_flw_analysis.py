@@ -233,6 +233,25 @@ def aggregate(records):
 
     dvals = sorted(x["avg_words_per_session"] for x in records if x["avg_words_per_session"] > 0)
     med = statistics.median(dvals) if dvals else 0
+
+    # ---- deep cuts (for the executive brief): who drops off, arm combos, recoverable at-risk ----
+    def _pct_by(rs, key, top=1):
+        c = Counter(x[key] for x in rs if x[key])
+        n = len(rs) or 1
+        return [{"k": k, "n": v, "pct": round(100 * v / n)} for k, v in c.most_common(top)]
+
+    oad = [x for x in records if x["persona"] == "One-and-done"]
+    oad_med_depth = (
+        statistics.median([x["avg_words_per_session"] for x in oad if x["avg_words_per_session"]]) if oad else 0
+    )
+    champ_med_depth = statistics.median(
+        [x["avg_words_per_session"] for x in records if x["persona"] == "Champion" and x["avg_words_per_session"]]
+        or [0]
+    )
+    at_risk = [
+        x for x in records if not x["finished_any"] and x["recency_days"] is not None and 14 <= x["recency_days"] <= 60
+    ]
+    combos = Counter(x["subgroups"] for x in records if x["n_cohorts"] > 1)
     return {
         "n_flws": len(records),
         "tiers": dist("tier", TIER_ORDER),
@@ -258,6 +277,19 @@ def aggregate(records):
         "byType": crosscut("type_of_flw"),
         "byLLO": crosscut("llos", minn=1),
         "coverage_lga": round(100 * sum(1 for x in records if x["lga"]) / N),
+        # deep cuts for the executive brief
+        "oneAndDone": {
+            "n": len(oad),
+            "pct": round(100 * len(oad) / N),
+            "topState": _pct_by(oad, "state", 1),
+            "topType": _pct_by(oad, "type_of_flw", 1),
+            "singleCohortPct": round(100 * sum(1 for x in oad if x["n_cohorts"] == 1) / (len(oad) or 1)),
+            "medianDepth": round(oad_med_depth),
+        },
+        "champMedianDepth": round(champ_med_depth),
+        "overallSingleCohortPct": round(100 * sum(1 for x in records if x["n_cohorts"] == 1) / N),
+        "atRisk": {"n": len(at_risk), "byState": _pct_by(at_risk, "state", 4)},
+        "armCombos": [{"k": k, "n": v} for k, v in combos.most_common(5)],
     }
 
 
