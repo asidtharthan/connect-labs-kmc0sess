@@ -14,8 +14,10 @@ python checkpoint.py rollback cp-0001     # prints the runbook
 |---|---|---|---|---|---|---|---|---|---|---|
 | **cp-0001** | 2026-08-07 16:40 | `73f81476` | `cp-0001-last-known-good-live-state-render-v140-p` | 140 | — | — | — | — | — | last known-good live state (render v140, pre-audit) |
 | **cp-0002** | 2026-08-07 16:41 | `205d5ff6` | `cp-0002-audit-fixes-blocking-gates-blank-chart-f` | 140 | 27/27 | 39/39 | 193/193 | 351.0 | 161.0 | audit fixes: blocking gates, blank-chart fix, corrected FLW stats, interactive tab, 42% smaller payload |
+| **cp-0003** | 2026-08-07 17:07 | `baa9a482` | `cp-0003-four-follow-ups-not-triggered-state-wide` | 140 | 27/27 | 39/39 | 196/196 | 358.3 | 153.7 | four follow-ups: not-triggered state, widened universe, single % base, regression guard |
 
 ## Notes
 
 - **cp-0001 — last known-good live state (render v140, pre-audit)**: The state stakeholders were using before the audit. Gates were ADVISORY at this commit, so its 6b was actually failing 37/38 in CI while still publishing — recorded here as the rollback floor, not as a clean bill of health.
 - **cp-0002 — audit fixes: blocking gates, blank-chart fix, corrected FLW stats, interactive tab, 42% smaller payload**: PR #69. Gates are now able to fail the job (this is the change that matters most). Programme-level numbers on all other tabs are byte-identical to cp-0001; only the FLW Retention tab's metric DEFINITIONS changed, plus labels.
+- **cp-0003 — four follow-ups: not-triggered state, widened universe, single % base, regression guard**: PR #69 head, awaiting merge+publish. Gates 6a 27/27 / 6b 39/39 / brutal 196/196 (+section H regression guard). Numbers that MOVE vs cp-0002: missed-overdue 5467->426 (92% were never sent), matrix rows 3326->3407 recovering 163 started/138 completed, topic parent-row % base now follows the N/A toggle.
