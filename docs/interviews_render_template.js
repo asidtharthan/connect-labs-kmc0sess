@@ -251,9 +251,9 @@ function WorkflowUI(props) {
             data: tsRows.map(function (t) { if (isCount) return t[st] || 0; var denom = excl ? (t.applicable || 0) : (t.total || 0); return denom ? Math.round(1000 * t[st] / denom) / 10 : 0; }),
             backgroundColor: STATE_COLOR[st] }; }) },
       options: { responsive: true, maintainAspectRatio: false, indexAxis: "y",
-        plugins: { title: { display: true, text: (topicGroupMode === "theme" ? "FLW status distribution by THEME (related topics pooled)" : "FLW status distribution by topic") + (isCount ? " — # of applicable FLWs" : (excl ? " — % of applicable FLWs (stacks to 100%)" : " — % of claimed FLWs (stacks to 100%)")) }, legend: { position: "bottom", title: { display: true, text: "⇄ Toggle: click any status in the legend below to show / hide it in the chart", color: "#4f46e5", font: { weight: "bold", size: 11 } } },
+        plugins: { title: { display: true, text: (topicGroupMode === "theme" ? "FLW status distribution by THEME (related topics pooled)" : "FLW status distribution by topic") + (isCount ? " — # of applicable slots" : (excl ? " — % of applicable slots (stacks to 100%)" : " — % of all slots (incl. cohorts the topic isn't in)")) }, legend: { position: "bottom", title: { display: true, text: "⇄ Toggle: click any status in the legend below to show / hide it in the chart", color: "#4f46e5", font: { weight: "bold", size: 11 } } },
           tooltip: { callbacks: { label: function (ctx) { return ctx.dataset.label + ": " + ctx.parsed.x + (isCount ? "" : "%"); } } } },
-        scales: { x: { stacked: true, max: isCount ? maxApp : 100, title: { display: true, text: isCount ? "# of FLWs the topic applies to" : "% of claimed FLWs" } }, y: { stacked: true, ticks: { autoSkip: false, font: { size: 10 } } } } }
+        scales: { x: { stacked: true, max: isCount ? maxApp : 100, title: { display: true, text: isCount ? "# of slots the topic applies to" : (excl ? "% of applicable slots" : "% of all slots") } }, y: { stacked: true, ticks: { autoSkip: false, font: { size: 10 } } } } }
     });
     return function () { if (barInst.current) { barInst.current.destroy(); barInst.current = null; } };
   }, [activeTab, tableSub, topicChart, tcMode, topicGroupMode, naMode]);
@@ -1021,7 +1021,7 @@ function WorkflowUI(props) {
                 {gView === "matrix" && (
                   <div>
                     <div className="px-1 pb-1 text-xs text-gray-500">
-                      {matFiltered.length} FLW×cohort rows{anyFilter ? " matching" : ""} · one row per claimed FLW, one column per topic — hover a cell for its status.
+                      {matFiltered.length} FLW×cohort rows{anyFilter ? " matching" : ""} · one row per FLW × cohort in the matrix universe, one column per topic — hover a cell for its status.
                     </div>
                     <div className="flex flex-wrap gap-x-3 gap-y-1 px-1 pb-2 text-xs text-gray-500">
                       {STATES5.map(function (s) {
@@ -1076,7 +1076,7 @@ function WorkflowUI(props) {
 
             {tableSub === "topiccomplete" && (
               <div className="space-y-4">
-                <p className="text-xs text-gray-400 px-1">Per-FLW status by topic, across all claimed FLWs (each topic stacks to 100%). Click a topic to break it down by cohort.</p>
+                <p className="text-xs text-gray-400 px-1">Per-FLW status by topic, across every FLW × cohort slot (each topic stacks to 100%). Click a topic to break it down by cohort.</p>
                 <p className="text-xs text-gray-400 px-1">Each bar counts <span className="font-medium text-gray-500">enrollment slots</span> for that topic (FLW × cohort — the completion-rate base), not unique FLWs. It includes people enrolled but not yet started, and counts anyone in two cohorts twice, so a bar can exceed the Overview unique-FLW total.</p>
                 <p className="text-xs px-1 text-gray-500">
                   <b>% base:</b> {naMode === "exclude"
@@ -1101,7 +1101,7 @@ function WorkflowUI(props) {
                   )}
                 </div>
                 {topicChart === "stacked" && tcMode === "pct" && naMode === "exclude" && (
-                  <p className="text-xs text-gray-400 px-1">Excludes “not applicable”: the 5 real statuses rescale to <span className="font-medium text-gray-500">100% of the interviews that apply</span>.</p>
+                  <p className="text-xs text-gray-400 px-1">Excludes “not applicable”: the remaining statuses rescale to <span className="font-medium text-gray-500">100% of the interviews that apply</span>.</p>
                 )}
                 {topicGroupMode === "theme" && (
                   <p className="text-xs text-gray-400 px-1">Related topics pooled into themes (interview-level sum): <span className="font-medium text-gray-500">Malaria</span> = B,1,2,10,10S,10L,14 · <span className="font-medium text-gray-500">Water &amp; Diarrhea</span> = D,11,11S,11L · <span className="font-medium text-gray-500">Community &amp; FLW Profile</span> = E,12 · <span className="font-medium text-gray-500">Antibiotics &amp; ACT Use</span> = 8,8S,8L · <span className="font-medium text-gray-500">Medicine Quality</span> = 9,13,13L. Topics not in a theme stay individual.</p>
@@ -1327,7 +1327,13 @@ function WorkflowUI(props) {
                               {cos.map(function (co) {
                                 return (
                                   <div key={co.cohort}>
-                                    <div className="text-xs font-medium text-gray-500 mb-1">{co.cohort} — {co.interviews.length} interview{co.interviews.length === 1 ? "" : "s"}</div>
+                                    <div className="text-xs font-medium text-gray-500 mb-1">
+                                      {co.cohort} — {co.interviews.length} interview{co.interviews.length === 1 ? "" : "s"}
+                                      {/* de-impact is only computed at subgroup level, so these rows stay RAW.
+                                          Say so, otherwise the parent row's Started looks like it disagrees with
+                                          the sum of its own children (e.g. ABT1-B Int 4: 131 vs 171). */}
+                                      {deImpact ? <span className="ml-2 text-amber-700 font-normal">· raw (de-impact applies to the subgroup row above, not per-cohort)</span> : null}
+                                    </div>
                                     <table className="min-w-full border border-gray-200 rounded-md overflow-hidden">
                                       <thead className="bg-white"><tr>
                                         <th className={th + " text-left"}>Int</th><th className={th + " text-left"}>Topic</th>

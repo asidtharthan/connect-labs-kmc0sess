@@ -12,14 +12,6 @@ import build_master_4src as bm
 import build_flw_analysis as bfa  # per-FLW cross-cohort rollup (import-safe; reuses cached bm)
 import topic_status_lib as _tsl  # shared slot-state rule (also used by build_payload_agg)
 
-STATES_NA = [
-    "completed",
-    "started-not-completed",
-    "available-missed-overdue",
-    "available-not-started",
-    "not-available-yet",
-]
-
 payload = json.loads(open("payload_agg.json", encoding="utf-8").read())
 cohort_meta = json.loads(open("cohort_meta.json", encoding="utf-8").read())
 # Present subgroups (in display order) come from the payload — auto-load: PANEL/ABT3 fold in only

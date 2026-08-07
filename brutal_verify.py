@@ -352,6 +352,14 @@ for row in snap:
     cohort_sg[c] = sg
     if pdt(row.get("date_claimed")) and u:
         cohort_claimed[c].add(u)
+# ...plus cohorts that exist in CommCare but not (yet) in the Connect snapshot. build_master_4src
+# unions those into cohort_info, so a Connect-pending cohort DOES appear on the dashboard; deriving
+# cohort_sg from the snapshot alone would omit it here and false-fail every topic on the day a new
+# cohort launches (the documented 2026-08-04 lag), blocking the publish for no reason.
+for r in R:
+    c = (r.get("cohort_id") or "").strip()
+    if c and c not in cohort_sg and not is_test(c) and cohort_to_sg(c):
+        cohort_sg[c] = cohort_to_sg(c)
 
 
 def status_for(flw, cohort, sg, topic):
@@ -369,7 +377,8 @@ def status_for(flw, cohort, sg, topic):
     if m:
         if td and n < len(topics) and TODAY >= td + timedelta(days=n * cad): return "available-missed-overdue"
         return "available-not-started"
-    if td and TODAY < td + timedelta(days=(n - 1) * cad): return "not-available-yet"
+    if not td or not cad: return "available-not-started"   # schedule unknown -> not provably due
+    if TODAY < td + timedelta(days=(n - 1) * cad): return "not-available-yet"
     return "not-triggered"
 
 

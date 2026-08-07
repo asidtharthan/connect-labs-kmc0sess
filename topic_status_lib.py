@@ -60,9 +60,14 @@ def status_for(topic, topics, master_row, training_date, cadence, today):
             return "available-missed-overdue"
         return "available-not-started"
     # no trigger form for this slot
-    if training_date and cadence and today < training_date + timedelta(days=(n - 1) * cadence):
+    if not training_date or not cadence:
+        # We don't know this cohort's schedule (it exists in CommCare but not in the Connect snapshot,
+        # so training_date is None — the documented 2026-08-04 case). Without a schedule we cannot say
+        # the interview was DUE, so we must not accuse the pipeline of missing it either.
+        return "available-not-started"
+    if today < training_date + timedelta(days=(n - 1) * cadence):
         return "not-available-yet"  # not due yet — nothing has gone wrong
-    return "not-triggered"  # due (or undatable) and never sent
+    return "not-triggered"  # due per the schedule and never sent
 
 
 def status_idx(topic, topics, master_row, training_date, cadence, today):

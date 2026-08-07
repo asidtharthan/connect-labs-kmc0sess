@@ -107,15 +107,25 @@ SOURCE_KEYS = ("ocs_sessions", "trigger_rows", "connect_snapshot_rows", "trigger
 ARM_DROP_ABS = 3
 ARM_DROP_PCT = 0.02
 
-# Absolute floors — see the module docstring for how each was derived (~55% of the 2026-08-07 build).
+# Absolute floors ≈ 55% of the LIVE 2026-08-07 build (render v140: master_rows 9909, started 9372,
+# flwMatrix 3327, Σinvited 3956, ocs_sessions ~18.3k).
+#
+# ⚠️ These were first calibrated against a LOCAL build that turned out to be 39% smaller than live,
+# because hq_pull_full/ held stale per-domain pulls (PANEL from 26-Jun, ABT3/2WT from 06-Jul, EXT from
+# 27-Jul) — and all 196 gate checks passed on it, which is precisely the blind spot this module exists
+# to cover. Always calibrate floors against the LIVE payload, never a local tree.
 FLOORS = {
-    "counts.master_rows": 3400,
-    "counts.started": 3100,
+    "counts.master_rows": 5400,
+    "counts.started": 5100,
     "counts.claimed_pairs": 1800,
-    "connectFunnel.TOTAL.invited": 2100,
+    "connectFunnel.TOTAL.invited": 2150,
     "flwMatrix.rows": 1800,
     "sources.ocs_sessions": 10000,
 }
+# A static floor goes stale as the programme grows. Once there is history, the effective floor is the
+# larger of the static value and this fraction of the best figure ever recorded, so the bar rises with
+# the data and a 60% collapse can never sit "above the floor" just because the floor was set years ago.
+FLOOR_FRACTION_OF_HISTORY = 0.55
 
 STALL_RUNS = 3  # counts.started identical across this many consecutive runs => frozen source
 
@@ -338,20 +348,24 @@ def check(
     cm["connectFunnel.TOTAL.invited"] = sum(
         v for k, v in cm.items() if k.startswith("connectFunnel.") and k.endswith(".invited")
     )
-    for metric, floor in FLOORS.items():
+    for metric, static_floor in FLOORS.items():
         val = cm.get(metric)
         if val is None:
             if verbose:
                 print(f"  [skip] floor {metric} — not present in this build")
             continue
+        # ratchet the floor up with the data: a static number set today is a weak collapse detector
+        # once the programme has doubled
+        best = max((_metrics(h).get(metric) or 0) for h in history) if history else 0
+        floor = max(static_floor, int(FLOOR_FRACTION_OF_HISTORY * best))
+        src = "static" if floor == static_floor else f"{FLOOR_FRACTION_OF_HISTORY:.0%} of best-ever {best}"
         if val <= floor:
             fail(
                 metric,
-                f"ABSOLUTE FLOOR breached: {val} <= {floor} "
-                f"(floor is ~55% of the 2026-08-07 baseline; a value this low means a source collapsed)",
+                f"ABSOLUTE FLOOR breached: {val} <= {floor} ({src}) — a value this low means a source collapsed",
             )
         elif verbose:
-            print(f"  [PASS] floor {metric} = {val} > {floor}")
+            print(f"  [PASS] floor {metric} = {val} > {floor} ({src})")
 
     # ---------- structural invariants (ALWAYS enforced) ----------
     for key in ("unmappedCohorts", "connectPendingSubgroups"):
@@ -413,15 +427,38 @@ def check(
                 print(f"  [ok]   arm wobble {metric}: {old} -> {new} (-{drop}, within tolerance {tol:.1f})")
 
         # Tier 3 — stall detection on counts.started.
+        #
+        # Two corrections over the naive version:
+        #  * count distinct DATES, not entries. Republishing three times in one day is not a stall.
+        #  * only FAIL when the SOURCES are frozen too. A flat interview count with sources still
+        #    growing is a programme winding down, which is real and must not block publishing.
+        #    Blocking it would also deadlock: the gate runs before the push, and history is only
+        #    recorded after a successful push, so a hard stall failure can never clear itself.
         started_now = cm.get("counts.started")
-        prior = [h.get("counts", {}).get("started") for h in history[-(STALL_RUNS - 1) :]]
-        if started_now is not None and len(prior) >= STALL_RUNS - 1 and all(p == started_now for p in prior):
-            fail(
-                "counts.started",
-                f"TIER 3 STALL: counts.started == {started_now} for {STALL_RUNS} consecutive runs "
-                f"({', '.join(str(h.get('date')) for h in history[-(STALL_RUNS - 1):])} and today) — "
-                f"a live programme always adds interviews, so a source is frozen",
-            )
+        by_date = {}
+        for h in history:
+            by_date[h.get("date")] = h  # last entry wins per date
+        recent = [by_date[d] for d in sorted(by_date)][-(STALL_RUNS - 1) :]
+        prior = [h.get("counts", {}).get("started") for h in recent]
+        flat = started_now is not None and len(prior) >= STALL_RUNS - 1 and all(p == started_now for p in prior)
+        if flat:
+            src_now = cm.get("sources.ocs_sessions")
+            src_prior = [_metrics(h).get("sources.ocs_sessions") for h in recent]
+            sources_frozen = src_now is not None and all(s == src_now for s in src_prior)
+            dates = ", ".join(str(h.get("date")) for h in recent)
+            if sources_frozen:
+                fail(
+                    "counts.started",
+                    f"TIER 3 STALL: counts.started == {started_now} AND sources.ocs_sessions == {src_now} "
+                    f"across {STALL_RUNS} distinct days ({dates} and today) — the interview count and its "
+                    f"source are both frozen, so a pull is stuck rather than the programme being quiet",
+                )
+            elif verbose:
+                print(
+                    f"  [warn] counts.started flat at {started_now} for {STALL_RUNS} days ({dates} and today), "
+                    f"but sources are still moving (ocs_sessions {src_prior} -> {src_now}) — reads as a quiet "
+                    f"programme, not a frozen pull. Not failing."
+                )
         elif verbose and started_now is not None:
             print(f"  [PASS] stall: counts.started {prior} -> {started_now}")
 

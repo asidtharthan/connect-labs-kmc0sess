@@ -151,7 +151,9 @@ def status_for(flw, cohort, topic):
         if td and n < len(topics) and TODAY >= td + timedelta(days=n * cad):
             return "available-missed-overdue"
         return "available-not-started"
-    if td and TODAY < td + timedelta(days=(n - 1) * cad):
+    if not td or not cad:
+        return "available-not-started"   # schedule unknown -> can't call it due, so can't call it missed
+    if TODAY < td + timedelta(days=(n - 1) * cad):
         return "not-available-yet"
     return "not-triggered"
 
@@ -212,7 +214,9 @@ def status_v2(flw, cohort, topic):
     triggered = bool(m)          # a master row exists only where a trigger form does
     if triggered:
         return "available-missed-overdue" if overdue else "available-not-started"
-    if td is not None and not avail:
+    if td is None or rel is None:
+        return "available-not-started"   # schedule unknown -> not provably due
+    if not avail:
         return "not-available-yet"
     return "not-triggered"
 
