@@ -150,20 +150,36 @@ table(
     ["Persona", "Workers", "Share", "What it means"],
     [[t["k"], f"{t['n']:,}", f"{t['pct']}%", persona_desc.get(t["k"], "")] for t in FE["personas"]],
 )
-_healthy = T.get("Champion", {}).get("pct", 0) + T.get("Solid", {}).get("pct", 0)
+# Tiers arrive in score order (best first), so refer to them BY POSITION, never by name. The labels
+# changed once already (Champion/Solid/At-risk -> Highly engaged/Engaged/Gone quiet) and a hardcoded
+# T.get("Champion") silently reads 0 rather than failing.
+_tiers = FE["tiers"]
+_top2, _worst2 = _tiers[:2], _tiers[-2:]
+_mid = _tiers[2:-2]
+_healthy = sum(t["pct"] for t in _top2)
 para(
     f"**{finishers_pct}% have completed at least one full schedule** (Champions {P.get('Champion',{}).get('pct',0)}% + "
     f"Steady finishers {P.get('Steady finisher',{}).get('pct',0)}%). Genuine early loss is **{OAD['pct']}%** "
     f"({OAD['n']} workers) — the One-and-done segment, which §3 profiles."
 )
 para(
-    f"Separately, engagement tiers blend recency, completion rate and answer depth: {_healthy}% sit in the top two "
-    f"tiers (Champion {T.get('Champion',{}).get('pct',0)}% + Solid {T.get('Solid',{}).get('pct',0)}%), "
-    f"{T.get('Slipping',{}).get('pct',0)}% Slipping, "
-    f"{T.get('At-risk',{}).get('pct',0)+T.get('Lost',{}).get('pct',0)}% At-risk or Lost. \"Slipping\" is mixed: it holds "
-    "both finishers who are simply inactive now and a large share of the one-and-done group, so it should not be read "
-    "as uniformly benign. Tier recency is measured against the freshest session in the dataset rather than the wall "
-    "clock, so these shares do not drift when a data pull runs late."
+    "Engagement tiers answer a **different question** from the personas above. A tier is where a worker sits "
+    "**right now** — a band blending how recently they interviewed with their completion rate and answer depth — so a "
+    "worker moves between tiers over time. A persona describes their **whole history** and does not move. The two use "
+    "deliberately different words so they are never read as the same grouping.",
+    italic=True,
+)
+_tier_bits = ", ".join(f"{t['pct']}% {t['k']}" for t in _tiers)
+para(
+    f"On that basis: {_healthy}% sit in the top two tiers. Full spread — {_tier_bits}."
+    + (
+        f" \"{_mid[0]['k']}\" is mixed: it holds both finishers who are simply inactive now and a large share of the "
+        "one-and-done group, so it should not be read as uniformly benign."
+        if _mid
+        else ""
+    )
+    + " Tier recency is measured against the freshest session in the dataset rather than the wall clock, so these "
+    "shares do not drift when a data pull runs late."
 )
 
 # ================================================================ 2
