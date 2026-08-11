@@ -1,6 +1,6 @@
 # FLW Retention & Engagement — Executive Analysis
 
-*Connect Interviews programme · per-FLW, cross-cohort · data as of 2026-08-11 · build 2026-08-11 18:18 UTC · dashboard render v147*
+*Connect Interviews programme · per-FLW, cross-cohort · data as of 2026-08-11 · build 2026-08-11 20:48 UTC · dashboard render v149*
 
 *Universe: **1,441 unique front-line workers (FLWs)** who started ≥1 interview · 100% have demographics · every metric dedups the worker across all cohorts/arms they were part of. Generated from the same payload the dashboard's **FLW Retention** tab embeds, so every figure here matches what is on screen.*
 
@@ -18,7 +18,7 @@ Every other view of this programme is cohort-level — how a study arm performed
 
 - **Personas** — what a worker has done over their **whole history** (Champion, Steady finisher, One-and-done…). Fixed: a persona does not change as time passes.
 - **Engagement tiers** — where a worker sits **right now** (Highly engaged, Engaged, Slipping, Gone quiet, Lost). A worker moves between tiers over time. Different words are used deliberately so the two are never mixed up.
-***And one limitation that applies to everything here:** this is observational data. It can show what goes *together* with finishing; it cannot show what *causes* finishing. Where a number is tempting to read causally, the text says so explicitly.*
+*And one limitation that applies to everything here: this is observational data. It can show what goes together with finishing; it cannot show what causes finishing. Where a number is tempting to read causally, the text says so explicitly.*
 
 ## 1. The engagement landscape
 
@@ -118,7 +118,7 @@ The difference between the halves is **6 points** on the like-for-like measure (
 | State | Workers | Per-cohort finish rate | Finished ≥1 schedule | Answer depth |
 |---|---|---|---|---|
 | Borno | 367 | 65% | 89% | 237 words |
-| Kebbi | 399 | 64% | 84% | 256 words |
+| Kebbi | 399 | 64% | 84% | 257 words |
 | Bauchi | 384 | 56% | 77% | 230 words |
 | Sokoto | 291 | 42% | 58% | 172 words |
 
@@ -133,13 +133,51 @@ The spread is wide: Borno 65% vs Sokoto 42% per-cohort — 23 points.
 
 By cadre, results are much tighter: 52–65% per-cohort across 8 cadres. The largest is **chew (558 workers) at 56%**. Because the cadre spread is narrow while the geography spread is wide, cadre looks like the weaker lever of the two.
 
-## 6. The reachable at-risk list
+## 6. The variation is LOCAL, not state-level — and that changes what to do
+
+§5 compared states and partners because those are the units we manage by. But splitting the same workers by **LGA** (local government area, 24 of them with enough workers to measure) shows the state framing is the wrong altitude:
+
+| State | Per-cohort finish | Spread between its own LGAs | LGAs measured |
+|---|---|---|---|
+| Borno | 65% | 26 points | 6 |
+| Kebbi | 64% | 36 points | 6 |
+| Bauchi | 56% | 34 points | 6 |
+| Sokoto | 42% | 24 points | 6 |
+
+**The gap between the best and worst state is 23 points. The gap between the best and worst LGA is 47 points.** Internal spreads run 24–36 points, so in 4 of the 4 states the variation inside the state is at least as large as the entire gap between states. The best-performing LGA in Sokoto (our weakest state, 55%) beats several LGAs in our strongest one.
+
+*Why this matters for the decision: §5 correctly says we cannot separate partner from state, because they are perfectly nested — and that looked like a dead end. This resolves it from the other direction: whatever is driving performance is mostly operating BELOW the state, so a partner-wide or state-wide explanation is the wrong shape regardless of which one you blame. The unit of action is the LGA, and the question to ask is what the strong LGAs do differently from the weak ones in the SAME state under the SAME partner.*
+
+## 7. Two things about how workers work that track with finishing
+
+**Working alone is a disadvantage.** Grouping workers by how many colleagues share their settlement — the finest geography we hold — gives a clean gradient in the expected direction. This is the one factor here that the community-health-worker literature consistently flags (informal peer support), so it is a hypothesis we had reason to test rather than one found by trawling:
+
+| Co-workers in the same settlement | Workers | Per-cohort finish | Finished ≥1 |
+|---|---|---|---|
+| Only worker in settlement | 553 | 52% | 72% |
+| 2-4 in settlement | 558 | 59% | 79% |
+| 5+ in settlement | 330 | 64% | 87% |
+
+**Falling behind the schedule shows up early and gets worse.** Each worker's typical gap between interviews is measured against what their own schedule asks for, so subgroups with 3-day and 14-day cadences are compared fairly:
+
+| Pace vs their own schedule | Workers | Per-cohort finish | Finished ≥1 |
+|---|---|---|---|
+| On/ahead of schedule | 1,041 | 68% | 91% |
+| Somewhat slow | 112 | 49% | 74% |
+| Very slow | 153 | 41% | 59% |
+| Single interview (no pace) | 135 | 3% | 3% |
+
+*Note the last row is workers with a single interview, who have no pace to measure — they are 0% by definition, not by behaviour. Among workers with a rhythm to measure, the gradient is monotonic.*
+
+*Why these two and not others: both are measurable before a worker is lost, which makes them usable as early warnings rather than post-mortems: peer density is known at assignment, and pace is visible after two interviews. We also tested response *consistency* (longest silence versus a worker's own typical gap) and onboarding delay (training date to first interview) and are not reporting either: consistency does not separate cleanly in this data, and onboarding delay has no variation to analyse — all but 20 workers start within a week. Education and first language showed no relationship to finishing either.*
+
+## 8. The reachable at-risk list
 
 **27 workers** started, have not finished any schedule, **were** offered a complete schedule, and have been silent 14–60 days — recent enough that a nudge is plausible. Concentrated in Sokoto (12), Bauchi (9), Kebbi (4), Borno (2). They are the recent slice of **316** unfinished workers, not the whole unfinished population — the rest have been silent longer than 60 days.
 
 *Two caveats: the list is defined off the newest session in the dataset, so it moves as data refreshes; and it deliberately excludes workers the programme never finished triggering, who are unfinished through no choice of their own.*
 
-## 7. What to do — and how confident we are
+## 9. What to do — and how confident we are
 
 1. **Run the 27-worker recovery list now.** Small, named, and time-bounded — the only directly actionable item here. Confidence: high that these workers are correctly identified; whether a nudge converts them is unknown — running it is how we find out.
 1. **Trial first-interview support, with a control group.** Above-median first-session depth is associated with a 6-point higher per-cohort finish rate. Confidence: moderate — real association, modest size, confounded with cohort count, so measure it rather than rolling it out.
@@ -153,5 +191,5 @@ By cadre, results are much tighter: 52–65% per-cohort across 8 cadres. The lar
 - **Reach curve** (how far through a schedule a worker got) is quoted against the workers whose schedule contains that interview, not the whole population, so a 2-interview worker is not counted as dropping out at interview 3.
 - **Engagement tier (RFM):** recency + completion rate + answer depth, each scored 1–5, with recency measured against the freshest session in the dataset rather than today's date.
 - **Personas** are rule-based. "Partial progress" means over half of triggered interviews completed but **no** schedule finished — it is not a slow finisher.
-- **Limits.** Observational, so associations only. Small groups are pooled into an "Other / not recorded" row rather than dropped or published as their own rate. Figures move with each daily refresh; this document is generated from dashboard render v147.
+- **Limits.** Observational, so associations only. Small groups are pooled into an "Other / not recorded" row rather than dropped or published as their own rate. Figures move with each daily refresh; this document is generated from dashboard render v149.
 - **Full per-worker detail** is in the flw_analysis.csv export; the dashboard's FLW Retention tab is interactive.

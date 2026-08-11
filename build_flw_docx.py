@@ -524,8 +524,10 @@ if GV.get("states"):
     )
     para(
         f"**The gap between the best and worst state is {GV['state_spread']} points. The gap between the best and "
-        f"worst LGA is {GV['lga_spread']} points** — and every single state has more variation inside it than exists "
-        f"between the states. "
+        f"worst LGA is {GV['lga_spread']} points.** Internal spreads run "
+        f"{min(x['lga_spread'] for x in GV['states'])}–{max(x['lga_spread'] for x in GV['states'])} points, so in "
+        f"{sum(1 for x in GV['states'] if x['lga_spread'] >= GV['state_spread'])} of the {len(GV['states'])} states "
+        f"the variation inside the state is at least as large as the entire gap between states. "
         + (
             f"The best-performing LGA in {GV['worst_state']} (our weakest state, {GV['worst_state_best_lga']}%) beats "
             f"several LGAs in our strongest one."
