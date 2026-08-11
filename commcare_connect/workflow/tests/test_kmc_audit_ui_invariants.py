@@ -20,8 +20,8 @@ import pytest
 HERE = Path(__file__).resolve().parent
 SCRIPT = HERE / "kmc_audit_ui_invariants.js"
 MUTATE = (
-    '? baseFiltered : baseFiltered.filter(function(d){ return condsPass(d, others); });',
-    '? analyzed : analyzed.filter(function(d){ return condsPass(d, others); });',
+    "? baseFiltered : baseFiltered.filter(function(d){ return condsPass(d, others); });",
+    "? analyzed : analyzed.filter(function(d){ return condsPass(d, others); });",
 )
 
 
@@ -38,9 +38,7 @@ def _run(env_tpl=None):
         import os
 
         env = dict(os.environ, KMC_UI_TPL=str(env_tpl))
-    return subprocess.run(
-        [_node(), str(SCRIPT)], capture_output=True, text=True, env=env, cwd=str(HERE)
-    )
+    return subprocess.run([_node(), str(SCRIPT)], capture_output=True, text=True, env=env, cwd=str(HERE))
 
 
 def test_ui_counts_match_the_rows_they_filter_to():
