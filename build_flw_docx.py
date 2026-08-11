@@ -21,10 +21,17 @@ Outputs: docs/FLW_Retention_Analysis_Brief.md and docs/FLW_Retention_Analysis_Br
 # flake8: noqa: E501  (string-heavy document template — long prose lines are intentional)
 import json
 import os
+import sys
 from collections import Counter
 
 from docx import Document
 from docx.shared import Pt, RGBColor
+
+# --insights-only produces the shortened cut for circulating findings without the action plan:
+# the analysis sections only, no recovery list, no recommendations, no method appendix. It writes to
+# its own filenames so the two variants can coexist and neither overwrites the other. This exists
+# because that cut was previously made by hand-editing the .docx, which the next regeneration wiped.
+INSIGHTS_ONLY = "--insights-only" in sys.argv
 
 FE = json.load(open("flw_analysis_payload.json", encoding="utf-8"))
 STAMP = json.load(open("_flw_today.json", encoding="utf-8")) if os.path.exists("_flw_today.json") else {}
@@ -420,7 +427,12 @@ para(
     + (
         f" Separately, **{MF['unfinished']} workers ({MF['unfinished_pct']}% of all) have not finished any schedule** — "
         f"most of them engaged repeatedly first. So {OAD['pct']}% is who we lost immediately; "
-        f"{MF['unfinished_pct']}% is who has not got there yet. §6 draws its recovery list from the second group."
+        f"{MF['unfinished_pct']}% is who has not got there yet. "
+        + (
+            "The recovery list is drawn from the second group."
+            if INSIGHTS_ONLY
+            else "§8 draws its recovery list from the second group."
+        )
         if MF.get("unfinished")
         else ""
     )
@@ -750,8 +762,30 @@ def render_docx(path):
         return alt
 
 
-MD_PATH = os.path.join("docs", "FLW_Retention_Analysis_Brief.md")
-DOCX_PATH = os.path.join("docs", "FLW_Retention_Analysis_Brief.docx")
+# Sections dropped by --insights-only. Matched on the heading prefix, so renumbering the document
+# does not silently change which sections get dropped — a mismatch shows up as nothing being dropped.
+INSIGHTS_OMIT = ("8.", "9.", "Method")
+_SUFFIX = "_Insights" if INSIGHTS_ONLY else ""
+MD_PATH = os.path.join("docs", f"FLW_Retention_Analysis_Brief{_SUFFIX}.md")
+DOCX_PATH = os.path.join("docs", f"FLW_Retention_Analysis_Brief{_SUFFIX}.docx")
+
+
+def apply_insights_filter(blocks):
+    """Drop the action-plan and method sections, keeping every analysis section.
+
+    Walks the flat block list tracking which heading each block belongs to, so a section is removed
+    whole (heading, prose, tables) rather than by guessing line ranges.
+    """
+    out, dropping, dropped = [], False, []
+    for b in blocks:
+        if b[0] == "h":
+            title = b[1]
+            dropping = any(title.startswith(p) for p in INSIGHTS_OMIT)
+            if dropping:
+                dropped.append(title)
+        if not dropping:
+            out.append(b)
+    return out, dropped
 
 
 def check():
@@ -790,10 +824,27 @@ if __name__ == "__main__":
 
     if "--check" in sys.argv:
         sys.exit(check())
+    dropped = []
+    if INSIGHTS_ONLY:
+        globals()["BLOCKS"], dropped = apply_insights_filter(BLOCKS)
+        # Say so in the document itself: a reader must not mistake a subset for the whole analysis.
+        BLOCKS.append(
+            (
+                "p",
+                "This is the findings-only cut of a longer analysis. It deliberately omits the recovery list, the "
+                "recommendations with their confidence levels, and the method and limitations appendix — ask for the "
+                "full brief before acting on anything here.",
+                {"italic": True, "muted": True},
+            )
+        )
     md_path = MD_PATH
     render_md(md_path)
     dx = render_docx(DOCX_PATH)
     print(f"wrote {md_path} + {dx}")
+    if INSIGHTS_ONLY:
+        print(
+            f"  insights-only: dropped {len(dropped)} section(s) -> {', '.join(dropped) or 'NONE (check INSIGHTS_OMIT)'}"
+        )
     print(
         f"  N={N:,}  finishers={finishers_pct}%  per-cohort single/multi={pc(CC['single'])}/{pc(CC['multi'])}%  "
         f"as of {TODAY} (render v{RENDER_V})"

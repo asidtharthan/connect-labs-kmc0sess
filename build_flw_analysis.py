@@ -202,6 +202,9 @@ def build_records():
     for x in records:
         peers = _by_settlement.get(x["settlement"], 0)
         x["settlement_peers"] = peers
+        # "Tangaza (Sokoto)" rather than "Tangaza" — an LGA name alone means nothing to most readers,
+        # and the state is the whole point of the comparison.
+        x["lga_label"] = f"{x['lga']} ({x['state']})" if x.get("lga") and x.get("state") else (x.get("lga") or "")
         x["peer_band"] = (
             "Only worker in settlement" if peers <= 1 else "2-4 in settlement" if peers <= 4 else "5+ in settlement"
         )
@@ -462,7 +465,7 @@ def aggregate(records):
         # behaviour, onboarding speed. Grounded in the CHW-attrition and panel-survey literature:
         # peer support is a repeatedly-identified retention factor, and response STABILITY predicts
         # retention more strongly than response SPEED.
-        "byLGA": crosscut("lga", minn=20),
+        "byLGA": crosscut("lga_label", minn=20),
         "byPeers": ordered_cut("peer_band", ["Only worker in settlement", "2-4 in settlement", "5+ in settlement"]),
         "byPace": ordered_cut(
             "pace_band", ["On/ahead of schedule", "Somewhat slow", "Very slow", "Single interview (no pace)"]

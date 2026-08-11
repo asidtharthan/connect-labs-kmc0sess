@@ -1875,12 +1875,80 @@ function WorkflowUI(props) {
                 })}
               </div>
 
+              {/* The headline of this analysis: the spread WITHIN states is larger than the spread
+                  between them, so the state/partner comparison above is at the wrong altitude. Global
+                  (not filtered) because it is a property of the whole population. */}
+              {(function () {
+                var GV = FE.geoVariance || {}, LG = (FE.byLGA || []).slice();
+                if (!GV.states || !LG.length) return null;
+                LG.sort(function (a, b) { return (b.finished_pc || 0) - (a.finished_pc || 0); });
+                var best = LG.slice(0, 3), worst = LG.slice(-3).reverse();
+                var mx = Math.max.apply(null, LG.map(function (r) { return r.finished_pc || 0; }).concat([1]));
+                var row = function (r, key) {
+                  return (
+                    <div key={key} className="flex items-center gap-2 py-0.5" style={{ fontSize: "11px" }}>
+                      <div className="text-right text-gray-700 truncate" style={{ width: "150px", flexShrink: 0 }}>{r.k}</div>
+                      <div className="flex-1 bg-gray-100 rounded h-3.5" style={{ minWidth: "60px" }}>
+                        <div className="h-3.5 rounded" style={{ width: Math.max(2, 100 * (r.finished_pc || 0) / mx) + "%", backgroundColor: "#1565C0" }}></div>
+                      </div>
+                      <div className="text-gray-500 text-right" style={{ width: "44px", flexShrink: 0 }}>n={r.n}</div>
+                      <div className="text-right font-medium" style={{ width: "34px", flexShrink: 0, color: (r.finished_pc || 0) >= 60 ? "#065f46" : (r.finished_pc || 0) >= 45 ? "#F9A825" : "#C62828" }}>{r.finished_pc}%</div>
+                    </div>
+                  );
+                };
+                return (
+                  <div className="rounded border border-blue-200 bg-blue-50 px-3 py-2">
+                    <div className="text-sm font-semibold text-gray-700 mb-1">
+                      Look below the state: that is where the variation is{globalTag}
+                    </div>
+                    <p className="text-xs text-gray-700 mb-2">
+                      Best-to-worst <b>between the {GV.states.length} states: {GV.state_spread} points</b>. Best-to-worst
+                      <b> across the {GV.n_lgas} LGAs: {GV.lga_spread} points</b>. Each state's own internal spread runs{" "}
+                      {Math.min.apply(null, GV.states.map(function (x) { return x.lga_spread; }))}–{Math.max.apply(null, GV.states.map(function (x) { return x.lga_spread; }))} points,
+                      so comparing states (or partners, which are nested inside them) is the wrong altitude — the same
+                      state and the same partner contain both the best and the worst performers.
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <div className="text-gray-500 mb-0.5" style={{ fontSize: "10px" }}>STRONGEST LGAs (per-cohort finish)</div>
+                        {best.map(function (r, i) { return row(r, "b" + i); })}
+                      </div>
+                      <div>
+                        <div className="text-gray-500 mb-0.5" style={{ fontSize: "10px" }}>WEAKEST LGAs</div>
+                        {worst.map(function (r, i) { return row(r, "w" + i); })}
+                      </div>
+                    </div>
+                    <p className="text-gray-500 mt-1" style={{ fontSize: "10px" }}>
+                      Only LGAs with 20+ FLWs are shown. The useful question is what the strong LGAs do differently from
+                      the weak ones in the SAME state under the SAME partner.
+                    </p>
+                  </div>
+                );
+              })()}
+
+              {/* The one directly actionable number in the analysis — the tab had no view of it. */}
+              {FE.atRisk && FE.atRisk.n ? (
+                <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-gray-700">
+                  <b>Reachable now: {FE.atRisk.n} FLWs.</b> Started, finished no schedule, were offered a complete one,
+                  and have been silent 14–60 days — recent enough that a nudge is plausible.
+                  {(FE.atRisk.byState || []).length
+                    ? <span> Concentrated in {(FE.atRisk.byState || []).map(function (x) { return x.k + " (" + x.n + ")"; }).join(", ")}.</span>
+                    : null}
+                  {FE.atRisk.ofUnfinished
+                    ? <span className="text-gray-500"> They are the recent slice of {FE.atRisk.ofUnfinished.toLocaleString()} unfinished FLWs, not the whole group.</span>
+                    : null}
+                  {globalTag}
+                </div>
+              ) : null}
+
               <Legend title="How this is built">
                 <div><b>Grain:</b> one row per unique FLW (deduped across cohorts); metrics union their sessions across every arm.</div>
                 <div><b>Per-cohort finish rate:</b> of all the cohort schedules an FLW was enrolled in, the share they completed. This is the comparable measure — unlike "finished ≥1 schedule", it does not go up simply because someone was in more cohorts.</div>
                 <div><b>Tier (RFM):</b> Recency + completion rate + answer depth, each scored 1–5. Recency is measured against the freshest session in the dataset, not the wall clock, so a lagging data pull cannot push everyone into a worse tier.</div>
                 <div><b>Persona:</b> rule-based behavioural segment. "Partial progress" means ≥50% of triggered interviews done but <i>no</i> schedule finished (it was previously labelled "Slow-but-finishing", which described the opposite of what it selects).</div>
                 <div><b>Drill-down:</b> the tab holds one character per FLW per dimension — attributes only, no identifier — so filtering happens in your browser. "×N" is the group's share of your selection divided by its share of all FLWs.</div>
+                <div><b>Colour on the right-hand %:</b> green ≥70, amber 50–69, red below 50. It is a reading aid only — for the per-cohort measure the normal range is roughly 40–70%, so amber is common and does not signal a problem.</div>
+                <div><b>Co-workers in settlement</b> proxies informal peer support (the factor most consistently identified in community-health-worker retention research). <b>Pace</b> is each FLW's typical gap between interviews divided by what their own schedule asks, so subgroups on 3-day and 14-day cadences compare fairly.</div>
                 <div><b>Not shown here:</b> full per-FLW detail lives in the flw_analysis.csv export.</div>
               </Legend>
             </div>
