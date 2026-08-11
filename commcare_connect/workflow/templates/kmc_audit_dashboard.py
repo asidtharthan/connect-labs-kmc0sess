@@ -356,6 +356,15 @@ function groupCases(visitRows){
     // follow-up-engagement metrics (low_avg_visits, flw_early_discharge) so it can't ~double their
     // denominators. Still kept for enroll_ontime / kmc_wrap (which read reg-row data).
     var isCrf=false; for(i=0;i<rows.length;i++){ if(low(rget(rows[i],"form_name"))==="child registration form"){ isCrf=true; break; } }
+    // Did this case EXIT the programme early (register row 19's four reasons)? Computed once
+    // so flw_early_discharge (which scores it) and low_avg_visits (which must exclude it) can
+    // never drift apart: an early-exited case had its exposure cut short, so counting it in the
+    // visits-per-case denominator penalises the FLW twice for one event. A case that RAN ITS
+    // COURSE and graduated (recovered with >=4 visits) is NOT early — those are 49.3% of the
+    // eligible denominator and carry MORE visits, so excluding them would manufacture REDs.
+    var isEarly=(statusEntered["parents_discontinued"]||conclusionReason==="caregiver_unavailable"
+      ||conclusionReason==="family_relocated"
+      ||(conclusionReason==="svn_recovered_or_met_discharge_criteria"&&followups.length<4))?true:false;
     // Weight series (reg + follow-ups). Registration rows carry no grp_kmc_visit.visit_date, so
     // without the reg_date fallback the enrolment weight — the birth anchor where neonatal weight
     // loss shows up — never entered the series (5,799 points across the 11 opps). Only reg rows
@@ -365,7 +374,7 @@ function groupCases(visitRows){
     ws.sort(function(a,b){ return a[0]-b[0]; });
     cases.push({case_id:cid,reg_date:regDate,discharge_date:dischargeDate,dob:dob,birth_location:birthLocation,
       followups:followups,followup_dates:followupDates,n_followup:followups.length,reg_rows:regRows,
-      last_visit_date:lastVisitDate,is_death:isDeath,status_entered:statusEntered,conclusion_reason:conclusionReason,is_crf:isCrf,weights:ws});
+      last_visit_date:lastVisitDate,is_death:isDeath,status_entered:statusEntered,conclusion_reason:conclusionReason,is_crf:isCrf,is_early:isEarly,weights:ws});
   });
   return cases;
 }
@@ -398,7 +407,7 @@ function deriveMetrics(aggRow, visitRows, asOf){
   function ageDays(regMs){ return (asOf-regMs)/DAY_MS; }
 
   // 1 low avg visits
-  var elig=cs.filter(function(c){ return c.reg_date!==null && ageDays(c.reg_date)>=60 && !c.is_death && !c.is_crf; });
+  var elig=cs.filter(function(c){ return c.reg_date!==null && ageDays(c.reg_date)>=60 && !c.is_death && !c.is_crf && !c.is_early; });
   if(elig.length>=10){ var num=0; for(i=0;i<elig.length;i++) num+=elig[i].n_followup; var avg=num/elig.length; out.low_avg_visits=M(avg,ragLowBad(avg,5,3.0001),num,elig.length); }
   else out.low_avg_visits=NA();
 
@@ -407,8 +416,11 @@ function deriveMetrics(aggRow, visitRows, asOf){
   // WITH a visit after day 28. Counting deaths only inside the pool was survivorship censoring
   // (death stops visits), dropping 61-100% of real deaths -> false RED "under-reporting".
   var reg28=cs.filter(function(c){ return c.reg_date!==null&&ageDays(c.reg_date)>=28; });
-  var pool=reg28.filter(function(c){ for(var q=0;q<c.followup_dates.length;q++){ if((c.followup_dates[q]-c.reg_date)/DAY_MS>=28) return true; } return false; });
-  if(pool.length>=20){ var deaths=0; for(i=0;i<reg28.length;i++) if(reg28[i].is_death) deaths++; var rate=100.0*deaths/pool.length; out.mortality=M(rate,ragLowBad(rate,5,3.0001),deaths,pool.length); }
+  // Denominator = cases mature enough to OBSERVE an outcome: reg>=28d AND (a visit after day 28
+  // OR the case died). Including the deaths makes the numerator a subset of the denominator by
+  // construction, so >100% is impossible; the register's literal wording leaves them disjoint.
+  var pool=reg28.filter(function(c){ if(c.is_death) return true; for(var q=0;q<c.followup_dates.length;q++){ if((c.followup_dates[q]-c.reg_date)/DAY_MS>=28) return true; } return false; });
+  if(pool.length>=20){ var deaths=0; for(i=0;i<pool.length;i++) if(pool[i].is_death) deaths++; var rate=100.0*deaths/pool.length; out.mortality=M(rate,ragLowBad(rate,5,3.0001),deaths,pool.length); }
   else out.mortality=NA();
 
   // 3 enroll ontime
@@ -481,7 +493,7 @@ function deriveMetrics(aggRow, visitRows, asOf){
 
   // 17 flw early discharge
   var e60=cs.filter(function(c){ return c.reg_date!==null&&ageDays(c.reg_date)>=60&&!c.is_crf; });
-  if(e60.length>=10){ var early=0; for(i=0;i<e60.length;i++){ var cc=e60[i]; var cr=cc.conclusion_reason; if(cc.status_entered["parents_discontinued"]||cr==="caregiver_unavailable"||cr==="family_relocated"||(cr==="svn_recovered_or_met_discharge_criteria"&&cc.n_followup<4)) early++; } var ped=100.0*early/e60.length; out.flw_early_discharge=M(ped,ragHighBad(ped,5,15),early,e60.length); } else out.flw_early_discharge=NA();
+  if(e60.length>=10){ var early=0; for(i=0;i<e60.length;i++){ if(e60[i].is_early) early++; } var ped=100.0*early/e60.length; out.flw_early_discharge=M(ped,ragHighBad(ped,5,15),early,e60.length); } else out.flw_early_discharge=NA();
 
   // 18 kmc wrap missing at reg
   var _wfo=fieldOpps(visitRows,"kmc_wrap_check");
@@ -500,8 +512,8 @@ function countryFor(oppId){ return COUNTRY[oppId]||"Other"; }
 var P1_ORDER = ["low_avg_visits","mortality","enroll_ontime","zero_danger","no_referral","rounded_weights","gps_within_200m","hr_copycat","temp_copycat","spo2_implausible","flw_early_discharge"];
 var P2_ORDER = ["danger_rate_cases","weight_loss","weight_gain_gkgday","modal_weight","flat_weight","image_missing","kmc_wrap_missing"];
 var META = {
-  low_avg_visits:{label:"Visits/case",unit:"dec",bands:"G>=5  Y 3-5  R<=3",desc:"Avg follow-up visits per non-mortality case enrolled >=60 days ago. Min 10 cases."},
-  mortality:{label:"Mortality",unit:"pct",bands:"R<=3%  Y 3-5%  G>=5%",desc:"All deaths among cases reg>=28d, over cases reg>=28d with a visit after day 28 (register C3). LOW = under-reporting concern. Min 20 cases."},
+  low_avg_visits:{label:"Visits/case",unit:"dec",bands:"G>=5  Y 3-5  R<=3",desc:"Avg follow-up visits per case enrolled >=60 days ago. Excludes deaths and cases that exited early (those are scored on Early discharge instead, so one event is not penalised twice). Successful graduations DO count. Min 10 cases."},
+  mortality:{label:"Mortality",unit:"pct",bands:"R<=3%  Y 3-5%  G>=5%",desc:"Deaths over cases reg>=28d that were observable: a visit after day 28 OR the case died. LOW = under-reporting concern. Min 20 cases."},
   enroll_ontime:{label:"Enroll on-time",unit:"pct",bands:"G>=50  Y 30-49  R<30",desc:"% enrolled on time: hospital reg<=discharge+3d; home reg<=DOB+7d. Min 10 cases."},
   zero_danger:{label:"Zero danger",unit:"pct",bands:"G<50  Y 50-75  R>75",desc:"% cases with NO danger sign ever recorded. Min 20 follow-up visits AND 20 visited cases."},
   no_referral:{label:"No referral",unit:"pct",bands:"G<30  Y 30-60  R>60",desc:"% danger-sign-positive visits with no referral. Min 5 DS+ visits."},
