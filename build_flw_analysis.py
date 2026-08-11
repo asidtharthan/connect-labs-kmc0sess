@@ -403,14 +403,29 @@ def micro(records):
         ("llo", lambda x: x["llos"] or "(not recorded)"),
         ("tier", lambda x: x["tier"]),
         ("persona", lambda x: x["persona"]),
-        ("nco", lambda x: str(min(x["n_cohorts"], 5)) + ("+" if x["n_cohorts"] > 5 else "")),
+        ("nco", lambda x: str(x["n_cohorts"])),
         ("fin", lambda x: "Finished ≥1 schedule" if x["finished_any"] else "No schedule finished"),
     ]
+    # Dimensions whose values have a NATURAL ORDER must publish the dictionary in that order, because
+    # the dashboard renders rows in dictionary order. Frequency-ordering an ordered scale made the tab
+    # show tiers as "Engaged, Slipping, Highly engaged, Gone quiet, Lost" and cohort counts as
+    # "2, 3, 1, 4, 5" — which reads as a bug. Nominal dimensions stay frequency-ordered (commonest
+    # first) since that is the useful reading for them.
+    ORDERED = {
+        "tier": TIER_ORDER,
+        "persona": PERSONA_ORDER,
+        "fin": ["Finished ≥1 schedule", "No schedule finished"],
+    }
     out = {"n": len(records), "dict": {}, "col": {}}
     for name, fn in dims:
         vals = [fn(x) for x in records]
-        # stable, frequency-ordered dictionary so the commonest value is index 0
-        order = [k for k, _ in Counter(vals).most_common()]
+        if name in ORDERED:
+            order = [k for k in ORDERED[name] if k in set(vals)]
+        elif name == "nco":
+            order = sorted(set(vals), key=int)
+        else:
+            # nominal: frequency-ordered so the commonest value is index 0
+            order = [k for k, _ in Counter(vals).most_common()]
         if len(order) > 10:  # keep one char per FLW; pool the tail
             keep = order[:9]
             order = keep + ["Other"]

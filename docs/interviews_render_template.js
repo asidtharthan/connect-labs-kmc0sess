@@ -1616,8 +1616,8 @@ function WorkflowUI(props) {
                       ["nco", "Cohorts they were in"], ["fin", "Finished a schedule?"]];
           var DIM_COLOR = { state: "#1565C0", llo: "#6d28d9", type: "#00695C", tier: "#0f766e", persona: "#b45309", nco: "#7c3aed", fin: "#065f46" };
           var DIM_HELP = {
-            tier: "Where the worker is TODAY: a score band blending how recently they interviewed, their completion rate and their answer depth. A worker moves between tiers over time.",
-            persona: "What the worker has DONE overall, across their whole history — a fixed behavioural segment, not a current-state reading. Deliberately worded differently from the tiers so the two are never confused.",
+            tier: "Where the worker is TODAY: a score band blending how recently they interviewed, their completion rate and their answer depth. A worker moves between tiers over time. Because it also rewards recency and answer depth, the top tier is NOT necessarily the highest finish rate.",
+            persona: "What the worker has DONE overall, across their whole history — a fixed behavioural segment, not a current-state reading. Deliberately worded differently from the tiers so the two are never confused. NOTE: several personas are DEFINED by whether the worker finished, so the right-hand % in this panel is a definition, not a result (One-and-done is 0% by construction).",
           };
           function unpackNum(spec) {
             var out = [], i, w = spec.w, s = spec.s;
@@ -1626,6 +1626,10 @@ function WorkflowUI(props) {
           }
           var NUM = {}, dimOK = !!(M && M.n && M.col && M.dict);
           if (dimOK) { Object.keys(M.num || {}).forEach(function (k) { NUM[k] = unpackNum(M.num[k]); }); }
+          // "Other" is this build's catch-all for tail values; "others" is a REAL cadre in the source
+          // data. They looked identical on screen, so the catch-all is renamed and marked everywhere.
+          function isResidual(label) { return label === "Other" || label === "(not recorded)" || label === "Other / not recorded"; }
+          function residualLabel(label) { return isResidual(label) ? "Other / not recorded" : label; }
           var selKeys = Object.keys(flwSel).filter(function (k) { return (flwSel[k] || []).length; });
           var filtered = selKeys.length > 0;
           // mask, optionally ignoring one dimension's own filter (so you can still see/deselect its
@@ -1689,7 +1693,14 @@ function WorkflowUI(props) {
                        any: cnt[idx] ? Math.round(100 * finc[idx] / cnt[idx]) : 0,
                        pc: cnt[idx] ? Math.round(pcs[idx] / cnt[idx]) : 0 };
             }).filter(function (r) { return r.n > 0 || (flwSel[dim] || []).indexOf(r.idx) >= 0; });
-            rows.sort(function (a, b) { return b.n - a.n; });
+            // Count-sorting an ORDERED scale makes the tab look broken: tiers rendered
+            // "Engaged, Slipping, Highly engaged, Gone quiet, Lost" and cohort counts "2, 3, 1, 4, 5".
+            // Nominal dimensions (state/partner/cadre) still sort by size; ordered ones keep their
+            // natural order, and the pooled residual is always pinned last wherever it appears.
+            var ORDERED = { tier: 1, persona: 1, nco: 1 };
+            if (ORDERED[dim]) rows.sort(function (a, b) { return a.idx - b.idx; });
+            else rows.sort(function (a, b) { return b.n - a.n; });
+            rows.sort(function (a, b) { return (isResidual(a.label) ? 1 : 0) - (isResidual(b.label) ? 1 : 0); });
             var maxShare = Math.max.apply(null, rows.map(function (r) { return r.share; }).concat([1]));
             return (
               <div key={dim} className="rounded border border-gray-200 bg-white px-3 py-2">
@@ -1701,6 +1712,16 @@ function WorkflowUI(props) {
                         onClick={function () { var nx = {}; Object.keys(flwSel).forEach(function (k) { nx[k] = flwSel[k]; }); nx[dim] = []; setFlwSel(nx); }}>clear</button>
                     : <span className="text-gray-300" style={{ fontSize: "10px" }}>click to filter</span>}
                 </div>
+                {/* P1: the row carries four quantities and used to label none of them. The bar is a
+                    SHARE of the current selection; the right-hand % is an outcome RATE whose meaning is
+                    set by the toggle above. Naming them here also makes the toggle's scope obvious. */}
+                <div className="flex items-center gap-2 text-gray-400" style={{ fontSize: "9px" }}>
+                  <div className="text-right" style={{ width: "118px", flexShrink: 0 }}></div>
+                  <div className="flex-1" style={{ minWidth: "60px" }}>share of selection</div>
+                  <span style={{ width: "34px" }}></span>
+                  <div className="text-right" style={{ width: "62px", flexShrink: 0 }}>workers · share</div>
+                  <div className="text-right" style={{ width: "34px", flexShrink: 0 }}>{flwMetric === "pc" ? "per-cohort finish" : "finished ≥1"}</div>
+                </div>
                 {rows.map(function (r) {
                   var on = (flwSel[dim] || []).indexOf(r.idx) >= 0;
                   var lift = r.baseShare > 0 ? r.share / r.baseShare : 1;
@@ -1711,19 +1732,26 @@ function WorkflowUI(props) {
                       title={r.label + " — " + r.n + " FLWs (" + Math.round(r.share) + "% of selection, " + Math.round(r.baseShare) + "% of all). Click to " + (on ? "remove" : "apply") + " this filter."}
                       className={"flex items-center gap-2 py-0.5 cursor-pointer rounded " + (on ? "bg-indigo-50" : "hover:bg-gray-50")}
                       style={{ fontSize: "11px" }}>
-                      <div className={"text-right truncate " + (on ? "text-indigo-700 font-semibold" : "text-gray-700")} style={{ width: "118px", flexShrink: 0 }}>
-                        {on ? "✓ " : ""}{r.label}
+                      <div className={"text-right truncate " + (on ? "text-indigo-700 font-semibold" : isResidual(r.label) ? "text-gray-400 italic" : "text-gray-700")} style={{ width: "118px", flexShrink: 0 }}
+                        title={isResidual(r.label) ? "Catch-all for values with too few workers to show separately, plus any not recorded. Not a group in its own right." : ""}>
+                        {on ? "✓ " : ""}{residualLabel(r.label)}
                       </div>
                       <div className="flex-1 bg-gray-100 rounded h-3.5 relative" style={{ minWidth: "60px" }}>
                         <div className="h-3.5 rounded" style={{ width: Math.max(1, 100 * r.share / maxShare) + "%", backgroundColor: DIM_COLOR[dim] || "#1565C0", opacity: on ? 1 : 0.75 }}></div>
                       </div>
+                      {/* P12: direction by glyph as well as colour, so it survives greyscale and
+                          colour-blindness. Shown only outside 0.77-1.3x (reciprocals). */}
                       {showLift
-                        ? <span className={"font-semibold " + (lift >= 1.3 ? "text-rose-600" : "text-gray-400")} style={{ width: "34px", fontSize: "10px" }} title="over/under-represented vs this group's share of all FLWs">
-                            {lift >= 1.3 ? "×" + (Math.round(lift * 10) / 10) : "×" + (Math.round(lift * 10) / 10)}
+                        ? <span className={"font-semibold " + (lift >= 1.3 ? "text-rose-600" : "text-gray-500")} style={{ width: "34px", fontSize: "10px" }}
+                            title={"This group is " + (Math.round(lift * 10) / 10) + "x its programme-wide share — " + (lift >= 1.3 ? "over" : "under") + "-represented in your current selection."}>
+                            {(lift >= 1.3 ? "▲×" : "▼×") + (Math.round(lift * 10) / 10)}
                           </span>
                         : <span style={{ width: "34px" }}></span>}
                       <div className="text-gray-600 text-right" style={{ width: "62px", flexShrink: 0 }}>{r.n} · {Math.round(r.share)}%</div>
-                      <div className="text-right font-medium" style={{ width: "34px", flexShrink: 0, color: out >= 70 ? "#065f46" : out >= 50 ? "#F9A825" : "#C62828" }}>{out}%</div>
+                      {/* P11: a rate off 1-2 workers reads as a finding (an n=1 partner showed "100%").
+                          P5: with an empty selection every row was a red 0%. Both now render "—". */}
+                      <div className="text-right font-medium" style={{ width: "34px", flexShrink: 0, color: r.n < 20 ? "#9ca3af" : out >= 70 ? "#065f46" : out >= 50 ? "#F9A825" : "#C62828" }}
+                        title={r.n < 20 ? "too few workers (" + r.n + ") to quote a rate" : ""}>{r.n < 20 ? "—" : out + "%"}</div>
                     </div>
                   );
                 })}
@@ -1737,12 +1765,20 @@ function WorkflowUI(props) {
                 <button key={k + idx} onClick={function () { toggle(k, idx); }}
                   className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 hover:bg-indigo-200" style={{ fontSize: "10px" }}
                   title="remove this filter">
-                  {(M.dict[k] || [])[idx]} ✕
+                  {(DIMS.filter(function (d) { return d[0] === k; })[0] || ["", k])[1].split(" —")[0]}: {residualLabel((M.dict[k] || [])[idx])} ✕
                 </button>
               );
             });
           });
           var ds = FE.depthSplit || null;
+          // P4: these three sections are precomputed programme-wide. Sitting under a KPI that says
+          // "291 FLWs in selection", an unmarked n=1,110 reads as a contradiction (or worse, as Sokoto's).
+          var globalTag = filtered
+            ? <span className="ml-2 px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-normal" style={{ fontSize: "9px" }}
+                title="This section is computed for the whole programme and does not change with your filter.">
+                whole programme ({N.toLocaleString()}) — not filtered
+              </span>
+            : null;
           return (
             <div className="p-4 space-y-4">
               <div className="text-xs bg-indigo-50 border border-indigo-100 rounded px-3 py-2 text-gray-700">
@@ -1758,24 +1794,30 @@ function WorkflowUI(props) {
                     ? <button onClick={function () { setFlwSel({}); }} className="px-2 py-0.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-100" style={{ fontSize: "10px" }}>reset</button>
                     : null}
                   <span className="mx-1 text-gray-300">|</span>
-                  <span className="text-xs font-medium text-gray-600">Right-hand %:</span>
+                  <span className="text-xs font-medium text-gray-600">Right-hand % on every panel:</span>
                   {subBtn(flwMetric, "pc", setFlwMetric, "Per-cohort finish")}
                   {subBtn(flwMetric, "any", setFlwMetric, "Finished ≥1")}
                 </div>
               ) : null}
 
+              {dimOK && filtered && SEL.n === 0 ? (
+                <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  <b>No FLWs match this combination of filters.</b> The figures below are not zero results — there is
+                  nothing to compute. Remove a filter (click a ✓ row again, or use “reset”) to continue.
+                </div>
+              ) : null}
               <div className="flex flex-wrap gap-2 px-1">
                 {card(SEL.n.toLocaleString(), filtered ? "FLWs in selection" : "FLWs analysed",
                       filtered ? Math.round(100 * SEL.n / (M.n || 1)) + "% of all " + N.toLocaleString() : "started ≥1 interview", "#1565C0", "k1")}
-                {card(SEL.pc + "%", "Per-cohort finish rate", filtered ? "all FLWs: " + ALL.pc + "%" : "of the schedules they were in", "#065f46", "k2")}
-                {card(SEL.any + "%", "Finished ≥1 schedule", filtered ? "all FLWs: " + ALL.any + "%" : "rises with # cohorts — see note", "#2E7D32", "k3")}
-                {card(SEL.fdepth, "Median first-session words", filtered ? "all FLWs: " + ALL.fdepth : "answer depth at interview 1", "#6d28d9", "k4")}
-                {card(SEL.deep, "Median deepest interview", filtered ? "all FLWs: " + ALL.deep : "furthest interview reached", "#b45309", "k5")}
+                {card(SEL.n ? SEL.pc + "%" : "—", "Per-cohort finish rate", filtered ? "all FLWs: " + ALL.pc + "%" : "share of THEIR OWN schedules finished, averaged per worker", "#065f46", "k2")}
+                {card(SEL.n ? SEL.any + "%" : "—", "Finished ≥1 schedule", filtered ? "all FLWs: " + ALL.any + "%" : "generous — rises with # cohorts", "#2E7D32", "k3")}
+                {card(SEL.n ? SEL.fdepth : "—", "Median words, interview 1", filtered ? "all FLWs: " + ALL.fdepth : "how much they wrote first time", "#6d28d9", "k4")}
+                {card(SEL.n ? "Int " + SEL.deep : "—", "Median furthest interview", filtered ? "all FLWs: Int " + ALL.deep : "how far through a schedule they got", "#b45309", "k5")}
               </div>
 
               {/* Cross-cohort: the honest version */}
               <div className="rounded border border-purple-200 bg-purple-50 px-3 py-2 text-xs text-gray-700">
-                <b>⭐ Most FLWs work across several cohorts — but re-use does not by itself raise finishing.</b>{" "}
+                <b>⭐ Most FLWs work across several cohorts — but re-use does not by itself raise finishing.</b>{globalTag}{" "}
                 {cc.multi.n} FLWs ({100 - (cc.single.n ? Math.round(100 * cc.single.n / N) : 0)}%) span ≥2 cohorts. They finish ≥1 schedule far more often ({cc.multi.finished}% vs {cc.single.finished}%) — but that comparison is <b>mechanical</b>: "finished ≥1" is a max over cohorts, so being in three cohorts gives three chances. On the like-for-like measure — the share of <i>their own</i> schedules they complete — multi-cohort FLWs are <b>{cc.multi.finished_pc}%</b> vs <b>{cc.single.finished_pc}%</b> for single-cohort: {(function () {
                   var g = (cc.multi.finished_pc || 0) - (cc.single.finished_pc || 0), a = Math.abs(g);
                   var raw = (cc.multi.finished || 0) - (cc.single.finished || 0);
@@ -1808,7 +1850,7 @@ function WorkflowUI(props) {
               {/* Early depth */}
               {ds ? (
                 <div className="rounded border border-gray-200 bg-white px-3 py-2">
-                  <div className="text-sm font-semibold text-gray-700 mb-1">Does answer depth at the FIRST interview predict finishing?</div>
+                  <div className="text-sm font-semibold text-gray-700 mb-1">Is answer depth at the first interview associated with finishing?{globalTag}</div>
                   <p className="text-gray-500 text-xs mb-2">FLWs split at the median first-session answer depth ({ds.median} words). Read the per-cohort rate, not "finished ≥1": the deeper group is also in more cohorts, which inflates the ≥1 measure.</p>
                   <div className="flex flex-wrap gap-2">
                     {card(ds.hi.finished_pc + "%", "Above-median depth", "per-cohort finish · n=" + ds.hi.n + " · " + ds.hi.first_depth + " words", "#065f46", "fi1")}
@@ -1820,7 +1862,7 @@ function WorkflowUI(props) {
 
               {/* How deep FLWs get */}
               <div>
-                <div className="text-sm font-semibold text-gray-700 mb-1">How deep FLWs get</div>
+                <div className="text-sm font-semibold text-gray-700 mb-1">How far through the schedule FLWs get{globalTag}</div>
                 <p className="text-gray-400 mb-1" style={{ fontSize: "10px" }}>Share reaching each interview, as a % of the FLWs whose schedule even <i>contains</i> that interview (a 2-interview TRS worker is not a drop-out at interview 3). The grey number is the old "% of everyone" reading.</p>
                 {(FE.survival || []).map(function (s) {
                   var p = (s.pct_elig == null ? s.pct : s.pct_elig);

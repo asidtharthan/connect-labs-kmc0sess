@@ -8,7 +8,17 @@
 
 Every other view of this programme is cohort-level — how a study arm performed. This one looks at the programme through the worker: one row per unique FLW, their interview history stitched across every cohort and arm they touched. Most workers are re-used across studies, so the worker's cumulative experience — not any single cohort — is what tells us who the programme retains and where it loses people.
 
-*Two things to hold on to before the numbers. First, there are **two different ways to say a worker "finished"**, and they answer different questions (§2). Second, this is observational data: it shows what is associated with finishing, not what causes it.*
+## How to read the numbers (please read this first)
+
+**Two ways of saying a worker “finished”.** They are different questions and are never interchangeable:
+
+- **Finished at least one schedule** — "have they ever completed a full cohort schedule?" Beware: a worker in three cohorts has three chances to clear this bar, so this number rises with how many cohorts someone was put in, even if nothing about the worker changed. Useful for describing, misleading for comparing.
+- **Per-cohort finish rate** — “of the schedules they were actually given, what share did they complete?” Worked out per person (schedules completed ÷ schedules enrolled in) and then averaged across the group. This is the fair one, and it is the number to quote when comparing groups.
+**Two ways of grouping workers.** Both appear below and they are not comparable with each other:
+
+- **Personas** — what a worker has done over their **whole history** (Champion, Steady finisher, One-and-done…). Fixed: a persona does not change as time passes.
+- **Engagement tiers** — where a worker sits **right now** (Highly engaged, Engaged, Slipping, Gone quiet, Lost). A worker moves between tiers over time. Different words are used deliberately so the two are never mixed up.
+***And one limitation that applies to everything here:** this is observational data. It can show what goes *together* with finishing; it cannot show what *causes* finishing. Where a number is tempting to read causally, the text says so explicitly.*
 
 ## 1. The engagement landscape
 
@@ -24,11 +34,21 @@ Behavioural personas — rule-based segments over each worker's whole history:
 | One-and-done | 131 | 9% | Started once and stopped — the genuine early-loss group |
 | Lapsed | 5 | 0% | Inactive, nothing finished |
 
-**78% have completed at least one full schedule** (Champions 19% + Steady finishers 59%). Genuine early loss is **9%** (131 workers) — the One-and-done segment, which §3 profiles.
+**78% of workers have completed at least one full schedule** — Champions 19% + Steady finishers 59%, the two personas defined by having finished. Genuine early loss is **9%** (131 workers), the One-and-done segment that §3 profiles. **Important:** that 78% is the generous measure — the one §2 shows is inflated by how many cohorts a worker was put in. On the like-for-like per-cohort measure, workers complete **58%** of the schedules they were actually given. Quote 58% as the programme's headline finish figure, not 78%. *(Both are whole-history views. The tier table below describes the same people's CURRENT activity and is not comparable with either.)*
 
 *Engagement tiers answer a **different question** from the personas above. A tier is where a worker sits **right now** — a band blending how recently they interviewed with their completion rate and answer depth — so a worker moves between tiers over time. A persona describes their **whole history** and does not move. The two use deliberately different words so they are never read as the same grouping.*
 
-On that basis: 61% sit in the top two tiers. Full spread — 21% Highly engaged, 40% Engaged, 31% Slipping, 7% Gone quiet, 1% Lost. "Slipping" is mixed: it holds both finishers who are simply inactive now and a large share of the one-and-done group, so it should not be read as uniformly benign. Tier recency is measured against the freshest session in the dataset rather than the wall clock, so these shares do not drift when a data pull runs late.
+| Engagement tier (activity right now) | Workers | % of all |
+|---|---|---|
+| Highly engaged | 298 | 21% |
+| Engaged | 575 | 40% |
+| Slipping | 446 | 31% |
+| Gone quiet | 101 | 7% |
+| Lost | 21 | 1% |
+
+**61% of workers sit in the top two tiers** (Highly engaged + Engaged). This answers a different question from the 78% above: that counted who has ever finished a schedule, this describes how active they are right now. "Slipping" is mixed - of its 446 workers, 295 have actually finished a schedule and are simply inactive now, while 89 are one-and-done workers - so it should not be read as uniformly benign.
+
+*Tier recency is measured against the freshest session in the dataset rather than the wall clock, so these shares do not drift when a data pull runs late.*
 
 ## 2. Re-use across cohorts — and the measurement trap
 
@@ -51,7 +71,11 @@ The multi-arm design re-uses the same workers across studies: **77%** are in ≥
 | Answer depth | 168 words/session | 245 words/session | How much do they actually say? |
 | Workers | 331 | 1,110 |  |
 
-The first row is the trap. "Finished ≥1 schedule" is a **maximum over a worker's cohorts** — a worker in three cohorts gets three independent chances to clear the bar — so it rises with cohort count even if nothing about the worker changed. It shows a 44-point gap. On the like-for-like measure, the gap is **18 points** (44% vs 62%), so roughly **59% of the headline gap is arithmetic rather than behaviour**.
+The first row is the trap. "Finished ≥1 schedule" is a **maximum over a worker's cohorts** - a worker in three cohorts gets three independent chances to clear the bar — so it rises with cohort count even if nothing about the worker changed.
+
+Compare the two rows directly. The headline measure gives a **44-point** gap (88% − 44%). The fair measure gives **18 points** (62% − 44%). So 44 − 18 = **26 points** of the original gap vanish once you stop rewarding a worker for having been put in more cohorts. That is 26 ÷ 44 = **59% of the headline gap**, which is arithmetic rather than behaviour. To be explicit: 59% is that share of the gap — it is NOT an average of the two rates.
+
+*Where the 62% itself comes from: for each multi-cohort worker, take the schedules they completed divided by the schedules they were enrolled in, then average that across all 1,110 of them. Single-cohort workers have exactly one schedule, so their fraction can only be 0 or 1 and the average collapses to "what share finished their one schedule" — which is why both of their measures read 44%.*
 
 What re-used workers clearly do differ on is **depth: 168 → 245 words/session**, while completion rate is essentially unchanged (0.88 vs 0.89).
 
@@ -70,11 +94,13 @@ Genuine early loss is the One-and-done segment: **131 workers (9%)** who started
 | chew (top cadre) | 44% | 39% | ×1.1 |
 | Median first-session depth | 112 words | 123 words (all workers) |  |
 
-Read together, the drop-off profile is a first-time, single-exposure worker in one geography, engaging shallowly on their single interview and not returning.
+**Read each row separately, not stacked.** Each line above is measured on its own, so they cannot be added up into one profile. Only **35 of the 131 one-and-done workers (27%)** are Sokoto *and* chew *and* single-cohort at the same time. The single strongest signal is Sokoto.
 
-On how far workers get: of those whose schedule even *contains* interview 3, **86%** reach it (893 of 1,039). Quoting it against the whole population instead gives 62%, which understates retention because most workers are in short cohorts that stop before interview 3 — that is schedule length, not attrition. The clean worker-level attrition figure is the 9% one-and-done.
+On how far workers get: of those whose schedule even *contains* interview 3, **86%** reach it (893 of 1,039). Quoting it against the whole population instead gives 62%, which understates retention because most workers are in short cohorts that stop before interview 3 — that is schedule length, not attrition.
 
-## 4. Does early answer depth predict finishing?
+On attrition, two numbers that are often confused: **9% (131 workers) is the clean early-loss figure** — they did one interview and vanished. Separately, **316 workers (22% of all) have not finished any schedule** — most of them engaged repeatedly first. So 9% is who we lost immediately; 22% is who has not got there yet. §6 draws its recovery list from the second group.
+
+## 4. Is early answer depth associated with finishing?
 
 Splitting workers at the median depth of their **first session only** (123 words) — first session, so the predictor does not contain the outcome:
 
@@ -83,7 +109,9 @@ Splitting workers at the median depth of their **first session only** (123 words
 | Above-median depth | 725 | 61% | 82% | 222 words |
 | Below-median depth | 716 | 55% | 74% | 80 words |
 
-That is a **6-point** difference on the like-for-like measure (74% vs 82% on the looser "finished ≥1" reading). It is a real association and the strongest early signal available, but it is modest, and the deeper group is also in more cohorts — so treat first-interview support as the leading hypothesis to **test**, not an established lever.
+Read those percentages carefully: **61% means that group completed, on average, 61% of the schedules they were enrolled in** — it does NOT mean they finished everything. Workers in both halves finish some of their schedules and not others.
+
+The difference between the halves is **6 points** on the like-for-like measure (61% vs 55%). On the looser "finished ≥1" reading it is 82% vs 74% — a gap of 8 points. It is a real association and the strongest early signal available, but it is modest — and the deeper group also happens to be in more cohorts, so the two effects are tangled together. Treat first-interview support as the leading hypothesis to **test**, not an established lever.
 
 ## 5. Geography and partner — one finding, not two
 
@@ -105,7 +133,7 @@ The spread is wide: Borno 65% vs Sokoto 42% per-cohort — 23 points.
 
 By cadre, results are much tighter: 52–65% per-cohort across 8 cadres. The largest is **chew (558 workers) at 56%**. Because the cadre spread is narrow while the geography spread is wide, cadre looks like the weaker lever of the two.
 
-## 6. The recoverable at-risk list
+## 6. The reachable at-risk list
 
 **27 workers** started, have not finished any schedule, **were** offered a complete schedule, and have been silent 14–60 days — recent enough that a nudge is plausible. Concentrated in Sokoto (12), Bauchi (9), Kebbi (4), Borno (2). They are the recent slice of **316** unfinished workers, not the whole unfinished population — the rest have been silent longer than 60 days.
 
@@ -113,7 +141,7 @@ By cadre, results are much tighter: 52–65% per-cohort across 8 cadres. The lar
 
 ## 7. What to do — and how confident we are
 
-1. **Run the 27-worker recovery list now.** Small, named, and time-bounded — the only directly actionable item here. Confidence: high, it is a list, not an inference.
+1. **Run the 27-worker recovery list now.** Small, named, and time-bounded — the only directly actionable item here. Confidence: high that these workers are correctly identified; whether a nudge converts them is unknown — running it is how we find out.
 1. **Trial first-interview support, with a control group.** Above-median first-session depth is associated with a 6-point higher per-cohort finish rate. Confidence: moderate — real association, modest size, confounded with cohort count, so measure it rather than rolling it out.
 1. **Treat the Sokoto / EHA gap as one investigation.** It is the largest effect in the data (23 points) and it is where one-and-done concentrates. Confidence: high that the gap is real, none at all on the cause — geography and partner cannot be separated here, so the next step is qualitative, not another cut of this data.
 1. **Keep re-using proven workers for operational reasons** — known, trained, available, and they answer at greater length. Confidence: high on the operational value; do not forecast a finish-rate gain from re-use itself, because the headline gap is mostly arithmetic and re-invitation is itself an outcome of past performance.
@@ -121,8 +149,8 @@ By cadre, results are much tighter: 52–65% per-cohort across 8 cadres. The lar
 ## Method & data
 
 - **Grain:** one row per unique worker (connect_id), deduped across cohorts; metrics union the worker's sessions across every arm. Ties out to the dashboard's canonical started-worker count (1,441).
-- **Per-cohort finish rate** — the measure to quote. Of all the cohort schedules a worker was enrolled in, the share they completed. Unlike "finished ≥1 schedule", it does not rise just because a worker was in more cohorts.
-- **Depth curve** is quoted against the workers whose schedule contains that interview, not the whole population, so a 2-interview worker is not counted as dropping out at interview 3.
+- **Per-cohort finish rate** — the measure to quote. For each worker: the share of *their own* cohort schedules they finished. The published figure is the **average across workers**, each worker counting once - NOT total schedules finished divided by total schedules given, which gives a different (higher) number. Unlike "finished >=1 schedule", it does not rise just because a worker was in more cohorts.
+- **Reach curve** (how far through a schedule a worker got) is quoted against the workers whose schedule contains that interview, not the whole population, so a 2-interview worker is not counted as dropping out at interview 3.
 - **Engagement tier (RFM):** recency + completion rate + answer depth, each scored 1–5, with recency measured against the freshest session in the dataset rather than today's date.
 - **Personas** are rule-based. "Partial progress" means over half of triggered interviews completed but **no** schedule finished — it is not a slow finisher.
 - **Limits.** Observational, so associations only. Small groups are pooled into an "Other / not recorded" row rather than dropped or published as their own rate. Figures move with each daily refresh; this document is generated from dashboard render v147.
