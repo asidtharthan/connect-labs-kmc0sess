@@ -107,6 +107,18 @@
       "note": "PR #71 + docx regen. Both briefs now generated from one code path off the PUBLISHED payload; --check guards staleness. No pipeline change.",
       "live_render_version": 146,
       "verified": null
+    },
+    {
+      "id": "cp-0007",
+      "label": "tier/persona name collision fixed; briefs regenerated (render v147)",
+      "tag": "cp-0007-tier-persona-name-collision-fixed-briefs",
+      "created_utc": "2026-08-11 18:24 UTC",
+      "git_sha": "fa519e4bb88d95cf1979bf10ce300c775f999e2a",
+      "git_subject": "docs(interviews): regenerate both briefs from live render v147 (renamed tiers)",
+      "branch": "main",
+      "note": "PR #72: tier labels renamed to activity-state language (Highly engaged/Engaged/Slipping/Gone quiet/Lost) so they no longer collide with persona names; panels name the timeframe; tier lookups made position-based. Briefs regenerated from v147, --check exits 0.",
+      "live_render_version": 147,
+      "verified": null
     }
   ]
 }

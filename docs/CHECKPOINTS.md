@@ -18,6 +18,7 @@ python checkpoint.py rollback cp-0001     # prints the runbook
 | **cp-0004** | 2026-08-07 17:40 | `ba3b095e` | `cp-0004-post-re-audit-live-calibrated-floors-sta` | 140 | 27/27 | 39/39 | 196/196 | 358.9 | 153.1 | post re-audit: live-calibrated floors, stall deadlock fixed, unknown-schedule regression fixed |
 | **cp-0005** | 2026-08-07 18:18 | `2ba286b8` | `cp-0005-deployed-live-render-v142-all-audit-work` | 142 | 27/27 | 39/39 | 196/196 | 359.6 | 152.4 | DEPLOYED — live render v142, all audit work merged |
 | **cp-0006** | 2026-08-11 15:37 | `6238f18b` | `cp-0006-flw-briefs-regenerated-from-live-payload` | 146 | — | — | — | — | — | FLW briefs regenerated from live payload (render v146) |
+| **cp-0007** | 2026-08-11 18:24 | `fa519e4b` | `cp-0007-tier-persona-name-collision-fixed-briefs` | 147 | — | — | — | — | — | tier/persona name collision fixed; briefs regenerated (render v147) |
 
 ## Notes
 
@@ -27,3 +28,4 @@ python checkpoint.py rollback cp-0001     # prints the runbook
 - **cp-0004 — post re-audit: live-calibrated floors, stall deadlock fixed, unknown-schedule regression fixed**: Adversarial re-audit found the 7-state reclassification EXACT (0 counterexamples / 13,042 cells) but caught that local hq_pull_full was 39% stale and the guard floors were calibrated on it. Floors now live-derived + dynamic. Tier 3 no longer deadlocks. Ready to merge+publish.
 - **cp-0005 — DEPLOYED — live render v142, all audit work merged**: Merged PRs #69 + #70 to main, published v142 via workflow_dispatch. First run with genuinely complete data (all 12 HQ domains): master_rows 9930, started 9393. Universe fix VERIFIED on live data — matrix started/completed cells now equal counts exactly (the 210/182 gap is closed). Regression guard seeded and made its first day-over-day comparison.
 - **cp-0006 — FLW briefs regenerated from live payload (render v146)**: PR #71 + docx regen. Both briefs now generated from one code path off the PUBLISHED payload; --check guards staleness. No pipeline change.
+- **cp-0007 — tier/persona name collision fixed; briefs regenerated (render v147)**: PR #72: tier labels renamed to activity-state language (Highly engaged/Engaged/Slipping/Gone quiet/Lost) so they no longer collide with persona names; panels name the timeframe; tier lookups made position-based. Briefs regenerated from v147, --check exits 0.
