@@ -20,6 +20,7 @@ python checkpoint.py rollback cp-0001     # prints the runbook
 | **cp-0006** | 2026-08-11 15:37 | `6238f18b` | `cp-0006-flw-briefs-regenerated-from-live-payload` | 146 | — | — | — | — | — | FLW briefs regenerated from live payload (render v146) |
 | **cp-0007** | 2026-08-11 18:24 | `fa519e4b` | `cp-0007-tier-persona-name-collision-fixed-briefs` | 147 | — | — | — | — | — | tier/persona name collision fixed; briefs regenerated (render v147) |
 | **cp-0008** | 2026-08-11 20:09 | `71cf2ab5` | `cp-0008-clarity-pass-tab-labelling-brief-rewrite` | 148 | — | — | — | — | — | clarity pass: tab labelling + brief rewrite (render v148) |
+| **cp-0009** | 2026-08-11 20:50 | `dfdb564f` | `cp-0009-flw-analysis-lga-peer-density-pace-rende` | 149 | — | — | — | — | — | FLW analysis: LGA + peer density + pace (render v149) |
 
 ## Notes
 
@@ -31,3 +32,4 @@ python checkpoint.py rollback cp-0001     # prints the runbook
 - **cp-0006 — FLW briefs regenerated from live payload (render v146)**: PR #71 + docx regen. Both briefs now generated from one code path off the PUBLISHED payload; --check guards staleness. No pipeline change.
 - **cp-0007 — tier/persona name collision fixed; briefs regenerated (render v147)**: PR #72: tier labels renamed to activity-state language (Highly engaged/Engaged/Slipping/Gone quiet/Lost) so they no longer collide with persona names; panels name the timeframe; tier lookups made position-based. Briefs regenerated from v147, --check exits 0.
 - **cp-0008 — clarity pass: tab labelling + brief rewrite (render v148)**: PR #73. Fixes from two independent audits: tab sort order/column headers/global-section pills/empty-state guard/small-n suppression; brief gains a how-to-read section, the 58% programme figure, marginal-shares warning, 9%-vs-22% reconciliation, position-based tier prose.
+- **cp-0009 — FLW analysis: LGA + peer density + pace (render v149)**: PR #74. Three decision-driving additions; rhythm/onboarding/education tested and deliberately not reported. Geography finding overturns section 5's altitude: between-state 23pts vs 47pts across LGAs.

@@ -131,6 +131,18 @@
       "note": "PR #73. Fixes from two independent audits: tab sort order/column headers/global-section pills/empty-state guard/small-n suppression; brief gains a how-to-read section, the 58% programme figure, marginal-shares warning, 9%-vs-22% reconciliation, position-based tier prose.",
       "live_render_version": 148,
       "verified": null
+    },
+    {
+      "id": "cp-0009",
+      "label": "FLW analysis: LGA + peer density + pace (render v149)",
+      "tag": "cp-0009-flw-analysis-lga-peer-density-pace-rende",
+      "created_utc": "2026-08-11 20:50 UTC",
+      "git_sha": "dfdb564f84cd60c6d421a38076864abbe4a33cb1",
+      "git_subject": "feat(interviews): FLW analysis below state level - LGA, peer density, pace vs schedule (#74)",
+      "branch": "main",
+      "note": "PR #74. Three decision-driving additions; rhythm/onboarding/education tested and deliberately not reported. Geography finding overturns section 5's altitude: between-state 23pts vs 47pts across LGAs.",
+      "live_render_version": 149,
+      "verified": null
     }
   ]
 }
