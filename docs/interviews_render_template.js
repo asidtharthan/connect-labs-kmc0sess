@@ -1613,10 +1613,14 @@ function WorkflowUI(props) {
           var M = FE.micro;
           var DIMS = [["state", "State"], ["llo", "Partner (LLO)"], ["type", "Cadre"],
                       ["tier", "Engagement tier — right now"], ["persona", "Persona — whole history"],
-                      ["nco", "Cohorts they were in"], ["fin", "Finished a schedule?"]];
-          var DIM_COLOR = { state: "#1565C0", llo: "#6d28d9", type: "#00695C", tier: "#0f766e", persona: "#b45309", nco: "#7c3aed", fin: "#065f46" };
+                      ["nco", "Cohorts they were in"], ["fin", "Finished a schedule?"],
+                      ["peers", "Co-workers in their settlement"], ["pace", "Pace vs their schedule"]];
+          var DIM_COLOR = { state: "#1565C0", llo: "#6d28d9", type: "#00695C", tier: "#0f766e", persona: "#b45309", nco: "#7c3aed", fin: "#065f46",
+                            peers: "#0e7490", pace: "#a16207" };
           var DIM_HELP = {
             tier: "Where the worker is TODAY: a score band blending how recently they interviewed, their completion rate and their answer depth. A worker moves between tiers over time. Because it also rewards recency and answer depth, the top tier is NOT necessarily the highest finish rate.",
+            peers: "How many other FLWs work in the same settlement. A proxy for informal peer support, which the community-health-worker literature repeatedly identifies as a retention factor.",
+            pace: "Their typical gap between interviews measured against what their own schedule asks for — so it is comparable across subgroups whose cadences differ (3 to 14 days).",
             persona: "What the worker has DONE overall, across their whole history — a fixed behavioural segment, not a current-state reading. Deliberately worded differently from the tiers so the two are never confused. NOTE: several personas are DEFINED by whether the worker finished, so the right-hand % in this panel is a definition, not a result (One-and-done is 0% by construction).",
           };
           function unpackNum(spec) {

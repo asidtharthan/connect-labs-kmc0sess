@@ -121,6 +121,16 @@ def build_records():
             _first = [s for s in f["sessions"].values() if s["date"] == dates[0]]
             first_words = round(sum(s["words"] for s in _first) / len(_first), 1) if _first else 0
         n_fin, n_known, n_offered = cohort_finish(f)
+        # The panel-survey literature separates two things we can measure independently: how LATE a
+        # worker responds (pace) and how ERRATIC they are (stability). Stability is the stronger
+        # retention signal there, so keep them apart rather than collapsing into "engagement".
+        design_cadence = max(
+            (DESIGN[bm.cohort_to_sg(c)]["cadence"] for c in f["cohorts"] if bm.cohort_to_sg(c)), default=None
+        )
+        train = [
+            bm.cohort_info[c]["training_date"] for c in f["cohorts"] if bm.cohort_info.get(c, {}).get("training_date")
+        ]
+        onboarding_lag = (dates[0] - min(train)).days if (dates and train) else None
         max_design_len = max(
             (len(DESIGN[bm.cohort_to_sg(c)]["topics"]) for c in f["cohorts"] if bm.cohort_to_sg(c)), default=0
         )
@@ -168,9 +178,64 @@ def build_records():
                 "recency_days": (ASOF - dates[-1]).days if dates else None,
                 "max_gap_days": max(gaps) if gaps else 0,
                 "median_cadence_days": round(statistics.median(gaps), 1) if gaps else None,
+                "design_cadence_days": design_cadence,
+                # >1 = slower than the schedule asks; the schedule is the fair yardstick, not a fixed
+                # number of days, because cadences differ by subgroup (3 to 14 days).
+                "pace_ratio": (
+                    round(statistics.median(gaps) / design_cadence, 2) if gaps and design_cadence else None
+                ),
+                # how erratic: longest silence relative to their own typical gap (1.0 = perfectly even)
+                "gap_ratio": (
+                    round(max(gaps) / statistics.median(gaps), 2) if gaps and statistics.median(gaps) > 0 else None
+                ),
+                "onboarding_lag_days": onboarding_lag,
                 "avg_words_per_session": round(words / n_sess, 1) if n_sess else 0,
                 "words_per_msg": round(words / msgs, 1) if msgs else 0,
             }
+        )
+
+    # Peer density: how many other workers share a worker's settlement. The CHW-attrition literature
+    # repeatedly identifies informal PEER SUPPORT as a retention factor, and settlement is the finest
+    # geography we hold (804 distinct values) — too granular to report as a cut, but exactly right for
+    # asking "does working alongside others help?".
+    _by_settlement = Counter(x["settlement"] for x in records if x["settlement"])
+    for x in records:
+        peers = _by_settlement.get(x["settlement"], 0)
+        x["settlement_peers"] = peers
+        x["peer_band"] = (
+            "Only worker in settlement" if peers <= 1 else "2-4 in settlement" if peers <= 4 else "5+ in settlement"
+        )
+        pr = x["pace_ratio"]
+        x["pace_band"] = (
+            "On/ahead of schedule"
+            if pr is not None and pr <= 1.25
+            else "Somewhat slow"
+            if pr is not None and pr <= 2
+            else "Very slow"
+            if pr is not None
+            else "Single interview (no pace)"
+        )
+        gr = x["gap_ratio"]
+        x["stability_band"] = (
+            "Steady rhythm"
+            if gr is not None and gr <= 1.5
+            else "Some variation"
+            if gr is not None and gr <= 3
+            else "Erratic"
+            if gr is not None
+            else "Single interview (no rhythm)"
+        )
+        ol = x["onboarding_lag_days"]
+        x["onboarding_band"] = (
+            "Started within a week"
+            if ol is not None and ol <= 7
+            else "1-2 weeks"
+            if ol is not None and ol <= 14
+            else "2-4 weeks"
+            if ol is not None and ol <= 28
+            else "Over a month"
+            if ol is not None
+            else "Unknown"
         )
 
     depth_vals = sorted(x["avg_words_per_session"] for x in records if x["avg_words_per_session"] > 0)
@@ -254,6 +319,14 @@ def aggregate(records):
             "finished_pc": round(100 * sum(z["finish_rate_per_cohort"] for z in v) / len(v)),
             "depth": round(sum(z["avg_words_per_session"] for z in v) / len(v)),
         }
+
+    def ordered_cut(key, order, minn=1):
+        """Like crosscut but preserves a meaningful order (these are bands, not nominal groups) and
+        keeps every band so the reader can see the whole gradient, including small ones."""
+        grp = defaultdict(list)
+        for x in records:
+            grp[x.get(key) or "Unknown"].append(x)
+        return [_row(k, grp[k]) for k in order if len(grp.get(k, [])) >= minn]
 
     def crosscut(key, minn=20):
         """Group by `key`. Buckets under `minn` are pooled into one honest residual row rather than
@@ -385,7 +458,63 @@ def aggregate(records):
             "byState": _pct_by(at_risk, "state", 4),
         },
         "armCombos": [{"k": k, "n": v} for k, v in combos.most_common(5)],
+        # ---- first-pass additions (2026-08-11): geography below state, peer support, response
+        # behaviour, onboarding speed. Grounded in the CHW-attrition and panel-survey literature:
+        # peer support is a repeatedly-identified retention factor, and response STABILITY predicts
+        # retention more strongly than response SPEED.
+        "byLGA": crosscut("lga", minn=20),
+        "byPeers": ordered_cut("peer_band", ["Only worker in settlement", "2-4 in settlement", "5+ in settlement"]),
+        "byPace": ordered_cut(
+            "pace_band", ["On/ahead of schedule", "Somewhat slow", "Very slow", "Single interview (no pace)"]
+        ),
+        "geoVariance": geo_variance(records),
         "micro": micro(records),
+    }
+
+
+def geo_variance(records):
+    """How much of the finish-rate spread is BETWEEN states vs WITHIN a state (between its LGAs)?
+
+    This is the one number that speaks to the state-vs-partner problem. Partner and state are perfectly
+    nested here, so no cut of this data can separate them — but if most of the variation sits WITHIN
+    each state, then a partner-wide or state-wide explanation is the wrong shape regardless, and the
+    action is local. Reported as the spread (max-min) at each level, which is what a reader can act on.
+    """
+    from statistics import mean
+
+    by_state, by_lga = {}, {}
+    for x in records:
+        if not x.get("state"):
+            continue
+        by_state.setdefault(x["state"], []).append(x["finish_rate_per_cohort"])
+        if x.get("lga"):
+            by_lga.setdefault((x["state"], x["lga"]), []).append(x["finish_rate_per_cohort"])
+    st = {k: round(100 * mean(v)) for k, v in by_state.items() if len(v) >= 20}
+    lg = {k: round(100 * mean(v)) for k, v in by_lga.items() if len(v) >= 20}
+    if not st or not lg:
+        return {}
+    within = {}
+    for (state, _lga), rate in lg.items():
+        within.setdefault(state, []).append(rate)
+    worst_state = min(st, key=lambda k: st[k])
+    return {
+        "state_spread": max(st.values()) - min(st.values()),
+        "lga_spread": max(lg.values()) - min(lg.values()),
+        "n_lgas": len(lg),
+        "states": [
+            {
+                "k": k,
+                "pc": v,
+                "lga_spread": (max(within[k]) - min(within[k])) if within.get(k) else 0,
+                "n_lgas": len(within.get(k, [])),
+            }
+            for k, v in sorted(st.items(), key=lambda kv: -kv[1])
+        ],
+        "worst_state": worst_state,
+        "worst_state_best_lga": max((v for (s2, _l), v in lg.items() if s2 == worst_state), default=None),
+        "best_state_worst_lga": max(
+            [(min((v for (s2, _l), v in lg.items() if s2 == s), default=None), s) for s in st], key=lambda t: st[t[1]]
+        )[0],
     }
 
 
@@ -405,6 +534,8 @@ def micro(records):
         ("persona", lambda x: x["persona"]),
         ("nco", lambda x: str(x["n_cohorts"])),
         ("fin", lambda x: "Finished ≥1 schedule" if x["finished_any"] else "No schedule finished"),
+        ("peers", lambda x: x["peer_band"]),
+        ("pace", lambda x: x["pace_band"]),
     ]
     # Dimensions whose values have a NATURAL ORDER must publish the dictionary in that order, because
     # the dashboard renders rows in dictionary order. Frequency-ordering an ordered scale made the tab
@@ -415,6 +546,8 @@ def micro(records):
         "tier": TIER_ORDER,
         "persona": PERSONA_ORDER,
         "fin": ["Finished ≥1 schedule", "No schedule finished"],
+        "peers": ["Only worker in settlement", "2-4 in settlement", "5+ in settlement"],
+        "pace": ["On/ahead of schedule", "Somewhat slow", "Very slow", "Single interview (no pace)"],
     }
     out = {"n": len(records), "dict": {}, "col": {}}
     for name, fn in dims:
@@ -497,6 +630,14 @@ CSV_COLS = [
     "recency_days",
     "max_gap_days",
     "median_cadence_days",
+    "design_cadence_days",
+    "pace_ratio",
+    "gap_ratio",
+    "onboarding_lag_days",
+    "settlement_peers",
+    "peer_band",
+    "pace_band",
+    "stability_band",
     "avg_words_per_session",
     "words_per_msg",
     "R",
