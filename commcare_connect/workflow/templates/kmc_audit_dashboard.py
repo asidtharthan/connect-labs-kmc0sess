@@ -306,7 +306,11 @@ RENDER_CODE = r"""/* KMC Audit Dashboard — RENDER_CODE (register-faithful band
 
 // ============================= compute core (PARITY-LOCKED) =============================
 var WMIN = 500.0, WMAX = 5000.0, PAIR_MIN = 1, PAIR_MAX = 30, KG_TO_G = 1000.0;
-var DAY_MS = 86400000, EARTH_R_M = 6371000.0, EXCLUDE_MIN_CASES = 20;
+var DAY_MS = 86400000, EARTH_R_M = 6371000.0;
+// Caseload below which an FLW is LABELLED low-caseload. NOT an exclusion: the register sets a
+// minimum per metric (5 to 30) and nowhere authorises a global gate. Excluding on 20 cases
+// suppressed 272 metric cells that clear their own register minimum, 73 of them RED.
+var LOW_CASELOAD_CASES = 20;
 // fields that exist in only SOME app versions, so their denominators must be scoped
 var SCOPED_FIELDS = ["equipment_image", "kmc_wrap_check", "kmc_status_entered", "flw_program_conclusion_reason"];
 
@@ -416,8 +420,15 @@ function groupCases(visitRows){
     // visits-per-case denominator penalises the FLW twice for one event. A case that RAN ITS
     // COURSE and graduated (recovered with >=4 visits) is NOT early — those are 49.3% of the
     // eligible denominator and carry MORE visits, so excluding them would manufacture REDs.
-    var isEarly=(statusEntered["parents_discontinued"]||conclusionReason==="caregiver_unavailable"
-      ||conclusionReason==="family_relocated"
+    // Two flavours, deliberately separated. isExitExogenous = the case left for a reason outside
+    // the FLW's control, so it could not accumulate visits -> excluded from low_avg_visits, the
+    // same logic the register applies to deaths. isEarly = all four register reasons, used by
+    // flw_early_discharge which SCORES the behaviour. The 'recovered before visit 4' leg must NOT
+    // reach low_avg_visits: removing a case for having too few visits, from the metric that
+    // measures too few visits, is circular and hid real flags.
+    var isExitExogenous=(statusEntered["parents_discontinued"]||conclusionReason==="caregiver_unavailable"
+      ||conclusionReason==="family_relocated")?true:false;
+    var isEarly=(isExitExogenous
       ||(conclusionReason==="svn_recovered_or_met_discharge_criteria"&&followups.length<4))?true:false;
     // Weight series (reg + follow-ups). Registration rows carry no grp_kmc_visit.visit_date, so
     // without the reg_date fallback the enrolment weight — the birth anchor where neonatal weight
@@ -428,7 +439,7 @@ function groupCases(visitRows){
     ws.sort(function(a,b){ return a[0]-b[0]; });
     cases.push({case_id:cid,reg_date:regDate,discharge_date:dischargeDate,dob:dob,birth_location:birthLocation,
       followups:followups,followup_dates:followupDates,n_followup:followups.length,reg_rows:regRows,
-      last_visit_date:lastVisitDate,is_death:isDeath,status_entered:statusEntered,conclusion_reason:conclusionReason,is_crf:isCrf,is_early:isEarly,n_additional:nAdditional,weights:ws});
+      last_visit_date:lastVisitDate,is_death:isDeath,status_entered:statusEntered,conclusion_reason:conclusionReason,is_crf:isCrf,is_early:isEarly,is_exit_exogenous:isExitExogenous,n_additional:nAdditional,weights:ws});
   });
   return cases;
 }
@@ -470,12 +481,7 @@ function inFieldOpps(row, fo){ return (!fo.tagged) || fo.opps[String(rget(row,"o
 
 function deriveMetrics(aggRow, visitRows, asOf, fieldMap){
   var totalCases=pint(rget(aggRow,"total_cases"))||0;
-  var excluded=totalCases<EXCLUDE_MIN_CASES;
   var out={}, k, i;
-  if(excluded){
-    for(i=0;i<METRIC_KEYS.length;i++) out[METRIC_KEYS[i]]={value:null,rag:"N/A",num:null,den:null,excluded:true};
-    out._excluded=true; out._total_cases=totalCases; return out;
-  }
   var cs=groupCases(visitRows);
   var fus=[]; for(i=0;i<cs.length;i++) for(var j=0;j<cs[i].followups.length;j++) fus.push(cs[i].followups[j]);
   function ageDays(regMs){ return (asOf-regMs)/DAY_MS; }
@@ -484,7 +490,7 @@ function deriveMetrics(aggRow, visitRows, asOf, fieldMap){
   // NOTE: the is_crf exclusion that used to sit here is GONE and must stay gone — it only existed
   // to drop the phantom mother-case. Registrations now key to the baby (caseIdOf), so a case
   // carrying a CRF row IS the baby's case; excluding it would remove nearly every V3 case.
-  var elig=cs.filter(function(c){ return c.reg_date!==null && ageDays(c.reg_date)>=60 && !c.is_death && !c.is_early; });
+  var elig=cs.filter(function(c){ return c.reg_date!==null && ageDays(c.reg_date)>=60 && !c.is_death && !c.is_exit_exogenous; });
   if(elig.length>=10){ var num=0; for(i=0;i<elig.length;i++) num+=elig[i].n_followup; var avg=num/elig.length; out.low_avg_visits=M(avg,ragLowBad(avg,5,3.0001),num,elig.length); }
   else out.low_avg_visits=NA();
 
@@ -587,7 +593,8 @@ function deriveMetrics(aggRow, visitRows, asOf, fieldMap){
   var regCases=cs.filter(function(c){ if(c.reg_rows.length===0) return false; for(var q=0;q<c.reg_rows.length;q++){ if(inFieldOpps(c.reg_rows[q],_wfo)) return true; } return false; });
   if(regCases.length>=20){ var bd=0,presentW=0; for(i=0;i<regCases.length;i++){ var wrap=null; for(j=0;j<regCases[i].reg_rows.length;j++){ var wv=low(rget(regCases[i].reg_rows[j],"kmc_wrap_check")); if(wv!==null){ wrap=wv; break; } } if(wrap!==null) presentW++; if(wrap!=="yes") bd++; } if(presentW===0&&!_wfo.tagged){ out.kmc_wrap_missing=NA(); } else { var pw=100.0*bd/regCases.length; out.kmc_wrap_missing=M(pw,ragHighBad(pw,15,40),bd,regCases.length); } } else out.kmc_wrap_missing=NA();
 
-  out._excluded=false; out._total_cases=totalCases;
+  // Retained for the UI as a LABEL, not a gate — every metric above enforced its own register minimum.
+  out._excluded=false; out._low_caseload=totalCases<LOW_CASELOAD_CASES; out._total_cases=totalCases;
   return out;
 }
 
@@ -800,7 +807,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
 
   var kpi = React.useMemo(function(){
     var loaded=scoped.length, excluded=0, anyRed=0, anyYellow=0, totalVisits=0, totalCases=0, addVisits=0;
-    scoped.forEach(function(r){ if (r._excluded) excluded++; if (r.red_count>=1) anyRed++; if (r.yellow_count>=1) anyYellow++; totalVisits+=r.total_visits||0; totalCases+=r.total_cases||0; addVisits+=r.additional_visits||0; });
+    scoped.forEach(function(r){ if (r._low_caseload) excluded++; if (r.red_count>=1) anyRed++; if (r.yellow_count>=1) anyYellow++; totalVisits+=r.total_visits||0; totalCases+=r.total_cases||0; addVisits+=r.additional_visits||0; });
     return { loaded:loaded, excluded:excluded, anyRed:anyRed, anyYellow:anyYellow, totalVisits:totalVisits, totalCases:totalCases, addVisits:addVisits };
   }, [scoped]);
 
@@ -819,18 +826,18 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
       byC[c]=byC[c]||{}; var s=byC[c][l]=byC[c][l]||{flws:0,red:0,yellow:0,clean:0,excluded:0};
       var t=lloTotals[l]=lloTotals[l]||{red:0,yellow:0,clean:0,excluded:0};
       s.flws++;
-      if (r._excluded){ s.excluded++; t.excluded++; }
+      if (r._low_caseload){ s.excluded++; t.excluded++; }
       else if (r.red_count>=1){ s.red++; t.red++; }
       else if (r.yellow_count>=1){ s.yellow++; t.yellow++; }
       else { s.clean++; t.clean++; }
     });
     var flagRed={}; for (var mi=0;mi<METRIC_KEYS.length;mi++) flagRed[METRIC_KEYS[mi]]=0;
-    scoped.forEach(function(r){ if (r._excluded) return; for (var mj=0;mj<METRIC_KEYS.length;mj++){ var k=METRIC_KEYS[mj]; if (effRag(r,k)==="RED") flagRed[k]++; } });
+    scoped.forEach(function(r){ for (var mj=0;mj<METRIC_KEYS.length;mj++){ var k=METRIC_KEYS[mj]; if (effRag(r,k)==="RED") flagRed[k]++; } });
     var topFlags=METRIC_KEYS.map(function(k){ return {k:k,label:META[k].label,red:flagRed[k]}; }).sort(function(a,b){ return b.red-a.red; });
     var catRed={}; for (var ci=0;ci<CAT_ORDER.length;ci++) catRed[CAT_ORDER[ci]]=0;
     var risk=[], analyzedN=0, flaggedRedN=0, cleanN=0;
     scoped.forEach(function(r){
-      if (r._excluded) return;
+      // low-caseload FLWs are scored now, so they belong in the risk list if they carry flags
       analyzedN++;
       var catHit={}, reds=[];
       for (var mi=0;mi<METRIC_KEYS.length;mi++){ var k=METRIC_KEYS[mi]; if (effRag(r,k)==="RED"){ reds.push(META[k].label); catHit[CAT[k]]=1; } }
@@ -850,7 +857,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
       {label:"Red",data:llos.map(function(l){return overview.lloTotals[l].red;}),backgroundColor:"#ef4444"},
       {label:"Yellow",data:llos.map(function(l){return overview.lloTotals[l].yellow;}),backgroundColor:"#f59e0b"},
       {label:"Clean",data:llos.map(function(l){return overview.lloTotals[l].clean;}),backgroundColor:"#22c55e"},
-      {label:"Excluded",data:llos.map(function(l){return overview.lloTotals[l].excluded;}),backgroundColor:"#d1d5db"}]},
+      {label:"Low caseload",data:llos.map(function(l){return overview.lloTotals[l].excluded;}),backgroundColor:"#d1d5db"}]},
       options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom",labels:{font:{size:10}}}},scales:{x:{stacked:true,ticks:{font:{size:10}}},y:{stacked:true,beginAtZero:true,ticks:{font:{size:10}}}}}});
     return function(){ if (byLloInst.current){ byLloInst.current.destroy(); byLloInst.current=null; } };
   }, [activeTab, overview]);
@@ -864,7 +871,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
     return function(){ if (topFlagInst.current){ topFlagInst.current.destroy(); topFlagInst.current=null; } };
   }, [activeTab, overview]);
 
-  var analyzed = scoped.filter(function(r){ return !r._excluded; });
+  var analyzed = scoped;
   var filtered = React.useMemo(function(){
     var data = analyzed.slice();
     if (lloFilter!=="all") data=data.filter(function(d){return d.llo===lloFilter;});
@@ -913,12 +920,12 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
     return (scope!=="all" && winActive && WINDOWED_METRICS[k] && d.win && d.win[k]) ? d.win[k] : d[k];
   }
   function _buildExportMatrix(scope){
-    var head=["FLW name","Username","LLO","Country","Versions","Opportunity IDs","Excluded (<20 cases)","Total cases","Total visits","Red flags","Yellow flags"];
+    var head=["FLW name","Username","LLO","Country","Versions","Opportunity IDs","Low caseload (<20 cases)","Total cases","Total visits","Red flags","Yellow flags"];
     EXPORT_METRIC_ORDER.forEach(function(k){ var lb=META[k].label; head.push(lb); head.push(lb+" band"); head.push(lb+" n/d"); });
     var mx=[head];
     _exportRows(scope).forEach(function(d){
       var row=[ d.flw_name||d.username||"", d.username||"", d.llo||"", d.country||"", (d.versions||[]).join("/"),
-        (d.opportunity_ids||[]).join(" "), d._excluded?"yes":"no", d.total_cases, d.total_visits, d.red_count, d.yellow_count ];
+        (d.opportunity_ids||[]).join(" "), d._low_caseload?"yes":"no", d.total_cases, d.total_visits, d.red_count, d.yellow_count ];
       EXPORT_METRIC_ORDER.forEach(function(k){ var m=_metricForExport(d,k,scope)||{}; var v=fmtVal(m.value, META[k].unit);
         row.push(v==null?"NE":v); row.push((m.rag==null||m.rag==="N/A")?"NE":m.rag);
         row.push((m.num!=null&&m.den!=null)?(m.num+"/"+m.den):""); });
@@ -1017,7 +1024,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
       h("div",null, h("i",{className:"fa-regular fa-clock mr-1"}), "Last loaded: ", h("span",{className:"font-semibold text-gray-700"}, freshness.loaded)),
       freshness.latestVisit ? h("div",{className:"mt-0.5"}, "Latest visit in data: ", h("span",{className:"font-semibold text-gray-700"}, freshness.latestVisit)) : null));
 
-  var kpiDefs=[["FLWs Loaded", kpi.loaded, "blue"],["≥1 Red", kpi.anyRed, "red"],["≥1 Yellow", kpi.anyYellow, "amber"],["Excluded (<20)", kpi.excluded, "gray"],["KMC Visits", kpi.totalVisits.toLocaleString(), "green", (kpi.totalVisits-kpi.addVisits).toLocaleString()+" scheduled · "+kpi.addVisits.toLocaleString()+" additional"],["Total Cases", kpi.totalCases.toLocaleString(), "teal"]];
+  var kpiDefs=[["FLWs Loaded", kpi.loaded, "blue"],["≥1 Red", kpi.anyRed, "red"],["≥1 Yellow", kpi.anyYellow, "amber"],["Low caseload (<20)", kpi.excluded, "gray"],["KMC Visits", kpi.totalVisits.toLocaleString(), "green", (kpi.totalVisits-kpi.addVisits).toLocaleString()+" scheduled · "+kpi.addVisits.toLocaleString()+" additional"],["Total Cases", kpi.totalCases.toLocaleString(), "teal"]];
   var kpiEl = h("div",{className:"grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3"}, kpiDefs.map(function(c){
     return h("div",{key:c[0], className:"bg-white rounded-lg shadow-sm p-4 border-l-4 border-"+c[2]+"-500"}, h("div",{className:"text-2xl font-bold text-gray-900"}, c[1]), h("div",{className:"text-xs text-gray-600 mt-1"}, c[0]),
       c[3] ? h("div",{className:"text-[11px] text-gray-400 mt-0.5"}, c[3]) : null);
@@ -1124,7 +1131,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
       h("span",{className:"text-gray-300"}, "•"),
       h("span",{className:"font-bold text-green-700"}, overview.cleanN), h("span",null,"clean (no red/yellow)"),
       h("span",{className:"text-gray-300"}, "•"),
-      h("span",{className:"font-bold text-gray-500"}, kpi.excluded), h("span",null,"too new to assess (<20 cases)")));
+      h("span",{className:"font-bold text-gray-500"}, kpi.excluded), h("span",null,"with a low caseload (<20 cases) — still scored on whatever clears each metric's minimum")));
 
   // 2. Concern-category cards — what KIND of problem
   var catColors={"Fraud / data integrity":"border-red-400","Clinical quality & skill":"border-amber-400","Model adherence":"border-blue-400"};
@@ -1177,7 +1184,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
                 h("span",{className:"px-2 py-0.5 rounded text-xs bg-red-100 text-red-700"}, s.red+" red"),
                 h("span",{className:"px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700"}, s.yellow+" yellow"),
                 h("span",{className:"px-2 py-0.5 rounded text-xs bg-green-100 text-green-700"}, s.clean+" clean"),
-                h("span",{className:"px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500"}, s.excluded+" excl")));
+                h("span",{className:"px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500"}, s.excluded+" low")));
           })));
     });
 
