@@ -1,162 +1,127 @@
 # FLW Retention & Engagement — Executive Analysis
 
-*Connect Interviews program · per-FLW, cross-cohort · data as of 2026-08-07 (matches live dashboard v140)*
-*Universe: **1,441 unique front-line workers (FLWs)** who started ≥1 interview · 100% demographic coverage · every metric dedups the worker across all cohorts/arms they were part of.*
+*Connect Interviews programme · per-FLW, cross-cohort · data as of 2026-08-11 · build 2026-08-11 05:47 UTC · dashboard render v146*
 
-> The Word version (`FLW_Retention_Analysis_Brief.docx`) and this file are both generated from the same payload the dashboard embeds, so all figures match the live **FLW Retention** tab.
-
----
-
-> ## ⚠️ Correction notice — 2026-08-07 (read before citing §2 or §4)
->
-> A statistical audit of this analysis found that two of its headline claims are artifacts of how "finished" was
-> measured. **Do not circulate §2 or §4 in their current form.** Both the dashboard tab and the brief generator have
-> been corrected; this document regenerates with the corrected figures on the next data refresh.
->
-> 1. **§2 / exec-summary #2 — "re-use compounds engagement, finish rate 44% → 88%" is not supported.**
->    "Finished" here means *finished at least one* of a worker's cohort schedules. That is a maximum over cohorts, so
->    a worker in three cohorts gets three independent chances to clear the bar and the rate rises even if nothing
->    about them changed. On the like-for-like measure — the share of *their own* schedules a worker completes —
->    the live figures are **44% (single) vs 61% (multi)**: a real 17-point difference, but roughly 60% of the
->    44-point headline gap was arithmetic rather than behaviour. Completion rate (0.88 vs 0.89) is flat. And
->    "was re-invited" is itself an outcome of how a worker performed the first time, so even the residual gap
->    is not evidence that re-use *causes* finishing.
-> 2. **§4 / exec-summary #4 — "first-interview depth predicts finishing, 88% vs 68%" overstates a real but modest
->    effect.** The split was computed on each worker's *lifetime* average answer depth across every interview, not
->    their first interview, so the predictor partly contained the outcome. Re-run on the first session only and
->    against the per-cohort finish rate, the gap is roughly **5 points**, not 20. Worth testing as a lever; not
->    established as one.
->
-> Two further wording corrections: the persona previously called **"Slow-but-finishing"** has finished *nothing* by
-> construction (it is reachable only after both "finished" branches fail) and is now **"Partial progress"**; and
-> **"Slipping is largely benign"** is not accurate — that tier also holds a large share of the one-and-done group.
->
-> Method note: engagement recency is now measured against the freshest session in the dataset rather than the wall
-> clock, so these figures no longer drift when a data pull runs late.
-
----
+*Universe: **1,441 unique front-line workers (FLWs)** who started ≥1 interview · 100% have demographics · every metric dedups the worker across all cohorts/arms they were part of. Generated from the same payload the dashboard's **FLW Retention** tab embeds, so every figure here matches what is on screen.*
 
 ## Why this analysis exists
 
-Every other view of this program is **cohort-level** — how a study arm performed. This one looks at the program **through the worker**: one row per unique FLW, their interview history stitched across every cohort and arm they touched. That matters because **most workers are re-used across studies** — so the worker's cumulative experience, not any single cohort, drives whether they stay engaged. This lens tells us who the program retains, when it loses people, and what to do about it.
+Every other view of this programme is cohort-level — how a study arm performed. This one looks at the programme through the worker: one row per unique FLW, their interview history stitched across every cohort and arm they touched. Most workers are re-used across studies, so the worker's cumulative experience — not any single cohort — is what tells us who the programme retains and where it loses people.
 
----
-
-## Executive summary
-
-1. **Engagement is fundamentally healthy.** **78%** of workers are reliable engagers (19% Champions, 59% Steady finishers). Genuine early loss is small — **9%** one-and-done.
-2. **Re-using workers is our biggest engagement asset — and it compounds.** Finish rate climbs sharply from single- to multi-cohort workers (**44% → 88%**), and answer depth rises with it (168 → 246 words/session).
-3. **The drop-off has a clear face.** One-and-done workers are disproportionately **Sokoto (49%), single-cohort (96%), and "chew" cadre (44%)** — first-time, single-exposure workers in one geography.
-4. **The retention lever is the first interview.** Workers with above-median answer depth finish at **88%** vs **68%** below.
-5. **The recoverable at-risk pool is small and targetable — 51 workers** (started, not finished, silent 14–60 days).
-
----
+*Two things to hold on to before the numbers. First, there are **two different ways to say a worker "finished"**, and they answer different questions (§2). Second, this is observational data: it shows what is associated with finishing, not what causes it.*
 
 ## 1. The engagement landscape
 
-Behavioral personas (segments over the worker's whole history):
+Behavioural personas — rule-based segments over each worker's whole history:
 
-| Persona | Count | Share | What it means |
-|---|--:|--:|---|
-| **Champion** | 275 | 19% | Finishes, steady cadence, high depth — the backbone |
-| **Steady finisher** | 850 | 59% | Completes their schedule reliably |
-| **Slow-but-finishing** | 129 | 9% | Gets there, but with long gaps |
-| **One-and-done** | 131 | 9% | Started once and stopped — the real early-loss group |
-| Re-engager / Early dropper / Lapsed | 56 | ~4% | Small tails |
+| Persona | Workers | Share | What it means |
+|---|---|---|---|
+| Champion | 276 | 19% | Finishes, steady cadence, high answer depth — the backbone |
+| Steady finisher | 849 | 59% | Completes at least one full schedule reliably |
+| Partial progress | 130 | 9% | Over half their triggered interviews done, but no schedule finished yet |
+| Re-engager | 34 | 2% | Went silent, then came back |
+| Early dropper | 16 | 1% | Shallow start, left early |
+| One-and-done | 131 | 9% | Started once and stopped — the genuine early-loss group |
+| Lapsed | 5 | 0% | Inactive, nothing finished |
 
-Engagement tiers (RFM blend of recency + completion + answer depth): **63% Champion/Solid** (26% + 37%), 29% Slipping, 8% At-risk/Lost. "Slipping" is largely benign — workers in finished short cohorts who are simply inactive now, not people who quit mid-schedule.
+**78% have completed at least one full schedule** (Champions 19% + Steady finishers 59%). Genuine early loss is **9%** (131 workers) — the One-and-done segment, which §3 profiles.
 
----
+Separately, engagement tiers blend recency, completion rate and answer depth: 61% sit in the top two tiers (Champion 21% + Solid 40%), 31% Slipping, 8% At-risk or Lost. "Slipping" is mixed: it holds both finishers who are simply inactive now and a large share of the one-and-done group, so it should not be read as uniformly benign. Tier recency is measured against the freshest session in the dataset rather than the wall clock, so these shares do not drift when a data pull runs late.
 
-## 2. ⭐ The cross-cohort story (the standout finding)
+## 2. Re-use across cohorts — and the measurement trap
 
-The multi-arm design re-uses the same workers across studies — **77% are in ≥2 cohorts** (23% in 1, 42% in 2, 25% in 3, 9% in 4, 1% in 5+):
+The multi-arm design re-uses the same workers across studies: **77%** are in ≥2 cohorts.
 
 | Cohorts per worker | Workers | Share |
-|---|--:|--:|
+|---|---|---|
 | 1 | 332 | 23% |
 | 2 | 599 | 42% |
-| 3 | 359 | 25% |
-| 4 | 136 | 9% |
-| 5+ | 15 | 1% |
+| 3 | 358 | 25% |
+| 4 | 137 | 10% |
+| 5 | 13 | 1% |
+| 6 | 2 | 0% |
 
-Comparing **single- vs multi-cohort** workers: completion is flat (0.88 vs 0.89), while **finishing rises 44% → 88%** and **answer depth rises 168 → 246 words/session**. Repeat exposure builds commitment and richer engagement, with no sign of fatigue.
+| Measure | Single-cohort workers | Multi-cohort workers | What it asks |
+|---|---|---|---|
+| Finished ≥1 schedule | 44% | 88% | Have they ever completed anything? |
+| Per-cohort finish rate | 44% | 62% | Of the schedules they were given, how many did they complete? |
+| Completion rate | 0.88 | 0.89 | Of interviews they were sent, how many did they finish? |
+| Answer depth | 168 words/session | 245 words/session | How much do they actually say? |
+| Workers | 332 | 1,109 |  |
 
-**Structurally, TRS is the gateway.** Almost every multi-arm worker started in the Training (TRS) cohort and was re-used into study arms — the top combination is `PANEL|TRS` (322), followed by TRS+2WT+ABT combinations. TRS is the program's on-ramp; workers who flow from it into further arms become the most engaged core.
+The first row is the trap. "Finished ≥1 schedule" is a **maximum over a worker's cohorts** — a worker in three cohorts gets three independent chances to clear the bar — so it rises with cohort count even if nothing about the worker changed. It shows a 44-point gap. On the like-for-like measure, the gap is **18 points** (44% vs 62%), so roughly **59% of the headline gap is arithmetic rather than behaviour**.
 
-> **Implication:** a stable, repeatedly-engaged worker panel is a competitive asset — deliberately re-invite proven workers rather than defaulting to fresh single-exposure recruitment.
-> *(Caveat: the raw "finished" share is partly mechanical for multi-cohort workers — more cohorts = more chances to finish one — so completion and depth, which aren't subject to that bias, carry the cleaner signal; they agree.)*
+What re-used workers clearly do differ on is **depth: 168 → 245 words/session**, while completion rate is essentially unchanged (0.88 vs 0.89).
 
----
+*Causal caution: being re-invited is itself an outcome of how a worker performed the first time, so even the residual difference is not evidence that re-using a worker causes them to finish more. Re-use is operationally valuable — these are known, trained, available workers who answer at greater length — but do not budget for a finish-rate gain from re-use itself.*
 
-## 3. Where the program loses people — and who they are
+Most common arm combinations: PANEL|TRS (322), 2WT|ABT1-B|TRS (87), 2WT|ABT2-B|EXT|TRS (70), 2WT|ABT2-B|TRS (70). (The arm set is unordered in this data, so we can say which arms co-occur, not which came first.)
 
-Genuine early loss is the **One-and-done** segment (131 workers, 9%). Not a random slice:
+## 3. Where the programme loses people — and who they are
 
-| Cut | One-and-done | Program overall |
-|---|--:|--:|
-| **Sokoto** (top state) | **49%** | 20% |
-| **Single-cohort** | **96%** | 23% |
-| **"chew" cadre** (top) | 44% | 39% |
-| Median answer depth | **112 words** | Champions: 181 |
+Genuine early loss is the One-and-done segment: **131 workers (9%)** who started exactly one interview and never returned. They are not a random slice. Each row below compares the segment against that group's share of the whole population, so a share is only notable if it exceeds the base rate:
 
-**The drop-off profile is a first-time, single-exposure worker in Sokoto, disproportionately "chew" cadre, who engaged shallowly on their one interview and didn't return.** This points at who to support (single-exposure Sokoto workers) and when (at/just after the first interview).
+| Cut | One-and-done | Programme base rate | Over-represented |
+|---|---|---|---|
+| Sokoto (top state) | 49% | 20% | ×2.5 |
+| Single-cohort | 96% | 23% | ×4.2 |
+| chew (top cadre) | 44% | 39% | ×1.1 |
+| Median first-session depth | 112 words | 123 words (all workers) |  |
 
-The depth curve (share reaching each interview: Int≥1 100% → Int≥2 88% → Int≥3 62%) partly reflects cohort schedule length — most workers are in shorter cohorts, so deeper steps largely mean "was this worker in a longer-schedule cohort," not attrition. The clean FLW-level attrition number is the **9% one-and-done**.
+Read together, the drop-off profile is a first-time, single-exposure worker in one geography, engaging shallowly on their single interview and not returning.
 
----
+On how far workers get: of those whose schedule even *contains* interview 3, **86%** reach it (893 of 1,038). Quoting it against the whole population instead gives 62%, which understates retention because most workers are in short cohorts that stop before interview 3 — that is schedule length, not attrition. The clean worker-level attrition figure is the 9% one-and-done.
 
-## 4. The retention lever: early engagement depth
+## 4. Does early answer depth predict finishing?
 
-Splitting the population at the median answer-depth:
+Splitting workers at the median depth of their **first session only** (123 words) — first session, so the predictor does not contain the outcome:
 
-| Group | Workers | Finish rate | Avg depth |
-|---|--:|--:|--:|
-| Above-median depth | 721 | **88%** | 323 words/session |
-| Below-median depth | 720 | **68%** | 133 words/session |
+| Group | Workers | Per-cohort finish rate | Finished ≥1 schedule | First-session depth |
+|---|---|---|---|---|
+| Above-median depth | 725 | 61% | 82% | 222 words |
+| Below-median depth | 716 | 55% | 74% | 80 words |
 
-A **20-point finish gap** tracks with how deeply a worker engages early — consistent with the longitudinal-survey literature, where a strong early experience is the dominant predictor of continuation. **The highest-leverage intervention is making the first interview(s) genuinely engaging** (prompt design, appropriate length, onboarding support).
+That is a **6-point** difference on the like-for-like measure (74% vs 82% on the looser "finished ≥1" reading). It is a real association and the strongest early signal available, but it is modest, and the deeper group is also in more cohorts — so treat first-interview support as the leading hypothesis to **test**, not an established lever.
 
----
+## 5. Geography and partner — one finding, not two
 
-## 5. Cross-cuts: geography, partner, cadre
+| State | Workers | Per-cohort finish rate | Finished ≥1 schedule | Answer depth |
+|---|---|---|---|---|
+| Borno | 367 | 65% | 89% | 237 words |
+| Kebbi | 399 | 64% | 84% | 256 words |
+| Bauchi | 384 | 56% | 77% | 230 words |
+| Sokoto | 291 | 42% | 58% | 172 words |
 
-**By state** — a 31-point spread:
+| Implementing partner | Workers | Per-cohort finish rate | Finished ≥1 schedule | Answer depth |
+|---|---|---|---|---|
+| COWACDI | 765 | 65% | 86% | 247 words |
+| EHA | 675 | 50% | 69% | 205 words |
 
-| State | Workers | Finish rate |
-|---|--:|--:|
-| Borno | 367 | **89%** |
-| Kebbi | 399 | 84% |
-| Bauchi | 384 | 77% |
-| **Sokoto** | 291 | **58%** |
+These two tables are **the same finding cut two ways**. In this data the partners and the states are nested (**COWACDI** serves Borno and Kebbi; **EHA** serves Bauchi and Sokoto), so a state's result and its partner's result are the same observation — the data cannot tell you whether the difference is geography, the partner's ways of working, or something the two share. Treat "the EHA gap" and "the Sokoto gap" as one issue, and do not count them as two independent findings or give them two separate workstreams.
 
-Sokoto is the clear laggard and, per §3, where one-and-done concentrates — the priority geography for support.
+The spread is wide: Borno 65% vs Sokoto 42% per-cohort — 23 points.
 
-**By implementing partner (LLO):** COWACDI **86%** vs EHA **69%** finish — the cohort-level partner gap, confirmed at the worker level.
-
-**By FLW cadre:** chv 87%, "others" 86%, eht 85% lead; **the largest cadre, "chew" (558 workers), sits at 75%** — mid-pack but, by size, the single biggest opportunity to lift the program average.
-
----
+By cadre, results are much tighter: 52–65% per-cohort across 8 cadres. The largest is **chew (558 workers) at 56%**. Because the cadre spread is narrow while the geography spread is wide, cadre looks like the weaker lever of the two.
 
 ## 6. The recoverable at-risk list
 
-**51 workers** started, haven't finished, and have been silent **14–60 days** — recent enough to re-engage. Concentrated in **Sokoto (20), Bauchi (18)**, Kebbi (7), Borno (6). A small, concrete outreach list; a targeted nudge here is high-yield.
+**27 workers** started, have not finished any schedule, **were** offered a complete schedule, and have been silent 14–60 days — recent enough that a nudge is plausible. Concentrated in Sokoto (12), Bauchi (9), Kebbi (4), Borno (2). They are the recent slice of **316** unfinished workers, not the whole unfinished population — the rest have been silent longer than 60 days.
 
----
+*Two caveats: the list is defined off the newest session in the dataset, so it moves as data refreshes; and it deliberately excludes workers the programme never finished triggering, who are unfinished through no choice of their own.*
 
-## 7. Recommendations
+## 7. What to do — and how confident we are
 
-1. **Make the first interview the priority** — the strongest retention lever (88% vs 68%). Invest in prompt quality, length, and first-touch support, especially for first-time workers.
-2. **Lean into worker re-use** — re-inviting proven workers compounds engagement (44% → 88% finish, single → multi-cohort). Build a returning-worker panel rather than defaulting to fresh single-exposure recruitment.
-3. **Target Sokoto and the "chew" cadre** — where one-and-done concentrates. Pair them with the onboarding support that works elsewhere.
-4. **Run the 51-worker recovery list now** — the fastest available win (heavily Sokoto + Bauchi).
-5. **Investigate the EHA gap** — COWACDI retains ~17 points better; understanding why could lift EHA materially.
-
----
+1. **Run the 27-worker recovery list now.** Small, named, and time-bounded — the only directly actionable item here. Confidence: high, it is a list, not an inference.
+1. **Trial first-interview support, with a control group.** Above-median first-session depth is associated with a 6-point higher per-cohort finish rate. Confidence: moderate — real association, modest size, confounded with cohort count, so measure it rather than rolling it out.
+1. **Treat the Sokoto / EHA gap as one investigation.** It is the largest effect in the data (23 points) and it is where one-and-done concentrates. Confidence: high that the gap is real, none at all on the cause — geography and partner cannot be separated here, so the next step is qualitative, not another cut of this data.
+1. **Keep re-using proven workers for operational reasons** — known, trained, available, and they answer at greater length. Confidence: high on the operational value; do not forecast a finish-rate gain from re-use itself, because the headline gap is mostly arithmetic and re-invitation is itself an outcome of past performance.
 
 ## Method & data
 
-- **Grain:** one row per unique worker (`connect_id`), deduped across cohorts; metrics union the worker's sessions across every arm. Ties out to the canonical 1,441 started workers.
-- **Engagement tier (RFM):** Recency + completion rate + answer depth, each 1–5. **Persona:** rule-based behavioral segment. **Finished:** completed all scheduled interviews in ≥1 cohort.
-- **Sources:** CommCare trigger + session data · OCS sessions (depth) · Connect funnel · `flw_registration` demographics (100% coverage). Full per-worker detail: `flw_analysis.csv`. Live view: dashboard → **FLW Retention** tab (refreshes daily). This document and the `.docx` are generated from the same payload, so they always match the dashboard.
-- **Caveats:** the multi-cohort "finished" share is upward-biased (§2 — completion & depth agree and are unbiased); the progression-depth curve conflates cohort schedule lengths (§3); `experience_years` in registration is unreliable (default values) and excluded.
+- **Grain:** one row per unique worker (connect_id), deduped across cohorts; metrics union the worker's sessions across every arm. Ties out to the dashboard's canonical started-worker count (1,441).
+- **Per-cohort finish rate** — the measure to quote. Of all the cohort schedules a worker was enrolled in, the share they completed. Unlike "finished ≥1 schedule", it does not rise just because a worker was in more cohorts.
+- **Depth curve** is quoted against the workers whose schedule contains that interview, not the whole population, so a 2-interview worker is not counted as dropping out at interview 3.
+- **Engagement tier (RFM):** recency + completion rate + answer depth, each scored 1–5, with recency measured against the freshest session in the dataset rather than today's date.
+- **Personas** are rule-based. "Partial progress" means over half of triggered interviews completed but **no** schedule finished — it is not a slow finisher.
+- **Limits.** Observational, so associations only. Small groups are pooled into an "Other / not recorded" row rather than dropped or published as their own rate. Figures move with each daily refresh; this document is generated from dashboard render v146.
+- **Full per-worker detail** is in the flw_analysis.csv export; the dashboard's FLW Retention tab is interactive.

@@ -1,339 +1,566 @@
 #!/usr/bin/env python3
-"""Render the FLW Retention executive analysis as a formatted Word (.docx) document.
+"""Render the FLW Retention executive analysis as BOTH Markdown and Word, from ONE payload.
 
-DATA-DRIVEN: every number is read from flw_analysis_payload.json (the same aggregates the dashboard
-FLW Retention tab embeds), so the document can never drift from the live dashboard. Regenerate the
-payload first with build_flw_analysis.py.
+DATA-DRIVEN: every figure comes from flw_analysis_payload.json — the `flwEngagement` block the
+dashboard embeds — so the document cannot state something the dashboard contradicts. Get that payload
+from the PUBLISHED render (not a local build) with:
 
-Run: .venv/Scripts/python.exe build_flw_docx.py  ->  docs/FLW_Retention_Analysis_Brief.docx
+    python pull_live_payload.py && python build_flw_docx.py
+
+Why both files come from here: the .docx used to be generated while the .md was hand-maintained, and
+they drifted — on 2026-08-11 the committed .docx still carried claims ("re-use compounds engagement",
+"the retention lever is the first interview") that the corrected analysis had already disproven, while
+the .md carried a correction notice the .docx did not. One content model, two renderers, no drift.
+
+Interpretation rule applied throughout: state the number, and where a verdict depends on the number,
+COMPUTE the verdict. Do not hardcode a conclusion — a hardcoded "flat" is exactly what went stale last
+time (the per-cohort gap moved from ~0 to 18 points between builds).
+
+Outputs: docs/FLW_Retention_Analysis_Brief.md and docs/FLW_Retention_Analysis_Brief.docx
 """
-# flake8: noqa: E501,E231  (string-heavy document template — long prose lines are intentional)
+# flake8: noqa: E501  (string-heavy document template — long prose lines are intentional)
 import json
 import os
+from collections import Counter
 
 from docx import Document
 from docx.shared import Pt, RGBColor
 
 FE = json.load(open("flw_analysis_payload.json", encoding="utf-8"))
-if os.path.exists("_flw_today.json"):
-    TODAY = json.load(open("_flw_today.json", encoding="utf-8")).get("today", "")
-elif os.path.exists("dashboard_data.json"):
-    TODAY = json.load(open("dashboard_data.json", encoding="utf-8")).get("today", "")
-else:
-    TODAY = ""
-
-NAVY = RGBColor(0x1F, 0x38, 0x64)
-GREY = RGBColor(0x6B, 0x72, 0x80)
-doc = Document()
-doc.styles["Normal"].font.name = "Calibri"
-doc.styles["Normal"].font.size = Pt(10.5)
+STAMP = json.load(open("_flw_today.json", encoding="utf-8")) if os.path.exists("_flw_today.json") else {}
+TODAY = STAMP.get("today") or ""
+BUILT_AT = STAMP.get("built_at") or ""
+RENDER_V = STAMP.get("render_version")
 
 N = FE["n_flws"]
-P = {t["k"]: t for t in FE["personas"]}  # persona -> {n,pct}
+P = {t["k"]: t for t in FE["personas"]}
 T = {t["k"]: t for t in FE["tiers"]}
 CC = FE["crossCohort"]
-CCD = {d["k"]: d for d in CC["dist"]}  # ncohorts -> {n,pct}
-FI = FE.get("depthSplit") or FE["firstIv"]  # depthSplit = FIRST-session depth (firstIv was lifetime avg)
+CCD = {d["k"]: d for d in CC["dist"]}
+DS = FE.get("depthSplit") or FE.get("firstIv") or {}
+_dsmed = DS.get("median")
+DS_MED = int(_dsmed) if isinstance(_dsmed, (int, float)) and float(_dsmed).is_integer() else _dsmed
 OAD = FE["oneAndDone"]
 AR = FE["atRisk"]
 ST = {s["k"]: s for s in FE["byState"]}
 LLO = {s["k"]: s for s in FE["byLLO"]}
-TY = {s["k"]: s for s in FE["byType"]}
 SV = {s["d"]: s for s in FE["survival"]}
-healthy = P.get("Champion", {}).get("pct", 0) + P.get("Steady finisher", {}).get("pct", 0)
+MICRO = FE.get("micro") or {}
+
+finishers_pct = P.get("Champion", {}).get("pct", 0) + P.get("Steady finisher", {}).get("pct", 0)
 multi_pct = 100 - CCD.get("1", {}).get("pct", 0)
 
 
+def pc(g, key="finished_pc"):
+    """Per-cohort finish rate for a group dict, falling back to the older key if absent."""
+    return g.get(key, g.get("finished", 0))
+
+
+def state_by_partner():
+    """state -> {partner: n}, derived from the per-FLW micro block (no assumption about which state
+    belongs to which partner — if the nesting ever stops holding, this stops claiming it)."""
+    if not MICRO.get("col"):
+        return {}
+    d, out = MICRO["dict"], {}
+    for i in range(MICRO["n"]):
+        s = d["state"][int(MICRO["col"]["state"][i])]
+        p = d["llo"][int(MICRO["col"]["llo"][i])]
+        out.setdefault(s, Counter())[p] += 1
+    return out
+
+
+SBP = state_by_partner()
+
+
+def partner_of(state):
+    """The partner a state is (almost) entirely served by, or None if it is genuinely mixed."""
+    c = SBP.get(state)
+    if not c:
+        return None
+    top, n = c.most_common(1)[0]
+    return top if n / sum(c.values()) >= 0.95 and "|" not in top else None
+
+
+# ---------------------------------------------------------------- content model
+BLOCKS = []
+
+
 def h(text, level=1):
-    p = doc.add_heading(text, level=level)
-    for r in p.runs:
-        r.font.color.rgb = NAVY
-
-
-def _runs(p, text):
-    for i, seg in enumerate(text.split("**")):
-        if seg:
-            r = p.add_run(seg)
-            r.bold = i % 2 == 1
+    BLOCKS.append(("h", text, level))
 
 
 def para(text, italic=False, color=None, size=None, sa=6):
-    p = doc.add_paragraph()
-    p.paragraph_format.space_after = Pt(sa)
-    _runs(p, text)
-    for r in p.runs:
-        if italic:
-            r.italic = True
-        if color:
-            r.font.color.rgb = color
-        if size:
-            r.font.size = Pt(size)
+    BLOCKS.append(("p", text, {"italic": italic, "muted": color is not None or italic}))
 
 
 def li(text, style="List Bullet"):
-    p = doc.add_paragraph(style=style)
-    p.paragraph_format.space_after = Pt(3)
-    _runs(p, text)
+    BLOCKS.append(("li", text, style))
 
 
 def table(headers, rows):
-    t = doc.add_table(rows=1, cols=len(headers))
-    t.style = "Light Grid Accent 1"
-    for j, x in enumerate(headers):
-        run = t.rows[0].cells[j].paragraphs[0].add_run(x)
-        run.bold = True
-        run.font.size = Pt(9.5)
-    for row in rows:
-        cells = t.add_row().cells
-        for j, v in enumerate(row):
-            run = cells[j].paragraphs[0].add_run(str(v))
-            run.font.size = Pt(9.5)
-            if j == 0:
-                run.bold = True
-    doc.add_paragraph().paragraph_format.space_after = Pt(2)
+    BLOCKS.append(("table", headers, rows))
 
 
-# ---------------- Title ----------------
-tr = doc.add_paragraph().add_run("FLW Retention & Engagement — Executive Analysis")
-tr.bold = True
-tr.font.size = Pt(20)
-tr.font.color.rgb = NAVY
-para(f"Connect Interviews program · per-FLW, cross-cohort · data as of {TODAY}", italic=True, color=GREY, size=9, sa=1)
+# ================================================================ TITLE
+_stamp_bits = [
+    b
+    for b in [
+        f"data as of {TODAY}" if TODAY else "",
+        f"build {BUILT_AT}" if BUILT_AT else "",
+        f"dashboard render v{RENDER_V}" if RENDER_V else "",
+    ]
+    if b
+]
+BLOCKS.append(("title", "FLW Retention & Engagement — Executive Analysis", None))
+para(f"Connect Interviews programme · per-FLW, cross-cohort · {' · '.join(_stamp_bits)}", italic=True)
 para(
-    f"Universe: {N:,} unique front-line workers (FLWs) who started ≥ 1 interview · {FE['coverage_lga']}% demographic "
-    "coverage · every metric dedups the worker across all cohorts/arms they were part of. Figures match the live "
-    "dashboard (FLW Retention tab) — generated from the same data.",
+    f"Universe: **{N:,} unique front-line workers (FLWs)** who started ≥1 interview · {FE['coverage_lga']}% have "
+    "demographics · every metric dedups the worker across all cohorts/arms they were part of. Generated from the same "
+    "payload the dashboard's **FLW Retention** tab embeds, so every figure here matches what is on screen.",
     italic=True,
-    color=GREY,
-    size=9,
-    sa=10,
 )
 
 h("Why this analysis exists", 1)
 para(
-    "Every other view of this program is cohort-level — how a study arm performed. This one looks at the program "
+    "Every other view of this programme is cohort-level — how a study arm performed. This one looks at the programme "
     "through the worker: one row per unique FLW, their interview history stitched across every cohort and arm they "
-    "touched. That matters because most workers are re-used across studies — so the worker's cumulative experience, "
-    "not any single cohort, drives whether they stay engaged. This lens tells us who the program retains, when it "
-    "loses people, and what to do about it."
+    "touched. Most workers are re-used across studies, so the worker's cumulative experience — not any single cohort — "
+    "is what tells us who the programme retains and where it loses people."
+)
+para(
+    'Two things to hold on to before the numbers. First, there are **two different ways to say a worker "finished"**, '
+    "and they answer different questions (§2). Second, this is observational data: it shows what is associated with "
+    "finishing, not what causes it.",
+    italic=True,
 )
 
-h("Executive summary", 1)
-li(
-    f"Engagement is fundamentally healthy. **{healthy}%** of workers are reliable engagers "
-    f"(**{P.get('Champion',{}).get('pct',0)}%** Champions, **{P.get('Steady finisher',{}).get('pct',0)}%** Steady finishers). "
-    f"Genuine early loss is small — **{OAD['pct']}%** one-and-done.",
-    "List Number",
-)
-li(
-    f"Re-use is the norm, but it does not by itself raise finishing. Multi-cohort workers finish ≥1 schedule far more "
-    f"often ({CC['single']['finished']}% → {CC['multi']['finished']}%), but that measure is a maximum over cohorts, so "
-    f"more cohorts mechanically means more chances. On the like-for-like measure — the share of their own schedules "
-    f"they complete — it is **{CC['single'].get('finished_pc', 0)}% (single) vs {CC['multi'].get('finished_pc', 0)}% "
-    f"(multi)**, i.e. flat. What re-used workers do show is greater depth "
-    f"({CC['single']['depth']} → {CC['multi']['depth']} words/session).",
-    "List Number",
-)
-li(
-    f"The drop-off has a clear face. One-and-done workers are disproportionately "
-    f"**{(OAD['topState'][0]['k'] if OAD['topState'] else '—')} ({OAD['topState'][0]['pct'] if OAD['topState'] else 0}%)**, "
-    f"**single-cohort ({OAD['singleCohortPct']}%)**, and "
-    f"**{(OAD['topType'][0]['k'] if OAD['topType'] else '—')} cadre ({OAD['topType'][0]['pct'] if OAD['topType'] else 0}%)**.",
-    "List Number",
-)
-li(
-    f"Depth at the first interview is associated with finishing, modestly. Splitting workers at the median "
-    f"first-session answer depth, the per-cohort finish rate is **{FI['hi'].get('finished_pc', 0)}%** (above median) "
-    f"vs **{FI['lo'].get('finished_pc', 0)}%** (below) — a {abs(FI['hi'].get('finished_pc', 0) - FI['lo'].get('finished_pc', 0))}-point gap. "
-    f"On the “finished ≥1 schedule” measure the same split reads {FI['hi']['finished']}% vs {FI['lo']['finished']}%, but "
-    f"the deeper group is also in more cohorts, which inflates that version. Treat this as an association worth "
-    f"testing, not a proven lever.",
-    "List Number",
-)
-li(
-    f"The recoverable at-risk pool is small and targetable — **{AR['n']} workers** (started, not finished, silent 14–60 days).",
-    "List Number",
-)
-
+# ================================================================ 1
 h("1. The engagement landscape", 1)
-para("Behavioral personas (rule-based segments over the worker's whole history):")
+para("Behavioural personas — rule-based segments over each worker's whole history:")
 persona_desc = {
-    "Champion": "Finishes, steady cadence, high depth — the backbone",
-    "Steady finisher": "Completes their schedule reliably",
-    "Partial progress": "≥50% of triggered interviews done, but no schedule finished yet",
-    "One-and-done": "Started once and stopped — the real early-loss group",
+    "Champion": "Finishes, steady cadence, high answer depth — the backbone",
+    "Steady finisher": "Completes at least one full schedule reliably",
+    "Partial progress": "Over half their triggered interviews done, but no schedule finished yet",
+    "One-and-done": "Started once and stopped — the genuine early-loss group",
     "Re-engager": "Went silent, then came back",
     "Early dropper": "Shallow start, left early",
-    "Lapsed": "Inactive, unfinished",
+    "Lapsed": "Inactive, nothing finished",
 }
 table(
-    ["Persona", "Count", "Share", "What it means"],
-    [[t["k"], t["n"], f"{t['pct']}%", persona_desc.get(t["k"], "")] for t in FE["personas"]],
+    ["Persona", "Workers", "Share", "What it means"],
+    [[t["k"], f"{t['n']:,}", f"{t['pct']}%", persona_desc.get(t["k"], "")] for t in FE["personas"]],
 )
-_t = {k: T.get(k, {}).get("pct", 0) for k in ("Champion", "Solid", "Slipping", "At-risk", "Lost")}
+_healthy = T.get("Champion", {}).get("pct", 0) + T.get("Solid", {}).get("pct", 0)
 para(
-    f"Engagement tiers (RFM blend of recency + completion + answer depth): {_t['Champion']+_t['Solid']}% "
-    f"Champion/Solid, {_t['Slipping']}% Slipping, {_t['At-risk']+_t['Lost']}% At-risk/Lost. “Slipping” is mixed: most "
-    "are finishers from short cohorts who are simply inactive now, but it also contains a large share of the "
-    "one-and-done group, so it should not be read as uniformly benign. Recency is measured against the freshest "
-    "session in the dataset rather than the wall clock, so these tiers do not drift when a data pull runs late."
+    f"**{finishers_pct}% have completed at least one full schedule** (Champions {P.get('Champion',{}).get('pct',0)}% + "
+    f"Steady finishers {P.get('Steady finisher',{}).get('pct',0)}%). Genuine early loss is **{OAD['pct']}%** "
+    f"({OAD['n']} workers) — the One-and-done segment, which §3 profiles."
+)
+para(
+    f"Separately, engagement tiers blend recency, completion rate and answer depth: {_healthy}% sit in the top two "
+    f"tiers (Champion {T.get('Champion',{}).get('pct',0)}% + Solid {T.get('Solid',{}).get('pct',0)}%), "
+    f"{T.get('Slipping',{}).get('pct',0)}% Slipping, "
+    f"{T.get('At-risk',{}).get('pct',0)+T.get('Lost',{}).get('pct',0)}% At-risk or Lost. \"Slipping\" is mixed: it holds "
+    "both finishers who are simply inactive now and a large share of the one-and-done group, so it should not be read "
+    "as uniformly benign. Tier recency is measured against the freshest session in the dataset rather than the wall "
+    "clock, so these shares do not drift when a data pull runs late."
 )
 
-h("2. The cross-cohort picture (and a measurement trap)", 1)
-para(f"The multi-arm design re-uses the same workers across studies — **{multi_pct}%** are in ≥2 cohorts:")
-table(["Cohorts per worker", "Workers", "Share"], [[d["k"], d["n"], f"{d['pct']}%"] for d in CC["dist"]])
-para(
-    f"It is tempting to read re-use as compounding engagement, because “finished ≥1 schedule” rises "
-    f"{CC['single']['finished']}% → {CC['multi']['finished']}% from single- to multi-cohort workers. That reading is "
-    "wrong. “Finished ≥1” is a maximum over a worker's cohorts, so a worker in three cohorts has three independent "
-    "chances to clear the bar; the rise is largely arithmetic."
+# ================================================================ 2
+h("2. Re-use across cohorts — and the measurement trap", 1)
+para(f"The multi-arm design re-uses the same workers across studies: **{multi_pct}%** are in ≥2 cohorts.")
+table(["Cohorts per worker", "Workers", "Share"], [[d["k"], f"{d['n']:,}", f"{d['pct']}%"] for d in CC["dist"]])
+_raw_gap = CC["multi"]["finished"] - CC["single"]["finished"]
+_pc_gap = pc(CC["multi"]) - pc(CC["single"])
+_arith = max(0, round(100 * (_raw_gap - _pc_gap) / _raw_gap)) if _raw_gap else 0
+table(
+    ["Measure", "Single-cohort workers", "Multi-cohort workers", "What it asks"],
+    [
+        [
+            "Finished ≥1 schedule",
+            f"{CC['single']['finished']}%",
+            f"{CC['multi']['finished']}%",
+            "Have they ever completed anything?",
+        ],
+        [
+            "Per-cohort finish rate",
+            f"{pc(CC['single'])}%",
+            f"{pc(CC['multi'])}%",
+            "Of the schedules they were given, how many did they complete?",
+        ],
+        [
+            "Completion rate",
+            f"{CC['single']['completion']}",
+            f"{CC['multi']['completion']}",
+            "Of interviews they were sent, how many did they finish?",
+        ],
+        [
+            "Answer depth",
+            f"{CC['single']['depth']} words/session",
+            f"{CC['multi']['depth']} words/session",
+            "How much do they actually say?",
+        ],
+        ["Workers", f"{CC['single']['n']:,}", f"{CC['multi']['n']:,}", ""],
+    ],
 )
 para(
-    f"The two measures that are not distorted by cohort count both say the effect is flat: per-cohort finish rate is "
-    f"**{CC['single'].get('finished_pc', 0)}% (single) vs {CC['multi'].get('finished_pc', 0)}% (multi)**, and "
-    f"completion rate is {CC['single']['completion']} vs {CC['multi']['completion']}. The one real difference is "
-    f"**depth: {CC['single']['depth']} → {CC['multi']['depth']} words/session**. Re-use is operationally valuable — "
-    "these are known, trained, available workers who answer at greater length — but this data does not show that "
-    "re-using a worker makes them more likely to finish."
+    f'The first row is the trap. "Finished ≥1 schedule" is a **maximum over a worker\'s cohorts** — a worker in three '
+    f"cohorts gets three independent chances to clear the bar — so it rises with cohort count even if nothing about the "
+    f"worker changed. It shows a {_raw_gap}-point gap. On the like-for-like measure, the gap is "
+    f"**{_pc_gap} points** ({pc(CC['single'])}% vs {pc(CC['multi'])}%), so roughly **{_arith}% of the headline gap is "
+    f"arithmetic rather than behaviour**."
+    + (" On this build the like-for-like difference is small enough to read as flat." if abs(_pc_gap) <= 3 else "")
+)
+para(
+    f"What re-used workers clearly do differ on is **depth: {CC['single']['depth']} → {CC['multi']['depth']} "
+    f"words/session**, while completion rate is essentially unchanged ({CC['single']['completion']} vs "
+    f"{CC['multi']['completion']})."
+)
+para(
+    "Causal caution: being re-invited is itself an outcome of how a worker performed the first time, so even the "
+    "residual difference is not evidence that re-using a worker causes them to finish more. Re-use is operationally "
+    "valuable — these are known, trained, available workers who answer at greater length — but do not budget for a "
+    "finish-rate gain from re-use itself.",
+    italic=True,
 )
 if FE.get("armCombos"):
-    combos = ", ".join(f"{c['k']} ({c['n']})" for c in FE["armCombos"][:4])
+    _combos = ", ".join(f"{c['k']} ({c['n']})" for c in FE["armCombos"][:4])
     para(
-        f"Structurally, TRS sits in almost every multi-arm worker's history — top combinations: {combos}. (The arm "
-        "set is unordered in this data, so we can say TRS is nearly always present, not that it always came first.)"
+        f"Most common arm combinations: {_combos}. (The arm set is unordered in this data, so we can say which arms "
+        "co-occur, not which came first.)"
     )
+
+# ================================================================ 3
+h("3. Where the programme loses people — and who they are", 1)
 para(
-    "Implication: a stable, repeatedly-engaged worker panel is operationally valuable — known, trained, available "
-    "workers who answer at greater length. Just don't budget for a finish-rate gain from re-use itself.",
-    italic=True,
-    color=GREY,
-    size=9,
+    f"Genuine early loss is the One-and-done segment: **{OAD['n']} workers ({OAD['pct']}%)** who started exactly one "
+    "interview and never returned. They are not a random slice. Each row below compares the segment against that "
+    "group's share of the whole population, so a share is only notable if it exceeds the base rate:"
+)
+_oad_rows = []
+if OAD.get("topState"):
+    _s = OAD["topState"][0]
+    _base = round(100 * ST.get(_s["k"], {}).get("n", 0) / N) if ST.get(_s["k"]) else None
+    _lift = f"×{_s['pct']/_base:.1f}" if _base else "—"
+    _oad_rows.append([f"{_s['k']} (top state)", f"{_s['pct']}%", f"{_base}%" if _base else "—", _lift])
+_oad_rows.append(
+    [
+        "Single-cohort",
+        f"{OAD['singleCohortPct']}%",
+        f"{FE['overallSingleCohortPct']}%",
+        f"×{OAD['singleCohortPct']/FE['overallSingleCohortPct']:.1f}" if FE.get("overallSingleCohortPct") else "—",
+    ]
+)
+if OAD.get("topType"):
+    _t = OAD["topType"][0]
+    _tb = next((round(100 * r["n"] / N) for r in FE["byType"] if r["k"] == _t["k"]), None)
+    _oad_rows.append(
+        [f"{_t['k']} (top cadre)", f"{_t['pct']}%", f"{_tb}%" if _tb else "—", f"×{_t['pct']/_tb:.1f}" if _tb else "—"]
+    )
+_oad_rows.append(
+    [
+        "Median first-session depth",
+        f"{OAD['medianDepth']} words",
+        f"{DS_MED if DS_MED is not None else '—'} words (all workers)",
+        "",
+    ]
+)
+table(["Cut", "One-and-done", "Programme base rate", "Over-represented"], _oad_rows)
+para(
+    "Read together, the drop-off profile is a first-time, single-exposure worker in one geography, engaging shallowly "
+    "on their single interview and not returning."
+)
+_s3 = SV.get(3, {})
+para(
+    f"On how far workers get: of those whose schedule even *contains* interview 3, **{_s3.get('pct_elig', _s3.get('pct'))}%** "
+    f"reach it ({_s3.get('reached',0):,} of {_s3.get('elig',N):,}). Quoting it against the whole population instead "
+    f"gives {_s3.get('pct')}%, which understates retention because most workers are in short cohorts that stop before "
+    f"interview 3 — that is schedule length, not attrition. The clean worker-level attrition figure is the "
+    f"{OAD['pct']}% one-and-done."
 )
 
-h("3. Where the program loses people — and who they are", 1)
+# ================================================================ 4
+h("4. Does early answer depth predict finishing?", 1)
 para(
-    f"Genuine early loss is the One-and-done segment ({OAD['n']} workers, {OAD['pct']}%). They are not a random slice:"
+    f"Splitting workers at the median depth of their **first session only** ({DS_MED if DS_MED is not None else '—'} words) — first "
+    "session, so the predictor does not contain the outcome:"
 )
 table(
-    ["Cut", "One-and-done", "Program overall"],
+    ["Group", "Workers", "Per-cohort finish rate", "Finished ≥1 schedule", "First-session depth"],
     [
         [
-            f"{OAD['topState'][0]['k'] if OAD['topState'] else '—'} (top state)",
-            f"{OAD['topState'][0]['pct'] if OAD['topState'] else 0}%",
-            f"{ST.get(OAD['topState'][0]['k'],{}).get('n','') if OAD['topState'] else ''} workers",
+            "Above-median depth",
+            f"{DS['hi']['n']:,}",
+            f"{pc(DS['hi'])}%",
+            f"{DS['hi']['finished']}%",
+            f"{DS['hi'].get('first_depth','—')} words",
         ],
-        ["Single-cohort", f"{OAD['singleCohortPct']}%", f"{FE['overallSingleCohortPct']}%"],
         [
-            f"{OAD['topType'][0]['k'] if OAD['topType'] else '—'} cadre (top)",
-            f"{OAD['topType'][0]['pct'] if OAD['topType'] else 0}%",
-            "",
+            "Below-median depth",
+            f"{DS['lo']['n']:,}",
+            f"{pc(DS['lo'])}%",
+            f"{DS['lo']['finished']}%",
+            f"{DS['lo'].get('first_depth','—')} words",
         ],
-        ["Median answer depth", f"{OAD['medianDepth']} words", f"Champions: {FE['champMedianDepth']}"],
     ],
 )
+_d_pc = pc(DS["hi"]) - pc(DS["lo"])
 para(
-    "The drop-off profile is a first-time, single-exposure worker (top geography above), engaging shallowly on their "
-    "one interview and not returning. This points at who to support and when — at/just after the first interview."
-)
-para(
-    f"The depth curve (share reaching each interview: Int≥1 {SV.get(1,{}).get('pct',0)}% → Int≥2 "
-    f"{SV.get(2,{}).get('pct',0)}% → Int≥3 {SV.get(3,{}).get('pct',0)}%) partly reflects cohort schedule length — most "
-    "workers are in short cohorts, so deeper steps largely mean “was this worker in a longer-schedule cohort,” not "
-    f"attrition. The clean FLW-level attrition number is the {OAD['pct']}% one-and-done."
+    f"That is a **{_d_pc}-point** difference on the like-for-like measure ({DS['lo']['finished']}% vs "
+    f"{DS['hi']['finished']}% on the looser \"finished ≥1\" reading). It is a real association and the strongest early "
+    "signal available, but it is modest, and the deeper group is also in more cohorts — so treat first-interview "
+    "support as the leading hypothesis to **test**, not an established lever."
 )
 
-h("4. The retention lever: early engagement depth", 1)
-para("Splitting the population at the median answer-depth:")
+# ================================================================ 5
+h("5. Geography and partner — one finding, not two", 1)
 table(
-    ["Group", "Workers", "Finish rate", "Avg depth"],
-    [
-        ["Above-median depth", FI["hi"]["n"], f"{FI['hi']['finished']}%", f"{FI['hi']['depth']} words/session"],
-        ["Below-median depth", FI["lo"]["n"], f"{FI['lo']['finished']}%", f"{FI['lo']['depth']} words/session"],
-    ],
+    ["State", "Workers", "Per-cohort finish rate", "Finished ≥1 schedule", "Answer depth"],
+    [[s["k"], f"{s['n']:,}", f"{pc(s)}%", f"{s['finished']}%", f"{s['depth']} words"] for s in FE["byState"]],
 )
+_llo_rows = [r for r in FE["byLLO"] if not r.get("residual")]
+table(
+    ["Implementing partner", "Workers", "Per-cohort finish rate", "Finished ≥1 schedule", "Answer depth"],
+    [[s["k"], f"{s['n']:,}", f"{pc(s)}%", f"{s['finished']}%", f"{s['depth']} words"] for s in _llo_rows],
+)
+_pairs = {}
+for _s in FE["byState"]:
+    _p = partner_of(_s["k"])
+    if _p:
+        _pairs.setdefault(_p, []).append(_s["k"])
+if len(_pairs) >= 2:
+    _desc = "; ".join(f"**{p}** serves {' and '.join(sorted(ss))}" for p, ss in sorted(_pairs.items()))
+    para(
+        f"These two tables are **the same finding cut two ways**. In this data the partners and the states are nested "
+        f"({_desc}), so a state's result and its partner's result are the same observation — the data cannot tell you "
+        f"whether the difference is geography, the partner's ways of working, or something the two share. Treat "
+        f"\"the {min(_llo_rows, key=lambda r: pc(r))['k']} gap\" and "
+        f"\"the {min(FE['byState'], key=lambda r: pc(r))['k']} gap\" as one issue, and do not count them as two "
+        f"independent findings or give them two separate workstreams."
+    )
+_worst = min(FE["byState"], key=lambda r: pc(r))
+_best = max(FE["byState"], key=lambda r: pc(r))
 para(
-    f"A {FI['hi']['finished'] - FI['lo']['finished']}-point finish gap tracks with how deeply a worker engages early "
-    "— consistent with the longitudinal-survey literature. The highest-leverage intervention is making the first "
-    "interview(s) genuinely engaging (prompt design, length, onboarding support)."
+    f"The spread is wide: {_best['k']} {pc(_best)}% vs {_worst['k']} {pc(_worst)}% per-cohort — "
+    f"{pc(_best) - pc(_worst)} points."
 )
+_types = [r for r in FE["byType"] if not r.get("residual")]
+if _types:
+    _big = max(_types, key=lambda r: r["n"])
+    para(
+        f"By cadre, results are much tighter: {min(pc(r) for r in _types)}–{max(pc(r) for r in _types)}% per-cohort "
+        f"across {len(_types)} cadres. The largest is **{_big['k']} ({_big['n']:,} workers) at {pc(_big)}%**. Because "
+        "the cadre spread is narrow while the geography spread is wide, cadre looks like the weaker lever of the two."
+    )
 
-h("5. Cross-cuts: geography, partner, cadre", 1)
-para("By state:")
-table(["State", "Workers", "Finish rate"], [[s["k"], s["n"], f"{s['finished']}%"] for s in FE["byState"]])
-_c = LLO.get("COWACDI", {}).get("finished", "—")
-_e = LLO.get("EHA", {}).get("finished", "—")
-li(
-    f"By implementing partner (LLO): COWACDI **{_c}%** vs EHA **{_e}%** finish — the cohort-level gap confirmed at the "
-    "worker level; workers spanning both partners finish ~100%."
-)
-_top = FE["byType"][0] if FE["byType"] else {}
-_chew = TY.get("chew", {})
-li(
-    f"By FLW cadre: {_top.get('k','')} leads at {_top.get('finished','')}%; the largest cadre, "
-    f"**“chew” ({_chew.get('n','')} workers) at {_chew.get('finished','')}%** — mid-pack but, by size, the single "
-    "biggest opportunity to lift the average."
-)
-
+# ================================================================ 6
 h("6. The recoverable at-risk list", 1)
 _ar = ", ".join(f"{s['k']} ({s['n']})" for s in AR["byState"])
 para(
-    f"**{AR['n']} workers** started, haven't finished, were offered a complete schedule, and have been silent "
-    f"14–60 days — recent enough to re-engage. Concentrated in {_ar}. "
+    f"**{AR['n']} workers** started, have not finished any schedule, **were** offered a complete schedule, and have "
+    f"been silent 14–60 days — recent enough that a nudge is plausible. Concentrated in {_ar}."
     + (
-        f"They are the recent slice of **{AR['ofUnfinished']}** unfinished workers overall, not the whole unfinished "
-        "population; the rest have been silent longer than 60 days. "
+        f" They are the recent slice of **{AR['ofUnfinished']:,}** unfinished workers, not the whole unfinished "
+        "population — the rest have been silent longer than 60 days."
         if AR.get("ofUnfinished")
         else ""
     )
-    + "Note this list moves with data freshness: it is defined off the newest session in the dataset."
+)
+para(
+    "Two caveats: the list is defined off the newest session in the dataset, so it moves as data refreshes; and it "
+    "deliberately excludes workers the programme never finished triggering, who are unfinished through no choice of "
+    "their own.",
+    italic=True,
 )
 
-h("7. Recommendations", 1)
+# ================================================================ 7
+h("7. What to do — and how confident we are", 1)
 li(
-    "Test first-interview support as the leading candidate lever. Depth at interview 1 is the strongest early signal "
-    "we have, but the association is modest once cohort count is held constant — so run it as a trial with a "
-    "control group rather than a programme-wide bet.",
+    f"**Run the {AR['n']}-worker recovery list now.** Small, named, and time-bounded — the only directly actionable "
+    "item here. Confidence: high, it is a list, not an inference.",
     "List Number",
 )
 li(
-    "Keep re-using proven workers for operational reasons (known, trained, available, and they answer at greater "
-    "length) — but do not forecast a finish-rate improvement from re-use; per-cohort finishing is flat across "
-    "single- and multi-cohort workers.",
+    f"**Trial first-interview support, with a control group.** Above-median first-session depth is associated with a "
+    f"{_d_pc}-point higher per-cohort finish rate. Confidence: moderate — real association, modest size, "
+    "confounded with cohort count, so measure it rather than rolling it out.",
     "List Number",
 )
 li(
-    f"Target {OAD['topState'][0]['k'] if OAD['topState'] else 'the lagging state'} and the “chew” cadre — where one-and-done concentrates. Pair them with the onboarding support that works elsewhere.",
+    f"**Treat the {_worst['k']} / {min(_llo_rows, key=lambda r: pc(r))['k'] if _llo_rows else 'partner'} gap as one "
+    f"investigation.** It is the largest effect in the data ({pc(_best) - pc(_worst)} points) and it is where "
+    f"one-and-done concentrates. Confidence: high that the gap is real, none at all on the cause — geography and "
+    "partner cannot be separated here, so the next step is qualitative, not another cut of this data.",
     "List Number",
 )
-li(f"Run the {AR['n']}-worker recovery list now — the fastest available win.", "List Number")
 li(
-    f"Investigate the EHA gap — COWACDI retains ~{(LLO.get('COWACDI',{}).get('finished',0)-LLO.get('EHA',{}).get('finished',0))} points better; understanding why could lift EHA materially.",
+    "**Keep re-using proven workers for operational reasons** — known, trained, available, and they answer at greater "
+    "length. Confidence: high on the operational value; do not forecast a finish-rate gain from re-use itself, because "
+    "the headline gap is mostly arithmetic and re-invitation is itself an outcome of past performance.",
     "List Number",
 )
 
+# ================================================================ METHOD
 h("Method & data", 1)
 li(
-    "Grain: one row per unique worker (connect_id), deduped across cohorts; metrics union the worker's sessions across every arm. Ties out to the canonical started-worker count."
+    f"**Grain:** one row per unique worker (connect_id), deduped across cohorts; metrics union the worker's sessions "
+    f"across every arm. Ties out to the dashboard's canonical started-worker count ({N:,})."
 )
 li(
-    "Engagement tier (RFM): Recency + completion rate + answer depth, each 1–5. Persona: rule-based "
-    "behavioral segment. Finished: completed all scheduled interviews in ≥1 cohort."
+    "**Per-cohort finish rate** — the measure to quote. Of all the cohort schedules a worker was enrolled in, the "
+    'share they completed. Unlike "finished ≥1 schedule", it does not rise just because a worker was in more cohorts.'
 )
 li(
-    "Sources: CommCare trigger + session data · OCS sessions (depth) · Connect funnel · flw_registration "
-    "demographics. Full per-worker detail: flw_analysis.csv. Live: dashboard → FLW Retention tab (daily). "
-    "This document is generated from the same payload, so it always matches the dashboard."
+    "**Depth curve** is quoted against the workers whose schedule contains that interview, not the whole population, "
+    "so a 2-interview worker is not counted as dropping out at interview 3."
 )
 li(
-    "Caveats: multi-cohort “finished” share is upward-biased (§2; completion & depth agree and are unbiased); "
-    "progression-depth conflates schedule lengths (§3); experience_years unreliable and excluded."
+    "**Engagement tier (RFM):** recency + completion rate + answer depth, each scored 1–5, with recency measured "
+    "against the freshest session in the dataset rather than today's date."
 )
+li(
+    '**Personas** are rule-based. "Partial progress" means over half of triggered interviews completed but **no** '
+    "schedule finished — it is not a slow finisher."
+)
+li(
+    '**Limits.** Observational, so associations only. Small groups are pooled into an "Other / not recorded" row '
+    "rather than dropped or published as their own rate. Figures move with each daily refresh; this document is "
+    f"generated from {'dashboard render v' + str(RENDER_V) if RENDER_V else 'the published dashboard payload'}."
+)
+li("**Full per-worker detail** is in the flw_analysis.csv export; the dashboard's FLW Retention tab is interactive.")
 
-_out = "docs/FLW_Retention_Analysis_Brief.docx"
-try:
-    doc.save(_out)
-except PermissionError:
-    _out = "docs/FLW_Retention_Analysis_Brief_UPDATED.docx"
-    doc.save(_out)
-    print("(canonical file was locked/open — wrote to _UPDATED variant instead)")
-print(f"wrote {_out}  (N={N}, healthy={healthy}%, as of {TODAY})")
+
+# ---------------------------------------------------------------- renderers
+def render_md(path):
+    out = []
+    for kind, a, b in BLOCKS:
+        if kind == "title":
+            out.append(f"# {a}\n")
+        elif kind == "h":
+            out.append(f"\n{'#' * (b + 1)} {a}\n")
+        elif kind == "p":
+            out.append(f"*{a}*\n" if b.get("italic") else f"{a}\n")
+        elif kind == "li":
+            out.append(("1. " if b == "List Number" else "- ") + a)
+        elif kind == "table":
+            out.append("")
+            out.append("| " + " | ".join(str(x) for x in a) + " |")
+            out.append("|" + "|".join("---" for _ in a) + "|")
+            for row in b:
+                out.append("| " + " | ".join(str(x) for x in row) + " |")
+            out.append("")
+    md = "\n".join(out).replace("\n\n\n", "\n\n")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(md.rstrip() + "\n")
+    return md
+
+
+NAVY = RGBColor(0x1F, 0x38, 0x64)
+GREY = RGBColor(0x6B, 0x72, 0x80)
+
+
+def render_docx(path):
+    doc = Document()
+    doc.styles["Normal"].font.name = "Calibri"
+    doc.styles["Normal"].font.size = Pt(10.5)
+
+    def runs(p, text):
+        for i, seg in enumerate(text.split("**")):
+            if seg:
+                r = p.add_run(seg)
+                r.bold = i % 2 == 1
+
+    for kind, a, b in BLOCKS:
+        if kind == "title":
+            r = doc.add_paragraph().add_run(a)
+            r.bold, r.font.size, r.font.color.rgb = True, Pt(20), NAVY
+        elif kind == "h":
+            p = doc.add_heading(a, level=b)
+            for r in p.runs:
+                r.font.color.rgb = NAVY
+        elif kind == "p":
+            p = doc.add_paragraph()
+            p.paragraph_format.space_after = Pt(6)
+            runs(p, a)
+            for r in p.runs:
+                if b.get("italic"):
+                    r.italic = True
+                    r.font.color.rgb = GREY
+                    r.font.size = Pt(9.5)
+        elif kind == "li":
+            p = doc.add_paragraph(style=b)
+            p.paragraph_format.space_after = Pt(3)
+            runs(p, a)
+        elif kind == "table":
+            t = doc.add_table(rows=1, cols=len(a))
+            t.style = "Light Grid Accent 1"
+            for j, x in enumerate(a):
+                run = t.rows[0].cells[j].paragraphs[0].add_run(str(x))
+                run.bold, run.font.size = True, Pt(9.5)
+            for row in b:
+                cells = t.add_row().cells
+                for j, v in enumerate(row):
+                    run = cells[j].paragraphs[0].add_run(str(v))
+                    run.font.size = Pt(9.5)
+                    if j == 0:
+                        run.bold = True
+            doc.add_paragraph().paragraph_format.space_after = Pt(2)
+
+    try:
+        doc.save(path)
+        return path
+    except PermissionError:
+        alt = path.replace(".docx", "_UPDATED.docx")
+        doc.save(alt)
+        print("(canonical .docx was locked/open — wrote the _UPDATED variant instead)")
+        return alt
+
+
+MD_PATH = os.path.join("docs", "FLW_Retention_Analysis_Brief.md")
+DOCX_PATH = os.path.join("docs", "FLW_Retention_Analysis_Brief.docx")
+
+
+def check():
+    """Flag a brief that no longer matches the payload it claims to be generated from.
+
+    This exists because the .docx silently went stale once: Word held the file open, the generator
+    quietly wrote a _UPDATED copy instead, and the stale canonical file stayed in git for days while
+    the dashboard said something different. Exit code 1 = do not circulate.
+    """
+    problems = []
+    if not os.path.exists(DOCX_PATH):
+        problems.append(f"{DOCX_PATH} is missing")
+    elif os.path.getmtime(DOCX_PATH) < os.path.getmtime("flw_analysis_payload.json"):
+        problems.append(f"{DOCX_PATH} is OLDER than flw_analysis_payload.json — it predates the current numbers")
+    if os.path.exists(DOCX_PATH.replace(".docx", "_UPDATED.docx")):
+        problems.append(
+            "a _UPDATED.docx exists — the canonical file was locked when it was last generated, "
+            "so the canonical file is the stale one"
+        )
+    if os.path.exists(MD_PATH) and RENDER_V and f"render v{RENDER_V}" not in open(MD_PATH, encoding="utf-8").read():
+        problems.append(f"{MD_PATH} is not stamped with the current render (v{RENDER_V})")
+    for p in problems:
+        print(f"  [STALE] {p}")
+    if problems:
+        print(
+            "\n  Fix: close the document in Word, then re-run:\n"
+            "      python pull_live_payload.py && python build_flw_docx.py"
+        )
+    else:
+        print(f"  [OK] both briefs match the current payload (render v{RENDER_V}, {TODAY})")
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    if "--check" in sys.argv:
+        sys.exit(check())
+    md_path = MD_PATH
+    render_md(md_path)
+    dx = render_docx(DOCX_PATH)
+    print(f"wrote {md_path} + {dx}")
+    print(
+        f"  N={N:,}  finishers={finishers_pct}%  per-cohort single/multi={pc(CC['single'])}/{pc(CC['multi'])}%  "
+        f"as of {TODAY} (render v{RENDER_V})"
+    )
