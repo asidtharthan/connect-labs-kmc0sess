@@ -98,7 +98,7 @@ Genuine early loss is the One-and-done segment: **131 workers (9%)** who started
 
 On how far workers get: of those whose schedule even *contains* interview 3, **86%** reach it (893 of 1,039). Quoting it against the whole population instead gives 62%, which understates retention because most workers are in short cohorts that stop before interview 3 — that is schedule length, not attrition.
 
-On attrition, two numbers that are often confused: **9% (131 workers) is the clean early-loss figure** — they did one interview and vanished. Separately, **316 workers (22% of all) have not finished any schedule** — most of them engaged repeatedly first. So 9% is who we lost immediately; 22% is who has not got there yet. §8 draws its recovery list from the second group.
+On attrition, two numbers that are often confused: **9% (131 workers) is the clean early-loss figure** — they did one interview and vanished. Separately, **316 workers (22% of all) have not finished any schedule** — most of them engaged repeatedly first. So 9% is who we lost immediately; 22% is who has not got there yet. The recovery list is drawn from the second group.
 
 ## 4. Is early answer depth associated with finishing?
 
@@ -171,25 +171,4 @@ By cadre, results are much tighter: 52–65% per-cohort across 8 cadres. The lar
 
 *Why these two and not others: both are measurable before a worker is lost, which makes them usable as early warnings rather than post-mortems: peer density is known at assignment, and pace is visible after two interviews. We also tested response *consistency* (longest silence versus a worker's own typical gap) and onboarding delay (training date to first interview) and are not reporting either: consistency does not separate cleanly in this data, and onboarding delay has no variation to analyse — all but 20 workers start within a week. Education and first language showed no relationship to finishing either.*
 
-## 8. The reachable at-risk list
-
-**27 workers** started, have not finished any schedule, **were** offered a complete schedule, and have been silent 14–60 days — recent enough that a nudge is plausible. Concentrated in Sokoto (12), Bauchi (9), Kebbi (4), Borno (2). They are the recent slice of **316** unfinished workers, not the whole unfinished population — the rest have been silent longer than 60 days.
-
-*Two caveats: the list is defined off the newest session in the dataset, so it moves as data refreshes; and it deliberately excludes workers the programme never finished triggering, who are unfinished through no choice of their own.*
-
-## 9. What to do — and how confident we are
-
-1. **Run the 27-worker recovery list now.** Small, named, and time-bounded — the only directly actionable item here. Confidence: high that these workers are correctly identified; whether a nudge converts them is unknown — running it is how we find out.
-1. **Trial first-interview support, with a control group.** Above-median first-session depth is associated with a 6-point higher per-cohort finish rate. Confidence: moderate — real association, modest size, confounded with cohort count, so measure it rather than rolling it out.
-1. **Treat the Sokoto / EHA gap as one investigation.** It is the largest effect in the data (23 points) and it is where one-and-done concentrates. Confidence: high that the gap is real, none at all on the cause — geography and partner cannot be separated here, so the next step is qualitative, not another cut of this data.
-1. **Keep re-using proven workers for operational reasons** — known, trained, available, and they answer at greater length. Confidence: high on the operational value; do not forecast a finish-rate gain from re-use itself, because the headline gap is mostly arithmetic and re-invitation is itself an outcome of past performance.
-
-## Method & data
-
-- **Grain:** one row per unique worker (connect_id), deduped across cohorts; metrics union the worker's sessions across every arm. Ties out to the dashboard's canonical started-worker count (1,441).
-- **Per-cohort finish rate** — the measure to quote. For each worker: the share of *their own* cohort schedules they finished. The published figure is the **average across workers**, each worker counting once - NOT total schedules finished divided by total schedules given, which gives a different (higher) number. Unlike "finished >=1 schedule", it does not rise just because a worker was in more cohorts.
-- **Reach curve** (how far through a schedule a worker got) is quoted against the workers whose schedule contains that interview, not the whole population, so a 2-interview worker is not counted as dropping out at interview 3.
-- **Engagement tier (RFM):** recency + completion rate + answer depth, each scored 1–5, with recency measured against the freshest session in the dataset rather than today's date.
-- **Personas** are rule-based. "Partial progress" means over half of triggered interviews completed but **no** schedule finished — it is not a slow finisher.
-- **Limits.** Observational, so associations only. Small groups are pooled into an "Other / not recorded" row rather than dropped or published as their own rate. Figures move with each daily refresh; this document is generated from dashboard render v151.
-- **Full per-worker detail** is in the flw_analysis.csv export; the dashboard's FLW Retention tab is interactive.
+*This is the findings-only cut of a longer analysis. It deliberately omits the recovery list, the recommendations with their confidence levels, and the method and limitations appendix — ask for the full brief before acting on anything here.*
