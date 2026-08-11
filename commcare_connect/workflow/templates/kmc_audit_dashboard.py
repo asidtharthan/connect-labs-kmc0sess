@@ -312,7 +312,10 @@ var DAY_MS = 86400000, EARTH_R_M = 6371000.0;
 // suppressed 272 metric cells that clear their own register minimum, 73 of them RED.
 var LOW_CASELOAD_CASES = 20;
 // fields that exist in only SOME app versions, so their denominators must be scoped
-var SCOPED_FIELDS = ["equipment_image", "kmc_wrap_check", "kmc_status_entered", "flw_program_conclusion_reason"];
+// Fields whose presence is a property of the APP (0% or 82-100% per opportunity), so a global
+// map is right. The discharge-reason fields are NOT here: per opportunity they run 87-100%,
+// i.e. presence is per-WORKER, and absence there yields the BEST band.
+var SCOPED_FIELDS = ["equipment_image", "kmc_wrap_check"];
 
 var METRIC_KEYS = ["low_avg_visits","mortality","enroll_ontime","zero_danger","danger_rate_cases",
   "no_referral","weight_loss","weight_gain_gkgday","rounded_weights","modal_weight","flat_weight",
@@ -362,6 +365,11 @@ function NA(){ return {value:null,rag:"N/A",num:null,den:null}; }
 // into one record (231 real twin pairs live). The registration row carries the baby's case id at
 // form.subcase_0.case.@case_id on 100% of rows, so key on that. Conditional on the form on purpose:
 // 'Register KMC Beneficiary' rows in opps 523/675 also carry a subcase_0 and must NOT be re-keyed.
+var _RICH_FIELDS=["weight","danger_sign_positive","temperature","heart_rate","spo2_level","gps","equipment_image","child_referred","child_alive"];
+// How much clinical content a row carries - picks the survivor on a dedup collision so a blank
+// resubmission never displaces a complete one (last-wins destroyed real weights and vitals).
+function _richness(row){ var n=0,i; for(i=0;i<_RICH_FIELDS.length;i++){ var v=rget(row,_RICH_FIELDS[i]); if(v!==null&&v!==undefined&&v!=="") n++; } return n; }
+
 function caseIdOf(row){
   if(low(rget(row,"form_name"))==="child registration form"){
     var sub=rget(row,"child_subcase_id");
@@ -399,7 +407,8 @@ function groupCases(visitRows){
       fus.push([vd,(_vn!==null)?("N:"+_vn):("A:"+rget(rows[i],"visit_date")),rows[i]]);
     }
     fus.sort(function(a,b){ return a[0]-b[0]; });
-    var _byKey={}; for(i=0;i<fus.length;i++){ _byKey[fus[i][1]]=fus[i]; }
+    var _byKey={};
+    for(i=0;i<fus.length;i++){ var _pv=_byKey[fus[i][1]]; if(!_pv||_richness(fus[i][2])>=_richness(_pv[2])) _byKey[fus[i][1]]=fus[i]; }
     fus=Object.keys(_byKey).map(function(kk){return _byKey[kk];}); fus.sort(function(a,b){ return a[0]-b[0]; });
     var followups=fus.map(function(t){return t[2];});
     var followupDates=fus.map(function(t){return t[0];});
@@ -428,8 +437,11 @@ function groupCases(visitRows){
     // measures too few visits, is circular and hid real flags.
     var isExitExogenous=(statusEntered["parents_discontinued"]||conclusionReason==="caregiver_unavailable"
       ||conclusionReason==="family_relocated")?true:false;
+    // "discharged before visit 4" is about the SCHEDULED schedule; counting additional visits
+    // here cancelled 89 early-discharge flags (one FLW went 20/39 RED -> 1/39 GREEN).
+    var nScheduled=followups.length-nAdditional;
     var isEarly=(isExitExogenous
-      ||(conclusionReason==="svn_recovered_or_met_discharge_criteria"&&followups.length<4))?true:false;
+      ||(conclusionReason==="svn_recovered_or_met_discharge_criteria"&&nScheduled<4))?true:false;
     // Weight series (reg + follow-ups). Registration rows carry no grp_kmc_visit.visit_date, so
     // without the reg_date fallback the enrolment weight — the birth anchor where neonatal weight
     // loss shows up — never entered the series (5,799 points across the 11 opps). Only reg rows
@@ -571,21 +583,28 @@ function deriveMetrics(aggRow, visitRows, asOf, fieldMap){
 
   // 16 equipment image missing
   var _ifo=fieldOpps(visitRows,"equipment_image",fieldMap);
-  var fusImg=fus.filter(function(v){ return inFieldOpps(v,_ifo); });
+  // Additional visits are a light check-in form: an image is present on 15.5% of them vs 78.7%
+  // of scheduled visits, so including them decided the band for 11 FLWs, 10 of them harmed.
+  var fusImg=fus.filter(function(v){ return inFieldOpps(v,_ifo)&&low(rget(v,"visit_type"))!=="additional visit"; });
   if(fusImg.length>=20){ var miss=0,present=0; for(i=0;i<fusImg.length;i++){ var ei=rget(fusImg[i],"equipment_image"); if(ei===null||ei==="") miss++; else present++; } if(present===0&&!_ifo.tagged){ out.image_missing=NA(); } else { var pimg=100.0*miss/fusImg.length; out.image_missing=M(pimg,ragHighBad(pimg,5,20),miss,fusImg.length); } } else out.image_missing=NA();
 
   // 17 flw early discharge
   // Scope to opportunities whose app actually asks the discharge-reason questions. Opp 675 has ZERO
   // rows carrying either field, so its cases could only ever score 0% — one FLW whose whole
   // denominator came from 675 read 0.0% GREEN on a Priority-1 metric.
-  var _sfo=fieldOpps(visitRows,"kmc_status_entered",fieldMap), _cfo=fieldOpps(visitRows,"flw_program_conclusion_reason",fieldMap);
+  // Direction-aware: absence here yields 0% = the BEST band, so "no data" must never look like
+  // "no early discharges". Requires (i) this FLW populated a status field at least once and
+  // (ii) the case comes from an opportunity whose app has the field (opp 675 has neither).
+  var _sfo=fieldOpps(visitRows,"kmc_status_entered",null), _cfo=fieldOpps(visitRows,"flw_program_conclusion_reason",null);
+  var _flwHasStatus=false;
+  for(i=0;i<visitRows.length;i++){ if(rget(visitRows[i],"kmc_status_entered")||rget(visitRows[i],"flw_program_conclusion_reason")){ _flwHasStatus=true; break; } }
   function _statusCapable(c){
     if(!_sfo.tagged&&!_cfo.tagged) return true;
     var rr=c.followups.concat(c.reg_rows), q;
     for(q=0;q<rr.length;q++){ var o=String(rget(rr[q],"opportunity_id")); if(_sfo.opps[o]===1||_cfo.opps[o]===1) return true; }
     return false;
   }
-  var e60=cs.filter(function(c){ return c.reg_date!==null&&ageDays(c.reg_date)>=60&&_statusCapable(c); });
+  var e60=_flwHasStatus?cs.filter(function(c){ return c.reg_date!==null&&ageDays(c.reg_date)>=60&&_statusCapable(c); }):[];
   if(e60.length>=10){ var early=0; for(i=0;i<e60.length;i++){ if(e60[i].is_early) early++; } var ped=100.0*early/e60.length; out.flw_early_discharge=M(ped,ragHighBad(ped,5,15),early,e60.length); } else out.flw_early_discharge=NA();
 
   // 18 kmc wrap missing at reg
