@@ -19,6 +19,7 @@ python checkpoint.py rollback cp-0001     # prints the runbook
 | **cp-0005** | 2026-08-07 18:18 | `2ba286b8` | `cp-0005-deployed-live-render-v142-all-audit-work` | 142 | 27/27 | 39/39 | 196/196 | 359.6 | 152.4 | DEPLOYED — live render v142, all audit work merged |
 | **cp-0006** | 2026-08-11 15:37 | `6238f18b` | `cp-0006-flw-briefs-regenerated-from-live-payload` | 146 | — | — | — | — | — | FLW briefs regenerated from live payload (render v146) |
 | **cp-0007** | 2026-08-11 18:24 | `fa519e4b` | `cp-0007-tier-persona-name-collision-fixed-briefs` | 147 | — | — | — | — | — | tier/persona name collision fixed; briefs regenerated (render v147) |
+| **cp-0008** | 2026-08-11 20:09 | `71cf2ab5` | `cp-0008-clarity-pass-tab-labelling-brief-rewrite` | 148 | — | — | — | — | — | clarity pass: tab labelling + brief rewrite (render v148) |
 
 ## Notes
 
@@ -29,3 +30,4 @@ python checkpoint.py rollback cp-0001     # prints the runbook
 - **cp-0005 — DEPLOYED — live render v142, all audit work merged**: Merged PRs #69 + #70 to main, published v142 via workflow_dispatch. First run with genuinely complete data (all 12 HQ domains): master_rows 9930, started 9393. Universe fix VERIFIED on live data — matrix started/completed cells now equal counts exactly (the 210/182 gap is closed). Regression guard seeded and made its first day-over-day comparison.
 - **cp-0006 — FLW briefs regenerated from live payload (render v146)**: PR #71 + docx regen. Both briefs now generated from one code path off the PUBLISHED payload; --check guards staleness. No pipeline change.
 - **cp-0007 — tier/persona name collision fixed; briefs regenerated (render v147)**: PR #72: tier labels renamed to activity-state language (Highly engaged/Engaged/Slipping/Gone quiet/Lost) so they no longer collide with persona names; panels name the timeframe; tier lookups made position-based. Briefs regenerated from v147, --check exits 0.
+- **cp-0008 — clarity pass: tab labelling + brief rewrite (render v148)**: PR #73. Fixes from two independent audits: tab sort order/column headers/global-section pills/empty-state guard/small-n suppression; brief gains a how-to-read section, the 58% programme figure, marginal-shares warning, 9%-vs-22% reconciliation, position-based tier prose.
