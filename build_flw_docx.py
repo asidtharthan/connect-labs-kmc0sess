@@ -47,6 +47,55 @@ LLO = {s["k"]: s for s in FE["byLLO"]}
 SV = {s["d"]: s for s in FE["survival"]}
 MICRO = FE.get("micro") or {}
 
+
+def _micro_facts():
+    """Facts the brief asserts but previously could not show. Derived at generation time, so they
+    cannot drift from the payload.
+
+    Added after a reader audit found the brief (a) never gave the programme-level per-cohort figure at
+    all, (b) invited readers to intersect three separate marginal shares in section 3, and (c) called
+    9% "the" attrition figure while section 6 implied a much larger unfinished population.
+    """
+    m = MICRO
+    if not m.get("col"):
+        return {}
+
+    def col(d):
+        return [m["dict"][d][int(c)] for c in m["col"][d]]
+
+    def unpack(spec):
+        w, t = spec["w"], spec["s"]
+        return [int(t[i : i + w], 36) for i in range(0, len(t), w)]
+
+    nn = m["n"]
+    pcf = unpack(m["num"]["pcf"])
+    st, ty, per, nco, tier, fin = col("state"), col("type"), col("persona"), col("nco"), col("tier"), col("fin")
+    finished_label = m["dict"]["fin"][0]
+    oad = [i for i in range(nn) if per[i] == "One-and-done"]
+    top_state = (OAD.get("topState") or [{}])[0].get("k")
+    top_type = (OAD.get("topType") or [{}])[0].get("k")
+    all_three = [i for i in oad if st[i] == top_state and ty[i] == top_type and nco[i] == "1"]
+    unfinished = [i for i in range(nn) if fin[i] != finished_label]
+    mid_tier = FE["tiers"][2]["k"] if len(FE["tiers"]) > 2 else None
+    mid = [i for i in range(nn) if tier[i] == mid_tier]
+    return {
+        "prog_pc": round(sum(pcf) / nn) if nn else 0,
+        "oad_all_three": len(all_three),
+        "oad_n": len(oad),
+        "oad_all_three_pct": round(100 * len(all_three) / len(oad)) if oad else 0,
+        "top_state": top_state,
+        "top_type": top_type,
+        "unfinished": len(unfinished),
+        "unfinished_pct": round(100 * len(unfinished) / nn) if nn else 0,
+        "mid_tier": mid_tier,
+        "mid_n": len(mid),
+        "mid_finishers": sum(1 for i in mid if fin[i] == finished_label),
+        "mid_oad": sum(1 for i in mid if per[i] == "One-and-done"),
+    }
+
+
+MF = _micro_facts()
+
 finishers_pct = P.get("Champion", {}).get("pct", 0) + P.get("Steady finisher", {}).get("pct", 0)
 multi_pct = 100 - CCD.get("1", {}).get("pct", 0)
 
@@ -127,10 +176,35 @@ para(
     "touched. Most workers are re-used across studies, so the worker's cumulative experience — not any single cohort — "
     "is what tells us who the programme retains and where it loses people."
 )
+
+# A reader hit four specific confusions on the previous version, and every one of them was caused by a
+# definition living in the Method section at the BOTTOM while the number appeared at the top. So the
+# things you must hold in your head now come first, in plain language.
+h("How to read the numbers (please read this first)", 1)
+para("**Two ways of saying a worker “finished”.** They are different questions and are never interchangeable:")
+li(
+    '**Finished at least one schedule** — "have they ever completed a full cohort schedule?" Beware: a worker in three '
+    "cohorts has three chances to clear this bar, so this number rises with how many cohorts someone was put in, even "
+    "if nothing about the worker changed. Useful for describing, misleading for comparing."
+)
+li(
+    "**Per-cohort finish rate** — “of the schedules they were actually given, what share did they complete?” "
+    "Worked out per person (schedules completed ÷ schedules enrolled in) and then averaged across the group. This is "
+    "the fair one, and it is the number to quote when comparing groups."
+)
+para("**Two ways of grouping workers.** Both appear below and they are not comparable with each other:")
+li(
+    "**Personas** — what a worker has done over their **whole history** (Champion, Steady finisher, One-and-done…). "
+    "Fixed: a persona does not change as time passes."
+)
+li(
+    "**Engagement tiers** — where a worker sits **right now** (Highly engaged, Engaged, Slipping, Gone quiet, Lost). "
+    "A worker moves between tiers over time. Different words are used deliberately so the two are never mixed up."
+)
 para(
-    'Two things to hold on to before the numbers. First, there are **two different ways to say a worker "finished"**, '
-    "and they answer different questions (§2). Second, this is observational data: it shows what is associated with "
-    "finishing, not what causes it.",
+    "**And one limitation that applies to everything here:** this is observational data. It can show what goes "
+    "*together* with finishing; it cannot show what *causes* finishing. Where a number is tempting to read causally, "
+    "the text says so explicitly.",
     italic=True,
 )
 
@@ -158,9 +232,20 @@ _top2, _worst2 = _tiers[:2], _tiers[-2:]
 _mid = _tiers[2:-2]
 _healthy = sum(t["pct"] for t in _top2)
 para(
-    f"**{finishers_pct}% have completed at least one full schedule** (Champions {P.get('Champion',{}).get('pct',0)}% + "
-    f"Steady finishers {P.get('Steady finisher',{}).get('pct',0)}%). Genuine early loss is **{OAD['pct']}%** "
-    f"({OAD['n']} workers) — the One-and-done segment, which §3 profiles."
+    f"**{finishers_pct}% of workers have completed at least one full schedule** — Champions "
+    f"{P.get('Champion',{}).get('pct',0)}% + Steady finishers {P.get('Steady finisher',{}).get('pct',0)}%, the two "
+    f"personas defined by having finished. Genuine early loss is **{OAD['pct']}%** ({OAD['n']} workers), the "
+    f"One-and-done segment that §3 profiles."
+    + (
+        f" **Important:** that {finishers_pct}% is the generous measure — the one §2 shows is inflated by how many "
+        f"cohorts a worker was put in. On the like-for-like per-cohort measure, workers complete "
+        f"**{MF['prog_pc']}%** of the schedules they were actually given. Quote {MF['prog_pc']}% as the "
+        f"programme's headline finish figure, not {finishers_pct}%."
+        if MF.get("prog_pc")
+        else ""
+    )
+    + " *(Both are whole-history views. The tier table below describes the same people's CURRENT activity and is "
+    "not comparable with either.)*"
 )
 para(
     "Engagement tiers answer a **different question** from the personas above. A tier is where a worker sits "
@@ -169,17 +254,28 @@ para(
     "deliberately different words so they are never read as the same grouping.",
     italic=True,
 )
-_tier_bits = ", ".join(f"{t['pct']}% {t['k']}" for t in _tiers)
+# Tiers previously appeared as prose with no counts while personas got a full table - that asymmetry is
+# WHY a reader read "top two tiers" as "top two personas". Equal visual weight now.
+table(
+    ["Engagement tier (activity right now)", "Workers", "% of all"],
+    [[t["k"], f"{t['n']:,}", f"{t['pct']}%"] for t in _tiers],
+)
 para(
-    f"On that basis: {_healthy}% sit in the top two tiers. Full spread — {_tier_bits}."
+    f"**{_healthy}% of workers sit in the top two tiers** ({_top2[0]['k']} + {_top2[1]['k']}). This answers a "
+    f"different question from the {finishers_pct}% above: that counted who has ever finished a schedule, this "
+    f"describes how active they are right now."
     + (
-        f" \"{_mid[0]['k']}\" is mixed: it holds both finishers who are simply inactive now and a large share of the "
-        "one-and-done group, so it should not be read as uniformly benign."
-        if _mid
+        f" \"{MF['mid_tier']}\" is mixed - of its {MF['mid_n']:,} workers, {MF['mid_finishers']:,} have actually "
+        f"finished a schedule and are simply inactive now, while {MF['mid_oad']} are one-and-done workers - so it "
+        f"should not be read as uniformly benign."
+        if MF.get("mid_tier")
         else ""
     )
-    + " Tier recency is measured against the freshest session in the dataset rather than the wall clock, so these "
-    "shares do not drift when a data pull runs late."
+)
+para(
+    "Tier recency is measured against the freshest session in the dataset rather than the wall clock, so these "
+    "shares do not drift when a data pull runs late.",
+    italic=True,
 )
 
 # ================================================================ 2
@@ -220,12 +316,30 @@ table(
     ],
 )
 para(
-    f'The first row is the trap. "Finished ≥1 schedule" is a **maximum over a worker\'s cohorts** — a worker in three '
-    f"cohorts gets three independent chances to clear the bar — so it rises with cohort count even if nothing about the "
-    f"worker changed. It shows a {_raw_gap}-point gap. On the like-for-like measure, the gap is "
-    f"**{_pc_gap} points** ({pc(CC['single'])}% vs {pc(CC['multi'])}%), so roughly **{_arith}% of the headline gap is "
-    f"arithmetic rather than behaviour**."
-    + (" On this build the like-for-like difference is small enough to read as flat." if abs(_pc_gap) <= 3 else "")
+    f'The first row is the trap. "Finished ≥1 schedule" is a **maximum over a worker\'s cohorts** - a worker in '
+    f"three cohorts gets three independent chances to clear the bar — so it rises with cohort count even if nothing "
+    f"about the worker changed."
+)
+para(
+    f"Compare the two rows directly. The headline measure gives a **{_raw_gap}-point** gap "
+    f"({CC['multi']['finished']}% − {CC['single']['finished']}%). The fair measure gives **{_pc_gap} points** "
+    f"({pc(CC['multi'])}% − {pc(CC['single'])}%). So {_raw_gap} − {_pc_gap} = **{_raw_gap - _pc_gap} points** of the "
+    f"original gap vanish once you stop rewarding a worker for having been put in more cohorts. That is "
+    f"{_raw_gap - _pc_gap} ÷ {_raw_gap} = **{_arith}% of the headline gap**, which is arithmetic rather than "
+    f"behaviour. To be explicit: {_arith}% is that share of the gap — it is NOT an average of the two rates."
+    + (
+        " On this build the remaining like-for-like difference is small enough to read as flat."
+        if abs(_pc_gap) <= 3
+        else ""
+    )
+)
+para(
+    f"Where the {pc(CC['multi'])}% itself comes from: for each multi-cohort worker, take the schedules they completed "
+    f"divided by the schedules they were enrolled in, then average that across all {CC['multi']['n']:,} of them. "
+    f"Single-cohort workers have exactly one schedule, so their fraction can only be 0 or 1 and the average collapses "
+    f'to "what share finished their one schedule" — which is why both of their measures read '
+    f"{CC['single']['finished']}%.",
+    italic=True,
 )
 para(
     f"What re-used workers clearly do differ on is **depth: {CC['single']['depth']} → {CC['multi']['depth']} "
@@ -283,20 +397,37 @@ _oad_rows.append(
 )
 table(["Cut", "One-and-done", "Programme base rate", "Over-represented"], _oad_rows)
 para(
-    "Read together, the drop-off profile is a first-time, single-exposure worker in one geography, engaging shallowly "
-    "on their single interview and not returning."
+    "**Read each row separately, not stacked.** Each line above is measured on its own, so they cannot be added "
+    "up into one profile."
+    + (
+        f" Only **{MF['oad_all_three']} of the {MF['oad_n']} one-and-done workers "
+        f"({MF['oad_all_three_pct']}%)** are {MF['top_state']} *and* {MF['top_type']} *and* single-cohort "
+        f"at the same time. The single strongest signal is {MF['top_state']}."
+        if MF.get("oad_all_three_pct") is not None
+        else ""
+    )
 )
 _s3 = SV.get(3, {})
 para(
     f"On how far workers get: of those whose schedule even *contains* interview 3, **{_s3.get('pct_elig', _s3.get('pct'))}%** "
     f"reach it ({_s3.get('reached',0):,} of {_s3.get('elig',N):,}). Quoting it against the whole population instead "
     f"gives {_s3.get('pct')}%, which understates retention because most workers are in short cohorts that stop before "
-    f"interview 3 — that is schedule length, not attrition. The clean worker-level attrition figure is the "
-    f"{OAD['pct']}% one-and-done."
+    f"interview 3 — that is schedule length, not attrition."
+)
+para(
+    f"On attrition, two numbers that are often confused: **{OAD['pct']}% ({OAD['n']} workers) is the clean early-loss "
+    f"figure** — they did one interview and vanished."
+    + (
+        f" Separately, **{MF['unfinished']} workers ({MF['unfinished_pct']}% of all) have not finished any schedule** — "
+        f"most of them engaged repeatedly first. So {OAD['pct']}% is who we lost immediately; "
+        f"{MF['unfinished_pct']}% is who has not got there yet. §6 draws its recovery list from the second group."
+        if MF.get("unfinished")
+        else ""
+    )
 )
 
 # ================================================================ 4
-h("4. Does early answer depth predict finishing?", 1)
+h("4. Is early answer depth associated with finishing?", 1)
 para(
     f"Splitting workers at the median depth of their **first session only** ({DS_MED if DS_MED is not None else '—'} words) — first "
     "session, so the predictor does not contain the outcome:"
@@ -322,10 +453,18 @@ table(
 )
 _d_pc = pc(DS["hi"]) - pc(DS["lo"])
 para(
-    f"That is a **{_d_pc}-point** difference on the like-for-like measure ({DS['lo']['finished']}% vs "
-    f"{DS['hi']['finished']}% on the looser \"finished ≥1\" reading). It is a real association and the strongest early "
-    "signal available, but it is modest, and the deeper group is also in more cohorts — so treat first-interview "
-    "support as the leading hypothesis to **test**, not an established lever."
+    f"Read those percentages carefully: **{pc(DS['hi'])}% means that group completed, on average, {pc(DS['hi'])}% of "
+    f"the schedules they were enrolled in** — it does NOT mean they finished everything. Workers in both halves "
+    f"finish some of their schedules and not others."
+)
+para(
+    f"The difference between the halves is **{_d_pc} points** on the like-for-like measure "
+    f"({pc(DS['hi'])}% vs {pc(DS['lo'])}%). On the looser \"finished ≥1\" reading it is "
+    f"{DS['hi']['finished']}% vs {DS['lo']['finished']}% — a gap of {DS['hi']['finished'] - DS['lo']['finished']} "
+    f"points. It is a real association "
+    "and the strongest early signal available, but it is modest — and the deeper group also happens to be in more "
+    "cohorts, so the two effects are tangled together. Treat first-interview support as the leading hypothesis to "
+    "**test**, not an established lever."
 )
 
 # ================================================================ 5
@@ -370,7 +509,7 @@ if _types:
     )
 
 # ================================================================ 6
-h("6. The recoverable at-risk list", 1)
+h("6. The reachable at-risk list", 1)
 _ar = ", ".join(f"{s['k']} ({s['n']})" for s in AR["byState"])
 para(
     f"**{AR['n']} workers** started, have not finished any schedule, **were** offered a complete schedule, and have "
@@ -393,7 +532,7 @@ para(
 h("7. What to do — and how confident we are", 1)
 li(
     f"**Run the {AR['n']}-worker recovery list now.** Small, named, and time-bounded — the only directly actionable "
-    "item here. Confidence: high, it is a list, not an inference.",
+    "item here. Confidence: high that these workers are correctly identified; whether a nudge converts them is unknown — running it is how we find out.",
     "List Number",
 )
 li(
@@ -423,11 +562,13 @@ li(
     f"across every arm. Ties out to the dashboard's canonical started-worker count ({N:,})."
 )
 li(
-    "**Per-cohort finish rate** — the measure to quote. Of all the cohort schedules a worker was enrolled in, the "
-    'share they completed. Unlike "finished ≥1 schedule", it does not rise just because a worker was in more cohorts.'
+    "**Per-cohort finish rate** — the measure to quote. For each worker: the share of *their own* cohort "
+    "schedules they finished. The published figure is the **average across workers**, each worker counting once "
+    "- NOT total schedules finished divided by total schedules given, which gives a different (higher) number. "
+    'Unlike "finished >=1 schedule", it does not rise just because a worker was in more cohorts.'
 )
 li(
-    "**Depth curve** is quoted against the workers whose schedule contains that interview, not the whole population, "
+    "**Reach curve** (how far through a schedule a worker got) is quoted against the workers whose schedule contains that interview, not the whole population, "
     "so a 2-interview worker is not counted as dropping out at interview 3."
 )
 li(
