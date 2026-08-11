@@ -282,6 +282,8 @@ RENDER_CODE = r"""/* KMC Audit Dashboard — RENDER_CODE (register-faithful band
 // ============================= compute core (PARITY-LOCKED) =============================
 var WMIN = 500.0, WMAX = 5000.0, PAIR_MIN = 1, PAIR_MAX = 30, KG_TO_G = 1000.0;
 var DAY_MS = 86400000, EARTH_R_M = 6371000.0, EXCLUDE_MIN_CASES = 20;
+// fields that exist in only SOME app versions, so their denominators must be scoped
+var SCOPED_FIELDS = ["equipment_image", "kmc_wrap_check"];
 
 var METRIC_KEYS = ["low_avg_visits","mortality","enroll_ontime","zero_danger","danger_rate_cases",
   "no_referral","weight_loss","weight_gain_gkgday","rounded_weights","modal_weight","flat_weight",
@@ -386,15 +388,35 @@ function groupCases(visitRows){
 // every legacy visit counted as a violation (worst: 96.6% RED vs 4.4% true; 33 of 55
 // banded FLWs contaminated). Opportunities with zero populated values drop out.
 // tagged=false means the rows carry no opportunity_id at all -> callers must not scope.
-function fieldOpps(rows, field){
+// PREFER THE GLOBAL MAP (buildFieldOpps over EVERY loaded row). Inferring per-FLW is wrong at
+// the edge: a worker who captured ZERO images in their V3 opportunity looks identical to "this
+// app has no such question", so they score N/A instead of the 100% RED they earned — that
+// silently under-flagged 5 real FLWs. Per-FLW inference is kept only as the no-map fallback.
+function fieldOpps(rows, field, globalMap){
   var opps={}, tagged=false, i, o;
-  for(i=0;i<rows.length;i++){ o=rget(rows[i],"opportunity_id"); if(o===null||o===undefined) continue; tagged=true;
+  for(i=0;i<rows.length;i++){ o=rget(rows[i],"opportunity_id"); if(o!==null&&o!==undefined){ tagged=true; break; } }
+  if(globalMap&&globalMap[field]){ var lst=globalMap[field]; for(i=0;i<lst.length;i++) opps[String(lst[i])]=1; return {opps:opps,tagged:tagged}; }
+  for(i=0;i<rows.length;i++){ o=rget(rows[i],"opportunity_id"); if(o===null||o===undefined) continue;
     var fv=rget(rows[i],field); if(fv!==null&&fv!=="") opps[String(o)]=1; }
   return {opps:opps,tagged:tagged};
 }
+// Global field-presence map: which opportunities' apps actually capture each field. Build once
+// over all loaded visit rows and hand it to deriveMetrics.
+function buildFieldOpps(rows, fields){
+  fields = fields || SCOPED_FIELDS;
+  var out={}, i, j, o, seen;
+  for(j=0;j<fields.length;j++){
+    seen={};
+    for(i=0;i<rows.length;i++){ o=rget(rows[i],"opportunity_id");
+      if(o===null||o===undefined) continue;
+      var fv=rget(rows[i],fields[j]); if(fv!==null&&fv!=="") seen[String(o)]=1; }
+    out[fields[j]]=Object.keys(seen).sort();
+  }
+  return out;
+}
 function inFieldOpps(row, fo){ return (!fo.tagged) || fo.opps[String(rget(row,"opportunity_id"))]===1; }
 
-function deriveMetrics(aggRow, visitRows, asOf){
+function deriveMetrics(aggRow, visitRows, asOf, fieldMap){
   var totalCases=pint(rget(aggRow,"total_cases"))||0;
   var excluded=totalCases<EXCLUDE_MIN_CASES;
   var out={}, k, i;
@@ -487,18 +509,18 @@ function deriveMetrics(aggRow, visitRows, asOf){
   if(sp.length>=20){ var bad=0; for(i=0;i<sp.length;i++) if(sp[i]<70||sp[i]>100) bad++; var ps=100.0*bad/sp.length; out.spo2_implausible=M(ps,ragHighBad(ps,3,5),bad,sp.length); } else out.spo2_implausible=NA();
 
   // 16 equipment image missing
-  var _ifo=fieldOpps(visitRows,"equipment_image");
+  var _ifo=fieldOpps(visitRows,"equipment_image",fieldMap);
   var fusImg=fus.filter(function(v){ return inFieldOpps(v,_ifo); });
-  if(fusImg.length>=20){ var miss=0,present=0; for(i=0;i<fusImg.length;i++){ var ei=rget(fusImg[i],"equipment_image"); if(ei===null||ei==="") miss++; else present++; } if(present===0){ out.image_missing=NA(); } else { var pimg=100.0*miss/fusImg.length; out.image_missing=M(pimg,ragHighBad(pimg,5,20),miss,fusImg.length); } } else out.image_missing=NA();
+  if(fusImg.length>=20){ var miss=0,present=0; for(i=0;i<fusImg.length;i++){ var ei=rget(fusImg[i],"equipment_image"); if(ei===null||ei==="") miss++; else present++; } if(present===0&&!_ifo.tagged){ out.image_missing=NA(); } else { var pimg=100.0*miss/fusImg.length; out.image_missing=M(pimg,ragHighBad(pimg,5,20),miss,fusImg.length); } } else out.image_missing=NA();
 
   // 17 flw early discharge
   var e60=cs.filter(function(c){ return c.reg_date!==null&&ageDays(c.reg_date)>=60&&!c.is_crf; });
   if(e60.length>=10){ var early=0; for(i=0;i<e60.length;i++){ if(e60[i].is_early) early++; } var ped=100.0*early/e60.length; out.flw_early_discharge=M(ped,ragHighBad(ped,5,15),early,e60.length); } else out.flw_early_discharge=NA();
 
   // 18 kmc wrap missing at reg
-  var _wfo=fieldOpps(visitRows,"kmc_wrap_check");
+  var _wfo=fieldOpps(visitRows,"kmc_wrap_check",fieldMap);
   var regCases=cs.filter(function(c){ if(c.reg_rows.length===0) return false; for(var q=0;q<c.reg_rows.length;q++){ if(inFieldOpps(c.reg_rows[q],_wfo)) return true; } return false; });
-  if(regCases.length>=20){ var bd=0,presentW=0; for(i=0;i<regCases.length;i++){ var wrap=null; for(j=0;j<regCases[i].reg_rows.length;j++){ var wv=low(rget(regCases[i].reg_rows[j],"kmc_wrap_check")); if(wv!==null){ wrap=wv; break; } } if(wrap!==null) presentW++; if(wrap!=="yes") bd++; } if(presentW===0){ out.kmc_wrap_missing=NA(); } else { var pw=100.0*bd/regCases.length; out.kmc_wrap_missing=M(pw,ragHighBad(pw,15,40),bd,regCases.length); } } else out.kmc_wrap_missing=NA();
+  if(regCases.length>=20){ var bd=0,presentW=0; for(i=0;i<regCases.length;i++){ var wrap=null; for(j=0;j<regCases[i].reg_rows.length;j++){ var wv=low(rget(regCases[i].reg_rows[j],"kmc_wrap_check")); if(wv!==null){ wrap=wv; break; } } if(wrap!==null) presentW++; if(wrap!=="yes") bd++; } if(presentW===0&&!_wfo.tagged){ out.kmc_wrap_missing=NA(); } else { var pw=100.0*bd/regCases.length; out.kmc_wrap_missing=M(pw,ragHighBad(pw,15,40),bd,regCases.length); } } else out.kmc_wrap_missing=NA();
 
   out._excluded=false; out._total_cases=totalCases;
   return out;
@@ -580,6 +602,10 @@ function correctedCaseCount(rows, opp){
 function buildMasterRows(flwRows, visitRows, nameByUser, asOf, winStartMs, winEndMs){
   nameByUser=nameByUser||{};
   var winActive = (winStartMs!==null && winStartMs!==undefined && winEndMs!==null && winEndMs!==undefined);
+  // ONE field-presence map over EVERY loaded visit row, handed to every FLW. Built globally on
+  // purpose: per-FLW inference cannot tell "this app has no equipment-image question" from
+  // "this worker never took one", which silently excused 5 FLWs from a 100% RED.
+  var fieldMap = buildFieldOpps(visitRows);
   var visitsByOppUser={}, i, r, k;
   for(i=0;i<visitRows.length;i++){ r=visitRows[i]; k=r.opportunity_id+"|"+r.username; (visitsByOppUser[k]=visitsByOppUser[k]||[]).push(r); }
   var buckets={};
@@ -597,7 +623,7 @@ function buildMasterRows(flwRows, visitRows, nameByUser, asOf, winStartMs, winEn
   var out=[];
   Object.keys(buckets).forEach(function(bk){ var b=buckets[bk];
     var aggDict={username:b.username,total_cases:b.agg_total_cases};
-    var res=deriveMetrics(aggDict,b.visit_rows,asOf);
+    var res=deriveMetrics(aggDict,b.visit_rows,asOf,fieldMap);
     res.username=b.username; res.flw_name=b.flw_name||b.username; res.llo=b.llo;
     res.opportunity_ids=b.opportunity_ids.slice(); res.opportunity_breakdown=b.opportunity_breakdown.slice();
     res.versions=[]; for(var vi=0;vi<b.opportunity_ids.length;vi++){ var vv=verFor(b.opportunity_ids[vi]); if(res.versions.indexOf(vv)<0) res.versions.push(vv); }
@@ -611,7 +637,7 @@ function buildMasterRows(flwRows, visitRows, nameByUser, asOf, winStartMs, winEn
     if(winActive){ winVisits=b.visit_rows.filter(function(v){ var vd=parseDate(rget(v,"visit_date")); return vd!==null && vd>=winStartMs && vd<=winEndMs; }); }
     res._win_visits=winVisits.length;
     res.in_window = winActive ? (winVisits.length>0) : true;
-    var resWin = winActive ? deriveMetrics(aggDict, winVisits, asOf) : res;
+    var resWin = winActive ? deriveMetrics(aggDict, winVisits, asOf, fieldMap) : res;
     res.win={}; for(var wi=0;wi<WINDOWED_METRICS_LIST.length;wi++){ var wk=WINDOWED_METRICS_LIST[wi]; res.win[wk]=resWin[wk]; }
     // ---- effective bands = windowed for the 6 windowable metrics (when a window is set) + full-history for the rest
     var red=0,yellow=0,p1red=0;
