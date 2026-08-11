@@ -172,8 +172,33 @@ PIPELINE_SCHEMAS = [
                     "transform": "float",
                 },
                 {
+                    # form.gps_block.normalized_location is the V3 apps' own GPS block: it carries
+                    # 527 rows (198 follow-ups) where none of the first three paths fire, and where
+                    # both exist the strings are identical on 8,393 rows — same reading, better
+                    # coverage. Last in the list, so it can only fill nulls.
                     "name": "gps",
-                    "paths": ["form.visit_gps_manual", "form.reg_gps", "metadata.location"],
+                    "paths": [
+                        "form.visit_gps_manual",
+                        "form.reg_gps",
+                        "metadata.location",
+                        "form.gps_block.normalized_location",
+                    ],
+                    "aggregation": "first",
+                },
+                {
+                    # The baby's case id, created as a subcase by the V3 Child Registration Form.
+                    # Present on 100% of CRF rows; without it registrations key to the MOTHER, which
+                    # collapses twins and strands the birth weight on a case that has no visits.
+                    "name": "child_subcase_id",
+                    "path": "form.subcase_0.case.@case_id",
+                    "aggregation": "first",
+                },
+                {
+                    # The ONLY reliable discriminator for an "Additional Visit": its visit_number is
+                    # the literal string "Additional", which the int transform nulls, so without this
+                    # field 481 real visits are misread as registrations.
+                    "name": "visit_type",
+                    "path": "form.grp_kmc_visit.visit_type",
                     "aggregation": "first",
                 },
                 {
@@ -283,7 +308,7 @@ RENDER_CODE = r"""/* KMC Audit Dashboard — RENDER_CODE (register-faithful band
 var WMIN = 500.0, WMAX = 5000.0, PAIR_MIN = 1, PAIR_MAX = 30, KG_TO_G = 1000.0;
 var DAY_MS = 86400000, EARTH_R_M = 6371000.0, EXCLUDE_MIN_CASES = 20;
 // fields that exist in only SOME app versions, so their denominators must be scoped
-var SCOPED_FIELDS = ["equipment_image", "kmc_wrap_check"];
+var SCOPED_FIELDS = ["equipment_image", "kmc_wrap_check", "kmc_status_entered", "flw_program_conclusion_reason"];
 
 var METRIC_KEYS = ["low_avg_visits","mortality","enroll_ontime","zero_danger","danger_rate_cases",
   "no_referral","weight_loss","weight_gain_gkgday","rounded_weights","modal_weight","flat_weight",
@@ -327,9 +352,23 @@ function ragHighBad(v,g,y){ if(v===null) return "N/A"; if(v<g) return "GREEN"; i
 function M(value,rag,num,den){ return {value:value,rag:rag,num:(num===undefined?null:num),den:(den===undefined?null:den)}; }
 function NA(){ return {value:null,rag:"N/A",num:null,den:null}; }
 
+// The case a row belongs to. In the V3 apps the Child Registration Form is filled against the
+// MOTHER and creates a subcase for the baby, so its own case.@case_id is the mother's — disjoint
+// from the baby's visit rows. That produced a reg-only "phantom" case per baby AND collapsed TWINS
+// into one record (231 real twin pairs live). The registration row carries the baby's case id at
+// form.subcase_0.case.@case_id on 100% of rows, so key on that. Conditional on the form on purpose:
+// 'Register KMC Beneficiary' rows in opps 523/675 also carry a subcase_0 and must NOT be re-keyed.
+function caseIdOf(row){
+  if(low(rget(row,"form_name"))==="child registration form"){
+    var sub=rget(row,"child_subcase_id");
+    if(sub!==null&&sub!==undefined&&sub!=="") return String(sub);
+  }
+  return rget(row,"beneficiary_case_id");
+}
+
 function groupCases(visitRows){
   var by={}, i, r, cid;
-  for(i=0;i<visitRows.length;i++){ r=visitRows[i]; cid=rget(r,"beneficiary_case_id"); if(!cid) continue; cid=String(cid); (by[cid]=by[cid]||[]).push(r); }
+  for(i=0;i<visitRows.length;i++){ r=visitRows[i]; cid=caseIdOf(r); if(!cid) continue; cid=String(cid); (by[cid]=by[cid]||[]).push(r); }
   var cases=[];
   Object.keys(by).forEach(function(cid){
     var rows=by[cid];
@@ -339,15 +378,28 @@ function groupCases(visitRows){
     var dischargeDate=first("discharge_date",parseDate);
     var dob=first("child_dob",parseDate);
     var birthLocation=first("birth_location",low);
-    var fus=[];
-    for(i=0;i<rows.length;i++){ if(pint(rget(rows[i],"visit_number"))===null) continue; var vd=parseDate(rget(rows[i],"visit_date")); if(vd===null) continue; fus.push([vd,rows[i]]); }
+    // follow-ups: a numbered visit OR an "Additional Visit", plus a parseable visit_date. An
+    // additional visit carries the literal string "Additional" in visit_number, which the pipeline's
+    // int transform nulls — without the visit_type test these rows were read as REGISTRATIONS and
+    // 481 real visits (479 GPS points, 100 danger-sign assessments, 46 weights) vanished from every
+    // follow-up metric, leaving 10 cases looking 0-visit.
+    var fus=[], regRows=[];
+    for(i=0;i<rows.length;i++){
+      var _vn=pint(rget(rows[i],"visit_number"));
+      var _isAdd=low(rget(rows[i],"visit_type"))==="additional visit";
+      if(_vn===null&&!_isAdd){ regRows.push(rows[i]); continue; }
+      var vd=parseDate(rget(rows[i],"visit_date")); if(vd===null) continue;
+      // Dedup key: visit number for scheduled visits; the date for additional ones (they have no
+      // number). 24 cases have MORE THAN ONE additional visit, so a shared sentinel would collapse
+      // them; the date keeps them distinct while still deduping a same-day resubmission.
+      fus.push([vd,(_vn!==null)?("N:"+_vn):("A:"+rget(rows[i],"visit_date")),rows[i]]);
+    }
     fus.sort(function(a,b){ return a[0]-b[0]; });
-    // Dedup duplicate/same-day resubmissions: one follow-up per visit_number (latest-dated after sort).
-    var _byVn={}; for(i=0;i<fus.length;i++){ _byVn[pint(rget(fus[i][1],"visit_number"))]=fus[i]; }
-    fus=Object.keys(_byVn).map(function(kk){return _byVn[kk];}); fus.sort(function(a,b){ return a[0]-b[0]; });
-    var followups=fus.map(function(t){return t[1];});
+    var _byKey={}; for(i=0;i<fus.length;i++){ _byKey[fus[i][1]]=fus[i]; }
+    fus=Object.keys(_byKey).map(function(kk){return _byKey[kk];}); fus.sort(function(a,b){ return a[0]-b[0]; });
+    var followups=fus.map(function(t){return t[2];});
     var followupDates=fus.map(function(t){return t[0];});
-    var regRows=[]; for(i=0;i<rows.length;i++){ if(pint(rget(rows[i],"visit_number"))===null) regRows.push(rows[i]); }
+    var nAdditional=0; for(i=0;i<followups.length;i++){ if(low(rget(followups[i],"visit_type"))==="additional visit") nAdditional++; }
     var lastVisitDate=null;
     for(i=0;i<rows.length;i++){ var dd=parseDate(rget(rows[i],"visit_date")); if(dd!==null&&(lastVisitDate===null||dd>lastVisitDate)) lastVisitDate=dd; }
     var isDeath=false; for(i=0;i<rows.length;i++){ if(low(rget(rows[i],"child_alive"))==="no"){ isDeath=true; break; } }
@@ -376,7 +428,7 @@ function groupCases(visitRows){
     ws.sort(function(a,b){ return a[0]-b[0]; });
     cases.push({case_id:cid,reg_date:regDate,discharge_date:dischargeDate,dob:dob,birth_location:birthLocation,
       followups:followups,followup_dates:followupDates,n_followup:followups.length,reg_rows:regRows,
-      last_visit_date:lastVisitDate,is_death:isDeath,status_entered:statusEntered,conclusion_reason:conclusionReason,is_crf:isCrf,is_early:isEarly,weights:ws});
+      last_visit_date:lastVisitDate,is_death:isDeath,status_entered:statusEntered,conclusion_reason:conclusionReason,is_crf:isCrf,is_early:isEarly,n_additional:nAdditional,weights:ws});
   });
   return cases;
 }
@@ -429,7 +481,10 @@ function deriveMetrics(aggRow, visitRows, asOf, fieldMap){
   function ageDays(regMs){ return (asOf-regMs)/DAY_MS; }
 
   // 1 low avg visits
-  var elig=cs.filter(function(c){ return c.reg_date!==null && ageDays(c.reg_date)>=60 && !c.is_death && !c.is_crf && !c.is_early; });
+  // NOTE: the is_crf exclusion that used to sit here is GONE and must stay gone — it only existed
+  // to drop the phantom mother-case. Registrations now key to the baby (caseIdOf), so a case
+  // carrying a CRF row IS the baby's case; excluding it would remove nearly every V3 case.
+  var elig=cs.filter(function(c){ return c.reg_date!==null && ageDays(c.reg_date)>=60 && !c.is_death && !c.is_early; });
   if(elig.length>=10){ var num=0; for(i=0;i<elig.length;i++) num+=elig[i].n_followup; var avg=num/elig.length; out.low_avg_visits=M(avg,ragLowBad(avg,5,3.0001),num,elig.length); }
   else out.low_avg_visits=NA();
 
@@ -514,7 +569,17 @@ function deriveMetrics(aggRow, visitRows, asOf, fieldMap){
   if(fusImg.length>=20){ var miss=0,present=0; for(i=0;i<fusImg.length;i++){ var ei=rget(fusImg[i],"equipment_image"); if(ei===null||ei==="") miss++; else present++; } if(present===0&&!_ifo.tagged){ out.image_missing=NA(); } else { var pimg=100.0*miss/fusImg.length; out.image_missing=M(pimg,ragHighBad(pimg,5,20),miss,fusImg.length); } } else out.image_missing=NA();
 
   // 17 flw early discharge
-  var e60=cs.filter(function(c){ return c.reg_date!==null&&ageDays(c.reg_date)>=60&&!c.is_crf; });
+  // Scope to opportunities whose app actually asks the discharge-reason questions. Opp 675 has ZERO
+  // rows carrying either field, so its cases could only ever score 0% — one FLW whose whole
+  // denominator came from 675 read 0.0% GREEN on a Priority-1 metric.
+  var _sfo=fieldOpps(visitRows,"kmc_status_entered",fieldMap), _cfo=fieldOpps(visitRows,"flw_program_conclusion_reason",fieldMap);
+  function _statusCapable(c){
+    if(!_sfo.tagged&&!_cfo.tagged) return true;
+    var rr=c.followups.concat(c.reg_rows), q;
+    for(q=0;q<rr.length;q++){ var o=String(rget(rr[q],"opportunity_id")); if(_sfo.opps[o]===1||_cfo.opps[o]===1) return true; }
+    return false;
+  }
+  var e60=cs.filter(function(c){ return c.reg_date!==null&&ageDays(c.reg_date)>=60&&_statusCapable(c); });
   if(e60.length>=10){ var early=0; for(i=0;i<e60.length;i++){ if(e60[i].is_early) early++; } var ped=100.0*early/e60.length; out.flw_early_discharge=M(ped,ragHighBad(ped,5,15),early,e60.length); } else out.flw_early_discharge=NA();
 
   // 18 kmc wrap missing at reg
@@ -586,7 +651,10 @@ function lloFor(oppId){ var m=OPP_META[oppId]; return m?m.llo:("opp_"+oppId); }
 // ---- V3 case-count correction (mirrors Superset KMC_Cases_Optimized; UI-only, not the parity core) ----
 // A 'Child Registration Form' row's beneficiary_case_id can only have come from case.@case_id (V3 CRF rows
 // carry no child_case_id/kmc_beneficiary_case_id), so guarding that form = Superset's "V3 dual-case fix".
-function correctedCaseId(row){ if(low(rget(row,"form_name"))==="child registration form") return null; return rget(row,"beneficiary_case_id"); }
+// Registrations now resolve to the CHILD via caseIdOf (form.subcase_0.case.@case_id), so a V3
+// registration no longer has to be discarded to avoid the mother-case double count — it names a
+// real baby. This also counts babies registered but not yet visited, which the old rule dropped.
+function correctedCaseId(row){ return caseIdOf(row); }
 function correctedCaseCount(rows, opp){
   var s={}, i, cc, fn, elig;
   for(i=0;i<rows.length;i++){
@@ -630,7 +698,22 @@ function buildMasterRows(flwRows, visitRows, nameByUser, asOf, winStartMs, winEn
     res.primary_opp=b.opportunity_ids.length?Math.max.apply(null,b.opportunity_ids):null;
     res.country=countryFor(res.primary_opp);
     res._visit_rows=b.visit_rows; res.total_cases=b.agg_total_cases;
-    res.total_visits=b.visit_rows.filter(function(v){return v.visit_number!=null&&v.visit_number!=="";}).length;
+    // Visit counts, shown as a scheduled / additional breakdown. An "Additional Visit" carries the
+    // string "Additional" in visit_number, which the pipeline's int transform nulls — so it must be
+    // recognised by visit_type or 481 real visits go uncounted. Deduped the same way the engine
+    // dedupes, so the displayed total matches the metric denominators instead of over-reporting.
+    var _seenV={}, _sch=0, _add=0;
+    for(var _q=0;_q<b.visit_rows.length;_q++){
+      var _v=b.visit_rows[_q], _vn=pint(rget(_v,"visit_number"));
+      var _isA=low(rget(_v,"visit_type"))==="additional visit";
+      if(_vn===null&&!_isA) continue;
+      if(parseDate(rget(_v,"visit_date"))===null) continue;
+      var _kk=String(rget(_v,"beneficiary_case_id"))+"|"+((_vn!==null)?("N:"+_vn):("A:"+rget(_v,"visit_date")));
+      if(_seenV[_kk]) continue;
+      _seenV[_kk]=1;
+      if(_isA) _add++; else _sch++;
+    }
+    res.total_visits=_sch+_add; res.scheduled_visits=_sch; res.additional_visits=_add;
     // ---- windowed variant (display only): re-run the SAME deriveMetrics on window-filtered visits.
     // Full-history total_cases stays in aggDict so the <20-case exclusion remains a lifetime decision.
     var winVisits=b.visit_rows;
@@ -716,9 +799,9 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
   React.useEffect(function(){ if (!startDate){ var now=new Date(); var fmt=function(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}; var start=new Date(now); start.setDate(now.getDate()-14); setStartDate(fmt(start)); setEndDate(fmt(now)); } }, []);
 
   var kpi = React.useMemo(function(){
-    var loaded=scoped.length, excluded=0, anyRed=0, anyYellow=0, totalVisits=0, totalCases=0;
-    scoped.forEach(function(r){ if (r._excluded) excluded++; if (r.red_count>=1) anyRed++; if (r.yellow_count>=1) anyYellow++; totalVisits+=r.total_visits||0; totalCases+=r.total_cases||0; });
-    return { loaded:loaded, excluded:excluded, anyRed:anyRed, anyYellow:anyYellow, totalVisits:totalVisits, totalCases:totalCases };
+    var loaded=scoped.length, excluded=0, anyRed=0, anyYellow=0, totalVisits=0, totalCases=0, addVisits=0;
+    scoped.forEach(function(r){ if (r._excluded) excluded++; if (r.red_count>=1) anyRed++; if (r.yellow_count>=1) anyYellow++; totalVisits+=r.total_visits||0; totalCases+=r.total_cases||0; addVisits+=r.additional_visits||0; });
+    return { loaded:loaded, excluded:excluded, anyRed:anyRed, anyYellow:anyYellow, totalVisits:totalVisits, totalCases:totalCases, addVisits:addVisits };
   }, [scoped]);
 
   var freshness = React.useMemo(function(){
@@ -876,6 +959,9 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
     return h("div",{className:"space-y-4"},
       h("div",null,
         h("div",{className:"text-sm font-semibold text-gray-700 mb-2"}, "Opportunity breakdown"),
+        h("div",{className:"text-xs text-gray-500 mb-2"},
+          "Visits: "+((d.scheduled_visits||0)+(d.additional_visits||0))+" total — "+(d.scheduled_visits||0)+" scheduled, "
+          +(d.additional_visits||0)+" additional"),
         h("div",{className:"flex flex-wrap gap-2"}, d.opportunity_breakdown.map(function(b){ return h("span",{key:b.opportunity_id, className:"text-xs bg-white border border-gray-200 rounded px-2 py-1"}, b.name+" — "+b.total_cases+" cases / "+b.kmc_visit_count+" visits"); }))),
       h("div",null,
         h("div",{className:"text-sm font-semibold text-gray-700 mb-2"}, "All 18 register metrics (value · band · n/d)"),
@@ -931,9 +1017,10 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
       h("div",null, h("i",{className:"fa-regular fa-clock mr-1"}), "Last loaded: ", h("span",{className:"font-semibold text-gray-700"}, freshness.loaded)),
       freshness.latestVisit ? h("div",{className:"mt-0.5"}, "Latest visit in data: ", h("span",{className:"font-semibold text-gray-700"}, freshness.latestVisit)) : null));
 
-  var kpiDefs=[["FLWs Loaded", kpi.loaded, "blue"],["≥1 Red", kpi.anyRed, "red"],["≥1 Yellow", kpi.anyYellow, "amber"],["Excluded (<20)", kpi.excluded, "gray"],["KMC Visits", kpi.totalVisits.toLocaleString(), "green"],["Total Cases", kpi.totalCases.toLocaleString(), "teal"]];
+  var kpiDefs=[["FLWs Loaded", kpi.loaded, "blue"],["≥1 Red", kpi.anyRed, "red"],["≥1 Yellow", kpi.anyYellow, "amber"],["Excluded (<20)", kpi.excluded, "gray"],["KMC Visits", kpi.totalVisits.toLocaleString(), "green", (kpi.totalVisits-kpi.addVisits).toLocaleString()+" scheduled · "+kpi.addVisits.toLocaleString()+" additional"],["Total Cases", kpi.totalCases.toLocaleString(), "teal"]];
   var kpiEl = h("div",{className:"grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3"}, kpiDefs.map(function(c){
-    return h("div",{key:c[0], className:"bg-white rounded-lg shadow-sm p-4 border-l-4 border-"+c[2]+"-500"}, h("div",{className:"text-2xl font-bold text-gray-900"}, c[1]), h("div",{className:"text-xs text-gray-600 mt-1"}, c[0]));
+    return h("div",{key:c[0], className:"bg-white rounded-lg shadow-sm p-4 border-l-4 border-"+c[2]+"-500"}, h("div",{className:"text-2xl font-bold text-gray-900"}, c[1]), h("div",{className:"text-xs text-gray-600 mt-1"}, c[0]),
+      c[3] ? h("div",{className:"text-[11px] text-gray-400 mt-0.5"}, c[3]) : null);
   }));
 
   var filterEl = h("div",{className:"bg-white rounded-lg shadow-sm p-3 flex flex-wrap items-center gap-3"},
