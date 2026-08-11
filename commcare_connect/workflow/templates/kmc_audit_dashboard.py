@@ -788,6 +788,11 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
   function applyPreset(p){ setWinPreset(p); if(p!=="custom"){ var w=computeWindow(p); setWinStart(w.start); setWinEnd(w.end); } }
 
   var _tab = React.useState("overview"); var activeTab=_tab[0], setActiveTab=_tab[1];
+  // Per-indicator slice: which of the 18 metrics to filter on, and which band.
+  var _mf = React.useState("all"); var metricFilter=_mf[0], setMetricFilter=_mf[1];
+  var _mb = React.useState("RED"); var metricBand=_mb[0], setMetricBand=_mb[1];
+  // Jump from the Overview indicator table straight into the filtered FLW list.
+  function focusMetric(k, band){ setMetricFilter(k); setMetricBand(band); setActiveTab("detail"); }
   var byLloRef = React.useRef(null), byLloInst = React.useRef(null);
   var topFlagRef = React.useRef(null), topFlagInst = React.useRef(null);
 
@@ -899,6 +904,16 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
     if (filter==="any_red") data=data.filter(function(d){return d.red_count>=1;});
     else if (filter==="two_red") data=data.filter(function(d){return d.red_count>=2;});
     else if (filter==="any_yellow") data=data.filter(function(d){return d.yellow_count>=1;});
+    // Per-indicator slice: pick one of the 18 metrics and a band. This is what makes
+    // "how many FLWs are RED on early discharge" answerable — the footer count and the
+    // Export toolbar both follow this filter, so the number can be read or exported directly.
+    if (metricFilter!=="all" && metricBand!=="all"){
+      data=data.filter(function(d){
+        var rg=effRag(d,metricFilter);
+        if (metricBand==="flag") return rg==="RED"||rg==="YELLOW";
+        return rg===metricBand;
+      });
+    }
     data.sort(function(a,b){
       var va, vb;
       if (sortKey==="name"){ va=a.flw_name||a.username||""; vb=b.flw_name||b.username||""; var c=va.localeCompare(vb); return sortAsc?c:-c; }
@@ -908,7 +923,22 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
       return sortAsc?va-vb:vb-va;
     });
     return data;
-  }, [analyzed, filter, lloFilter, verFilter, search, sortKey, sortAsc, winActive]);
+  }, [analyzed, filter, lloFilter, verFilter, search, sortKey, sortAsc, winActive, metricFilter, metricBand]);
+
+  // Band tally for every indicator, over the LLO/version/window-scoped set (before the
+  // per-indicator slice, so the counts stay stable while you click through bands).
+  var metricTally = React.useMemo(function(){
+    var base=analyzed.slice();
+    if (lloFilter!=="all") base=base.filter(function(d){return d.llo===lloFilter;});
+    if (verFilter!=="all") base=base.filter(function(d){return d.versions.indexOf(verFilter)>=0;});
+    var out={};
+    for (var mi=0;mi<METRIC_KEYS.length;mi++){
+      var kk=METRIC_KEYS[mi], t={GREEN:0,YELLOW:0,RED:0,"N/A":0};
+      for (var bi=0;bi<base.length;bi++){ var rg=effRag(base[bi],kk); if(t[rg]!==undefined) t[rg]++; }
+      out[kk]=t;
+    }
+    return out;
+  }, [analyzed, lloFilter, verFilter, winActive]);
 
   var selectedRows = filtered.filter(function(d){ return selected[d.llo+"|"+d.username]; });
   var selectedCount = selectedRows.length;
@@ -1064,6 +1094,38 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
     h("input",{type:"text", placeholder:"Search FLW...", value:search, onChange:function(e){setSearch(e.target.value);}, className:"flex-1 min-w-40 border border-gray-300 rounded-lg px-3 py-1.5 text-sm"}),
     h("label",{className:"flex items-center gap-2 text-sm text-gray-700"}, h("input",{type:"checkbox", checked:showP2, onChange:function(e){setShowP2(e.target.checked);}}), "Show Priority-2 metrics"));
 
+  // ---- Per-indicator slice. Pick one of the 18 metrics + a band, and the table, the footer
+  // count and the CSV export all narrow to it — which is how you read "how many FLWs are RED on
+  // early discharge" off the screen. The tally chips show the whole split for the chosen
+  // indicator, so the four numbers are visible without clicking through each band.
+  var _bandChipCls={GREEN:"bg-green-100 text-green-800",YELLOW:"bg-amber-100 text-amber-800",
+    RED:"bg-red-100 text-red-800","N/A":"bg-gray-100 text-gray-600"};
+  var indicatorEl = h("div",{className:"bg-white rounded-lg shadow-sm p-3 flex flex-wrap items-center gap-3"},
+    h("span",{className:"text-xs font-semibold uppercase tracking-wide text-gray-400"}, "Indicator"),
+    h("select",{value:metricFilter, onChange:function(e){setMetricFilter(e.target.value);},
+      className:"border border-gray-300 rounded-lg px-2 py-1.5 text-sm"+(metricFilter!=="all"?" border-blue-400 text-blue-700":""),
+      title:"Slice the table by a single indicator"},
+      [h("option",{key:"all",value:"all"},"Any indicator")].concat(METRIC_KEYS.map(function(k){
+        return h("option",{key:k,value:k}, META[k].label+(PRIORITY[k]===1?"":" (P2)"));
+      }))),
+    metricFilter!=="all" ? h("select",{value:metricBand, onChange:function(e){setMetricBand(e.target.value);},
+      className:"border border-gray-300 rounded-lg px-2 py-1.5 text-sm"},
+      h("option",{value:"RED"},"Red only"), h("option",{value:"YELLOW"},"Yellow only"),
+      h("option",{value:"GREEN"},"Green only"), h("option",{value:"N/A"},"Not eligible"),
+      h("option",{value:"flag"},"Red or Yellow"), h("option",{value:"all"},"Any band")) : null,
+    metricFilter!=="all" ? h("div",{className:"flex flex-wrap items-center gap-1.5"},
+      ["GREEN","YELLOW","RED","N/A"].map(function(b){
+        var n=(metricTally[metricFilter]||{})[b]||0;
+        return h("button",{key:b, onClick:function(){setMetricBand(b);},
+          className:"px-2 py-0.5 rounded text-xs font-semibold "+_bandChipCls[b]+(metricBand===b?" ring-2 ring-blue-400":""),
+          title:"Show only FLWs whose "+META[metricFilter].label+" is "+b}, n+" "+(b==="N/A"?"NE":b.charAt(0)+b.slice(1).toLowerCase()));
+      })) : null,
+    metricFilter!=="all" ? h("span",{className:"text-xs text-gray-500"}, META[metricFilter].bands) : null,
+    metricFilter!=="all" ? h("button",{onClick:function(){setMetricFilter("all");},
+      className:"text-xs underline text-gray-500 hover:text-gray-800 ml-auto"}, "clear indicator") : null,
+    metricFilter==="all" ? h("span",{className:"text-xs text-gray-400 ml-auto"},
+      "pick an indicator to count and list FLWs by its band · any column header sorts the table") : null);
+
   var exportBarEl = h("div",{className:"bg-white rounded-lg shadow-sm px-3 py-2 flex flex-wrap items-center gap-2"},
     h("span",{className:"text-xs font-semibold text-gray-500 uppercase tracking-wide mr-1"}, h("i",{className:"fa-solid fa-file-export mr-1"}), "Export"),
     h("select",{value:exportScope, onChange:function(e){setExportScope(e.target.value);}, className:"border border-gray-300 rounded-lg px-2 py-1.5 text-sm", title:"Choose what to export"},
@@ -1108,7 +1170,9 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
     h("table",{className:"min-w-full divide-y divide-gray-200"},
       h("thead",{className:"bg-gray-50"}, h("tr",null, headerCells)),
       h("tbody",{className:"bg-white divide-y divide-gray-200"}, bodyRows)),
-    h("div",{className:"px-4 py-2 text-xs text-gray-500"}, filtered.length+" FLW"+(filtered.length!==1?"s":"")+" shown · bands per KMC Audit & Metrics Flag Register · NE = not eligible (below the register's minimum data for that metric, or the field is not captured by that opp's app)"));
+    h("div",{className:"px-4 py-2 text-xs text-gray-500"}, filtered.length+" FLW"+(filtered.length!==1?"s":"")+" shown"
+      +(metricFilter!=="all" ? " · filtered to "+META[metricFilter].label+" = "+(metricBand==="flag"?"Red or Yellow":metricBand==="all"?"any band":metricBand) : "")
+      +" · click any column header to sort · bands per KMC Audit & Metrics Flag Register · NE = not eligible (below the register's minimum data for that metric, or the field is not captured by that opp's app)"));
 
   var progressEl = progress ? h("span",{className:"text-sm "+(progress.status==="failed"?"text-red-600":progress.status==="completed"?"text-green-600":"text-blue-600")},
     progress.status==="completed"?("✓ "+progress.message):progress.status==="failed"?("⚠ "+(progress.error||"Failed")):h("span",null, h("i",{className:"fa-solid fa-spinner fa-spin mr-1"}), progress.message)) : null;
@@ -1138,6 +1202,38 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
 
   var COUNTRY_ORDER=["Uganda","Kenya","Nigeria","Other"];
   var pctRed = overview.analyzedN>0 ? Math.round(100*overview.flaggedRedN/overview.analyzedN) : 0;
+
+  // ---- Indicator scoreboard: all 18 indicators x Green/Yellow/Red/Not-eligible in one grid.
+  // Every number is a button that opens the FLW Detail tab already filtered to that indicator and
+  // band, so "22 FLWs are RED on early discharge" is one click away from the list of who they are.
+  var scoreCell = function(k, band, n){
+    var cls = band==="RED" ? "text-red-700 hover:bg-red-50" : band==="YELLOW" ? "text-amber-700 hover:bg-amber-50"
+      : band==="GREEN" ? "text-green-700 hover:bg-green-50" : "text-gray-400 hover:bg-gray-50";
+    return h("td",{key:band, className:"px-2 py-1 text-center"},
+      n>0 ? h("button",{onClick:function(){focusMetric(k,band);}, className:"w-full rounded px-2 py-0.5 font-semibold "+cls,
+        title:"List the "+n+" FLW"+(n===1?"":"s")+" whose "+META[k].label+" is "+(band==="N/A"?"not eligible":band.toLowerCase())}, n)
+        : h("span",{className:"text-gray-300"},"–"));
+  };
+  var scoreboardEl = h("div",{className:"bg-white rounded-lg shadow-sm overflow-hidden"},
+    h("div",{className:"px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2"},
+      h("span",{className:"text-sm font-semibold text-gray-800"}, "Indicator scoreboard — how many FLWs sit in each band"),
+      h("span",{className:"text-xs text-gray-400"}, "click any number to list those FLWs")),
+    h("div",{className:"overflow-x-auto"},
+      h("table",{className:"min-w-full text-sm"},
+        h("thead",{className:"bg-gray-50 text-xs text-gray-500 uppercase"},
+          h("tr",null, ["Indicator","Green","Yellow","Red","Not eligible","Bands"].map(function(hd,hi){
+            return h("th",{key:hd, className:"px-2 py-2 font-medium whitespace-nowrap "+(hi===0||hi===5?"text-left":"text-center")}, hd); }))),
+        h("tbody",null, METRIC_KEYS.filter(function(k){ return showP2 || PRIORITY[k]===1; }).map(function(k){
+          var t=metricTally[k]||{GREEN:0,YELLOW:0,RED:0,"N/A":0};
+          return h("tr",{key:k, className:"border-t border-gray-100 hover:bg-gray-50"},
+            h("td",{className:"px-2 py-1 whitespace-nowrap"},
+              h("span",{className:"font-medium text-gray-900"}, META[k].label),
+              h("span",{className:"text-xs text-gray-400 ml-1.5"}, PRIORITY[k]===1?"P1":"P2")),
+            scoreCell(k,"GREEN",t.GREEN), scoreCell(k,"YELLOW",t.YELLOW), scoreCell(k,"RED",t.RED), scoreCell(k,"N/A",t["N/A"]),
+            h("td",{className:"px-2 py-1 text-xs text-gray-500 whitespace-nowrap"}, META[k].bands));
+        })))),
+    h("div",{className:"px-4 py-2 text-xs text-gray-500"},
+      "Counts follow the LLO, version and date-window filters. Tick \"Show Priority-2 metrics\" in FLW Detail to include the P2 rows here too."));
 
   // 1. Program-at-a-glance banner
   var glanceEl = h("div",{className:"bg-white rounded-lg shadow-sm p-5 border-l-4 border-slate-700"},
@@ -1207,7 +1303,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
           })));
     });
 
-  var overviewEl = h("div",{className:"space-y-5"}, glanceEl, catCardsEl, chartsEl, riskEl,
+  var overviewEl = h("div",{className:"space-y-5"}, glanceEl, catCardsEl, chartsEl, scoreboardEl, riskEl,
     h("div",{className:"space-y-4"}, h("div",{className:"text-sm font-bold text-gray-700"}, "Coverage by country → LLO"), rollupEl));
 
   var winBannerEl = winActive ? h("div",{className:"bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm text-blue-800 flex items-center flex-wrap gap-x-2 gap-y-1"},
@@ -1216,7 +1312,7 @@ function WorkflowUI({ definition, instance, workers, pipelines, links, actions, 
     h("button",{onClick:function(){applyPreset("all");}, className:"ml-auto text-xs underline hover:text-blue-900"}, "clear window")) : null;
 
   return h("div",{className:"space-y-5 pb-28"}, headerEl, kpiEl, tabBar, winBannerEl,
-    (activeTab==="overview") ? overviewEl : h("div",{className:"space-y-5"}, filterEl, exportBarEl, tableEl),
+    (activeTab==="overview") ? overviewEl : h("div",{className:"space-y-5"}, filterEl, indicatorEl, exportBarEl, tableEl),
     (activeTab==="detail") ? actionBar : null, modal);
 }
 """
