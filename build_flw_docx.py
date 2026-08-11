@@ -202,8 +202,8 @@ li(
     "A worker moves between tiers over time. Different words are used deliberately so the two are never mixed up."
 )
 para(
-    "**And one limitation that applies to everything here:** this is observational data. It can show what goes "
-    "*together* with finishing; it cannot show what *causes* finishing. Where a number is tempting to read causally, "
+    "And one limitation that applies to everything here: this is observational data. It can show what goes "
+    "together with finishing; it cannot show what causes finishing. Where a number is tempting to read causally, "
     "the text says so explicitly.",
     italic=True,
 )
@@ -509,7 +509,82 @@ if _types:
     )
 
 # ================================================================ 6
-h("6. The reachable at-risk list", 1)
+# ---------------------------------------------------------------- 6: geography, at the level that matters
+GV = FE.get("geoVariance") or {}
+if GV.get("states"):
+    h("6. The variation is LOCAL, not state-level — and that changes what to do", 1)
+    para(
+        f"§5 compared states and partners because those are the units we manage by. But splitting the same workers by "
+        f"**LGA** (local government area, {GV['n_lgas']} of them with enough workers to measure) shows the state "
+        f"framing is the wrong altitude:"
+    )
+    table(
+        ["State", "Per-cohort finish", "Spread between its own LGAs", "LGAs measured"],
+        [[s["k"], f"{s['pc']}%", f"{s['lga_spread']} points", s["n_lgas"]] for s in GV["states"]],
+    )
+    para(
+        f"**The gap between the best and worst state is {GV['state_spread']} points. The gap between the best and "
+        f"worst LGA is {GV['lga_spread']} points** — and every single state has more variation inside it than exists "
+        f"between the states. "
+        + (
+            f"The best-performing LGA in {GV['worst_state']} (our weakest state, {GV['worst_state_best_lga']}%) beats "
+            f"several LGAs in our strongest one."
+            if GV.get("worst_state_best_lga")
+            else ""
+        )
+    )
+    para(
+        "Why this matters for the decision: §5 correctly says we cannot separate partner from state, because they "
+        "are perfectly nested — and that looked like a dead end. This resolves it from the other direction: whatever "
+        "is driving performance is mostly operating BELOW the state, so a partner-wide or state-wide explanation is "
+        "the wrong shape regardless of which one you blame. The unit of action is the LGA, and the question to ask is "
+        "what the strong LGAs do differently from the weak ones in the SAME state under the SAME partner.",
+        italic=True,
+    )
+
+# ---------------------------------------------------------------- 7: the two behavioural levers that survived
+_pe, _pa = FE.get("byPeers") or [], FE.get("byPace") or []
+if _pe or _pa:
+    h("7. Two things about how workers work that track with finishing", 1)
+if _pe:
+    para(
+        "**Working alone is a disadvantage.** Grouping workers by how many colleagues share their settlement — the "
+        "finest geography we hold — gives a clean gradient in the expected direction. This is the one factor here "
+        "that the community-health-worker literature consistently flags (informal peer support), so it is a "
+        "hypothesis we had reason to test rather than one found by trawling:"
+    )
+    table(
+        ["Co-workers in the same settlement", "Workers", "Per-cohort finish", "Finished ≥1"],
+        [[r["k"], f"{r['n']:,}", f"{pc(r)}%", f"{r['finished']}%"] for r in _pe],
+    )
+if _pa:
+    para(
+        "**Falling behind the schedule shows up early and gets worse.** Each worker's typical gap between interviews "
+        "is measured against what their own schedule asks for, so subgroups with 3-day and 14-day cadences are "
+        "compared fairly:"
+    )
+    table(
+        ["Pace vs their own schedule", "Workers", "Per-cohort finish", "Finished ≥1"],
+        [[r["k"], f"{r['n']:,}", f"{pc(r)}%", f"{r['finished']}%"] for r in _pa],
+    )
+    para(
+        "Note the last row is workers with a single interview, who have no pace to measure — they are 0% by "
+        "definition, not by behaviour. Among workers with a rhythm to measure, the gradient is monotonic.",
+        italic=True,
+    )
+if _pe or _pa:
+    para(
+        "Why these two and not others: both are measurable before a worker is lost, which makes them usable as "
+        "early warnings rather than post-mortems: peer density is known at assignment, and pace is visible after two "
+        "interviews. We also tested response *consistency* (longest silence versus a worker's own typical gap) and "
+        "onboarding delay (training date to first interview) and are not reporting either: consistency does not "
+        "separate cleanly in this data, and onboarding delay has no variation to analyse — all but 20 workers start "
+        "within a week. Education and first language showed no relationship to finishing either.",
+        italic=True,
+    )
+
+
+h("8. The reachable at-risk list", 1)
 _ar = ", ".join(f"{s['k']} ({s['n']})" for s in AR["byState"])
 para(
     f"**{AR['n']} workers** started, have not finished any schedule, **were** offered a complete schedule, and have "
@@ -529,7 +604,7 @@ para(
 )
 
 # ================================================================ 7
-h("7. What to do — and how confident we are", 1)
+h("9. What to do — and how confident we are", 1)
 li(
     f"**Run the {AR['n']}-worker recovery list now.** Small, named, and time-bounded — the only directly actionable "
     "item here. Confidence: high that these workers are correctly identified; whether a nudge converts them is unknown — running it is how we find out.",
