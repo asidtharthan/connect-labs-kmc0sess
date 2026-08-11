@@ -23,7 +23,14 @@ from collections import Counter, defaultdict
 
 import build_master_4src as bm
 
-TIER_ORDER = ["Champion", "Solid", "Slipping", "At-risk", "Lost"]
+# Engagement TIERS describe a worker's CURRENT activity state (an RFM score band). Behavioural
+# PERSONAS (below) describe their whole history. Those are different questions, so they must not share
+# vocabulary: until 2026-08-11 both lists contained "Champion" (297 vs 276 workers on live data) and
+# both were clickable filters on the same screen, so "Champion" meant two things depending on which
+# panel you clicked. Tiers renamed to activity-state language; personas keep the behavioural names.
+TIER_ORDER = ["Highly engaged", "Engaged", "Slipping", "Gone quiet", "Lost"]
+# old label -> new, so a payload built before the rename still renders
+TIER_ALIASES = {"Champion": "Highly engaged", "Solid": "Engaged", "At-risk": "Gone quiet"}
 PERSONA_ORDER = [
     "Champion",
     "Steady finisher",
@@ -213,16 +220,17 @@ def build_records():
         D = dscore(x["avg_words_per_session"])
         tot = R + F + D
         x["R"], x["F"], x["D"], x["rfm"] = R, F, D, tot
+        # score bands -> TIER_ORDER, so the ladder and the published order can never disagree
         x["tier"] = (
-            "Champion"
+            TIER_ORDER[0]
             if tot >= 13
-            else "Solid"
+            else TIER_ORDER[1]
             if tot >= 10
-            else "Slipping"
+            else TIER_ORDER[2]
             if tot >= 7
-            else "At-risk"
+            else TIER_ORDER[3]
             if tot >= 5
-            else "Lost"
+            else TIER_ORDER[4]
         )
         x["persona"] = persona(x)
     return records

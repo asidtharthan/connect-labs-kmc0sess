@@ -1577,9 +1577,14 @@ function WorkflowUI(props) {
           var FE = DATA.flwEngagement || {};
           if (!FE.n_flws) return <div className="p-6 text-sm text-gray-500">FLW-level analysis not available in this build.</div>;
           var N = FE.n_flws;
-          var TIER_COLOR = { Champion: "#065f46", Solid: "#2E7D32", Slipping: "#F9A825", "At-risk": "#EF6C00", Lost: "#C62828" };
+          // Tier labels were renamed 2026-08-11 to stop them colliding with the persona names
+          // ("Champion" was in both lists, with different counts, as two clickable filters on one
+          // screen). Old keys kept as aliases so a payload built before the rename still colours.
+          var TIER_COLOR = { "Highly engaged": "#065f46", Engaged: "#2E7D32", Slipping: "#F9A825", "Gone quiet": "#EF6C00", Lost: "#C62828",
+                             Champion: "#065f46", Solid: "#2E7D32", "At-risk": "#EF6C00" };
           var PERSONA_COLOR = { Champion: "#065f46", "Steady finisher": "#2E7D32", "Partial progress": "#F9A825", "Re-engager": "#1565C0", "Early dropper": "#EF6C00", "One-and-done": "#C62828", Lapsed: "#9ca3af" };
-          var healthy = (FE.tiers || []).filter(function (t) { return t.k === "Champion" || t.k === "Solid"; }).reduce(function (a, t) { return a + t.pct; }, 0);
+          // top two score bands, by published order — no hardcoded tier names to go stale
+          var healthy = (FE.tiers || []).slice(0, 2).reduce(function (a, t) { return a + t.pct; }, 0);
           var cc = FE.crossCohort || { multi: {}, single: {}, dist: [] };
           // horizontal bar row
           var bar = function (label, pct, color, right, key) {
@@ -1607,9 +1612,13 @@ function WorkflowUI(props) {
           // re-slice client-side: click any bar and every other panel re-computes for that segment.
           var M = FE.micro;
           var DIMS = [["state", "State"], ["llo", "Partner (LLO)"], ["type", "Cadre"],
-                      ["tier", "Engagement tier"], ["persona", "Behavioural persona"],
+                      ["tier", "Engagement tier — right now"], ["persona", "Persona — whole history"],
                       ["nco", "Cohorts they were in"], ["fin", "Finished a schedule?"]];
           var DIM_COLOR = { state: "#1565C0", llo: "#6d28d9", type: "#00695C", tier: "#0f766e", persona: "#b45309", nco: "#7c3aed", fin: "#065f46" };
+          var DIM_HELP = {
+            tier: "Where the worker is TODAY: a score band blending how recently they interviewed, their completion rate and their answer depth. A worker moves between tiers over time.",
+            persona: "What the worker has DONE overall, across their whole history — a fixed behavioural segment, not a current-state reading. Deliberately worded differently from the tiers so the two are never confused.",
+          };
           function unpackNum(spec) {
             var out = [], i, w = spec.w, s = spec.s;
             for (i = 0; i < s.length; i += w) out.push(parseInt(s.substr(i, w), 36));
@@ -1685,7 +1694,8 @@ function WorkflowUI(props) {
             return (
               <div key={dim} className="rounded border border-gray-200 bg-white px-3 py-2">
                 <div className="flex items-baseline justify-between mb-1">
-                  <div className="text-xs font-semibold text-gray-700">{title}</div>
+                  <div className={"text-xs font-semibold text-gray-700" + (DIM_HELP[dim] ? " cursor-help underline decoration-dotted decoration-gray-300" : "")}
+                    title={DIM_HELP[dim] || ""}>{title}</div>
                   {(flwSel[dim] || []).length
                     ? <button className="text-indigo-600 hover:underline" style={{ fontSize: "10px" }}
                         onClick={function () { var nx = {}; Object.keys(flwSel).forEach(function (k) { nx[k] = flwSel[k]; }); nx[dim] = []; setFlwSel(nx); }}>clear</button>
