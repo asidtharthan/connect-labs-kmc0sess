@@ -95,6 +95,18 @@
         "data_kb": 225.4,
         "headroom_kb": 152.4
       }
+    },
+    {
+      "id": "cp-0006",
+      "label": "FLW briefs regenerated from live payload (render v146)",
+      "tag": "cp-0006-flw-briefs-regenerated-from-live-payload",
+      "created_utc": "2026-08-11 15:37 UTC",
+      "git_sha": "6238f18bde8c67427910b36f6154fdac36520ee9",
+      "git_subject": "docs(interviews): regenerate the Word brief from live render v146",
+      "branch": "main",
+      "note": "PR #71 + docx regen. Both briefs now generated from one code path off the PUBLISHED payload; --check guards staleness. No pipeline change.",
+      "live_render_version": 146,
+      "verified": null
     }
   ]
 }
