@@ -1,6 +1,6 @@
 # FLW Retention & Engagement — Executive Analysis
 
-*Connect Interviews programme · per-FLW, cross-cohort · data as of 2026-08-11 · build 2026-08-11 05:47 UTC · dashboard render v146*
+*Connect Interviews programme · per-FLW, cross-cohort · data as of 2026-08-11 · build 2026-08-11 18:18 UTC · dashboard render v147*
 
 *Universe: **1,441 unique front-line workers (FLWs)** who started ≥1 interview · 100% have demographics · every metric dedups the worker across all cohorts/arms they were part of. Generated from the same payload the dashboard's **FLW Retention** tab embeds, so every figure here matches what is on screen.*
 
@@ -26,7 +26,9 @@ Behavioural personas — rule-based segments over each worker's whole history:
 
 **78% have completed at least one full schedule** (Champions 19% + Steady finishers 59%). Genuine early loss is **9%** (131 workers) — the One-and-done segment, which §3 profiles.
 
-Separately, engagement tiers blend recency, completion rate and answer depth: 61% sit in the top two tiers (Champion 21% + Solid 40%), 31% Slipping, 8% At-risk or Lost. "Slipping" is mixed: it holds both finishers who are simply inactive now and a large share of the one-and-done group, so it should not be read as uniformly benign. Tier recency is measured against the freshest session in the dataset rather than the wall clock, so these shares do not drift when a data pull runs late.
+*Engagement tiers answer a **different question** from the personas above. A tier is where a worker sits **right now** — a band blending how recently they interviewed with their completion rate and answer depth — so a worker moves between tiers over time. A persona describes their **whole history** and does not move. The two use deliberately different words so they are never read as the same grouping.*
+
+On that basis: 61% sit in the top two tiers. Full spread — 21% Highly engaged, 40% Engaged, 31% Slipping, 7% Gone quiet, 1% Lost. "Slipping" is mixed: it holds both finishers who are simply inactive now and a large share of the one-and-done group, so it should not be read as uniformly benign. Tier recency is measured against the freshest session in the dataset rather than the wall clock, so these shares do not drift when a data pull runs late.
 
 ## 2. Re-use across cohorts — and the measurement trap
 
@@ -34,8 +36,8 @@ The multi-arm design re-uses the same workers across studies: **77%** are in ≥
 
 | Cohorts per worker | Workers | Share |
 |---|---|---|
-| 1 | 332 | 23% |
-| 2 | 599 | 42% |
+| 1 | 331 | 23% |
+| 2 | 600 | 42% |
 | 3 | 358 | 25% |
 | 4 | 137 | 10% |
 | 5 | 13 | 1% |
@@ -47,7 +49,7 @@ The multi-arm design re-uses the same workers across studies: **77%** are in ≥
 | Per-cohort finish rate | 44% | 62% | Of the schedules they were given, how many did they complete? |
 | Completion rate | 0.88 | 0.89 | Of interviews they were sent, how many did they finish? |
 | Answer depth | 168 words/session | 245 words/session | How much do they actually say? |
-| Workers | 332 | 1,109 |  |
+| Workers | 331 | 1,110 |  |
 
 The first row is the trap. "Finished ≥1 schedule" is a **maximum over a worker's cohorts** — a worker in three cohorts gets three independent chances to clear the bar — so it rises with cohort count even if nothing about the worker changed. It shows a 44-point gap. On the like-for-like measure, the gap is **18 points** (44% vs 62%), so roughly **59% of the headline gap is arithmetic rather than behaviour**.
 
@@ -70,7 +72,7 @@ Genuine early loss is the One-and-done segment: **131 workers (9%)** who started
 
 Read together, the drop-off profile is a first-time, single-exposure worker in one geography, engaging shallowly on their single interview and not returning.
 
-On how far workers get: of those whose schedule even *contains* interview 3, **86%** reach it (893 of 1,038). Quoting it against the whole population instead gives 62%, which understates retention because most workers are in short cohorts that stop before interview 3 — that is schedule length, not attrition. The clean worker-level attrition figure is the 9% one-and-done.
+On how far workers get: of those whose schedule even *contains* interview 3, **86%** reach it (893 of 1,039). Quoting it against the whole population instead gives 62%, which understates retention because most workers are in short cohorts that stop before interview 3 — that is schedule length, not attrition. The clean worker-level attrition figure is the 9% one-and-done.
 
 ## 4. Does early answer depth predict finishing?
 
@@ -123,5 +125,5 @@ By cadre, results are much tighter: 52–65% per-cohort across 8 cadres. The lar
 - **Depth curve** is quoted against the workers whose schedule contains that interview, not the whole population, so a 2-interview worker is not counted as dropping out at interview 3.
 - **Engagement tier (RFM):** recency + completion rate + answer depth, each scored 1–5, with recency measured against the freshest session in the dataset rather than today's date.
 - **Personas** are rule-based. "Partial progress" means over half of triggered interviews completed but **no** schedule finished — it is not a slow finisher.
-- **Limits.** Observational, so associations only. Small groups are pooled into an "Other / not recorded" row rather than dropped or published as their own rate. Figures move with each daily refresh; this document is generated from dashboard render v146.
+- **Limits.** Observational, so associations only. Small groups are pooled into an "Other / not recorded" row rather than dropped or published as their own rate. Figures move with each daily refresh; this document is generated from dashboard render v147.
 - **Full per-worker detail** is in the flw_analysis.csv export; the dashboard's FLW Retention tab is interactive.
