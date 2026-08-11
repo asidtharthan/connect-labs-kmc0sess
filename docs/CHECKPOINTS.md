@@ -21,6 +21,7 @@ python checkpoint.py rollback cp-0001     # prints the runbook
 | **cp-0007** | 2026-08-11 18:24 | `fa519e4b` | `cp-0007-tier-persona-name-collision-fixed-briefs` | 147 | — | — | — | — | — | tier/persona name collision fixed; briefs regenerated (render v147) |
 | **cp-0008** | 2026-08-11 20:09 | `71cf2ab5` | `cp-0008-clarity-pass-tab-labelling-brief-rewrite` | 148 | — | — | — | — | — | clarity pass: tab labelling + brief rewrite (render v148) |
 | **cp-0009** | 2026-08-11 20:50 | `dfdb564f` | `cp-0009-flw-analysis-lga-peer-density-pace-rende` | 149 | — | — | — | — | — | FLW analysis: LGA + peer density + pace (render v149) |
+| **cp-0010** | 2026-08-11 21:57 | `4b5da4f6` | `cp-0010-final-for-team-review-lga-on-tab-insight` | 151 | — | — | — | — | — | FINAL for team review: LGA on tab + insights-only variant (render v151) |
 
 ## Notes
 
@@ -33,3 +34,4 @@ python checkpoint.py rollback cp-0001     # prints the runbook
 - **cp-0007 — tier/persona name collision fixed; briefs regenerated (render v147)**: PR #72: tier labels renamed to activity-state language (Highly engaged/Engaged/Slipping/Gone quiet/Lost) so they no longer collide with persona names; panels name the timeframe; tier lookups made position-based. Briefs regenerated from v147, --check exits 0.
 - **cp-0008 — clarity pass: tab labelling + brief rewrite (render v148)**: PR #73. Fixes from two independent audits: tab sort order/column headers/global-section pills/empty-state guard/small-n suppression; brief gains a how-to-read section, the 58% programme figure, marginal-shares warning, 9%-vs-22% reconciliation, position-based tier prose.
 - **cp-0009 — FLW analysis: LGA + peer density + pace (render v149)**: PR #74. Three decision-driving additions; rhythm/onboarding/education tested and deliberately not reported. Geography finding overturns section 5's altitude: between-state 23pts vs 47pts across LGAs.
+- **cp-0010 — FINAL for team review: LGA on tab + insights-only variant (render v151)**: PR #74 + eade0258. Tab has LGA panel, recovery-list callout, peer/pace panels, colour legend. Two brief variants from one code path. Ready for team review.

@@ -143,6 +143,18 @@
       "note": "PR #74. Three decision-driving additions; rhythm/onboarding/education tested and deliberately not reported. Geography finding overturns section 5's altitude: between-state 23pts vs 47pts across LGAs.",
       "live_render_version": 149,
       "verified": null
+    },
+    {
+      "id": "cp-0010",
+      "label": "FINAL for team review: LGA on tab + insights-only variant (render v151)",
+      "tag": "cp-0010-final-for-team-review-lga-on-tab-insight",
+      "created_utc": "2026-08-11 21:57 UTC",
+      "git_sha": "4b5da4f69b3597898aadb1ffbe6f5808e3410919",
+      "git_subject": "docs(interviews): regenerate both brief variants from live render v151",
+      "branch": "main",
+      "note": "PR #74 + eade0258. Tab has LGA panel, recovery-list callout, peer/pace panels, colour legend. Two brief variants from one code path. Ready for team review.",
+      "live_render_version": 151,
+      "verified": null
     }
   ]
 }
