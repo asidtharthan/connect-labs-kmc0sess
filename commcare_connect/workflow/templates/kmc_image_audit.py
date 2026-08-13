@@ -26,11 +26,14 @@ Design notes worth knowing before editing
 * **Sessions are stored scoped per opportunity**, so the results fetch loops the opp set
   and merges. Fetching ``/sessions/`` without ``?opportunity_id=`` only ever returns the
   home opp's sessions, which reads as "0 sessions" for everything else.
-* ``filter_by_image`` filters *visits*, not images — every image on a matched visit is
-  extracted regardless of type. A "weight photo audit" therefore also collects equipment,
-  wrap and immunization photos, which carry no reading and so cannot be AI-scored.
-  Measured on a real run: 161 of 308 extracted images (52%) had no reading. The summary
-  reports that split instead of implying the run was weight-only.
+* **Image extraction differs between this repo and the deployed backend.** The copy of
+  ``_filter_visits_by_related_fields`` in this repo filters *visits* and returns every image
+  on a matched visit — running it locally against opp 1487 produced four question types and
+  161 of 308 images (52%) with no reading. The DEPLOYED backend also narrows to the
+  requested image path: live run 13250 extracted 858 images across 6 opportunities, all of
+  them ``anthropometric/upload_weight_image`` and all 858 carrying a reading. The repo is
+  behind. The "images without a reading" warning is kept as a guard — it simply does not
+  fire on the deployed path — and must not be removed on the assumption that it is dead.
 * **There is no per-image-type sampling and no FLW cap.** ``AuditCriteria`` accepts only
   ``sample_percentage`` for a date-range audit (``count_per_flw`` applies solely to
   ``last_n_per_flw``, and ``max_flws`` does not exist — passing it is silently ignored).
