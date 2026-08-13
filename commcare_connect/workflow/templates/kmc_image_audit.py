@@ -293,18 +293,33 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     const rollup = React.useMemo(() => {
         const byOpp = {}; const byLlo = {};
         let images = 0, withReading = 0, match = 0, noMatch = 0, error = 0, pending = 0, flws = 0;
+        let notReviewed = 0, unstarted = 0;
         sessions.forEach(s => {
             const oid = s._opp || s.opportunity_id;
             const m = meta(oid);
-            const o = byOpp[oid] || (byOpp[oid] = { opp: oid, llo: m.llo || '?', scale: m.scale || '?', sessions: 0, images: 0, withReading: 0, match: 0, noMatch: 0, error: 0, pending: 0 });
+            const o = byOpp[oid] || (byOpp[oid] = { opp: oid, llo: m.llo || '?', scale: m.scale || '?', sessions: 0, images: 0, withReading: 0, match: 0, noMatch: 0, error: 0, pending: 0, notReviewed: 0, unstarted: 0 });
             o.sessions += 1; flws += 1;
             const vres = s.visit_results || {};
             const vimg = s.visit_images || {};
+            // Which blobs actually carry an assessment. An image whose blob is missing here was
+            // never REACHED by the AI pass — it is not a verdict, not an error and not pending,
+            // so without this it disappears from every count on screen. Observed on live run
+            // 13250: the task died with the last 5 sessions untouched, and 98% "reviewed" made
+            // that look like a rounding gap rather than 5 FLWs with no review at all.
+            const assessedBlobs = {};
+            Object.keys(vres).forEach(vid => {
+                const a = (vres[vid] || {}).assessments || {};
+                Object.keys(a).forEach(bid => { assessedBlobs[bid] = true; });
+            });
+            let seenAssessed = 0;
             Object.keys(vimg).forEach(vid => (vimg[vid] || []).forEach(im => {
                 o.images += 1; images += 1;
                 const rf = im.related_fields || [];
                 if (rf.some(f => f && f.value)) { o.withReading += 1; withReading += 1; }
+                if (assessedBlobs[im.blob_id]) { seenAssessed += 1; }
+                else { o.notReviewed += 1; notReviewed += 1; }
             }));
+            if (!seenAssessed && Object.keys(vimg).length) { o.unstarted += 1; unstarted += 1; }
             Object.keys(vres).forEach(vid => {
                 const ass = (vres[vid] || {}).assessments || {};
                 Object.keys(ass).forEach(bid => {
@@ -318,9 +333,10 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
         });
         Object.keys(byOpp).forEach(k => {
             const o = byOpp[k];
-            const l = byLlo[o.llo] || (byLlo[o.llo] = { llo: o.llo, scale: o.scale, opps: 0, sessions: 0, images: 0, withReading: 0, match: 0, noMatch: 0, error: 0, pending: 0 });
+            const l = byLlo[o.llo] || (byLlo[o.llo] = { llo: o.llo, scale: o.scale, opps: 0, sessions: 0, images: 0, withReading: 0, match: 0, noMatch: 0, error: 0, pending: 0, notReviewed: 0, unstarted: 0 });
             l.opps += 1; l.sessions += o.sessions; l.images += o.images; l.withReading += o.withReading;
             l.match += o.match; l.noMatch += o.noMatch; l.error += o.error; l.pending += o.pending;
+            l.notReviewed += o.notReviewed; l.unstarted += o.unstarted;
         });
         const scored = match + noMatch;
         return {
@@ -328,6 +344,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
             byLlo: Object.keys(byLlo).map(k => byLlo[k]).sort((a, b) => a.llo.localeCompare(b.llo)),
             images: images, withReading: withReading, match: match, noMatch: noMatch,
             error: error, pending: pending, flws: flws, scored: scored,
+            notReviewed: notReviewed, unstarted: unstarted,
             reviewed: scored + error,
             errorPct: (scored + error) > 0 ? Math.round(100 * error / (scored + error)) : 0,
             noMatchPct: scored > 0 ? Math.round(100 * noMatch / scored) : 0,
@@ -336,6 +353,18 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
 
     // ── Warnings: things a reader would otherwise mis-conclude ────────────────
     const warnings = [];
+    // Leads the list on purpose. An unfinished run is worse than a failed one: it looks like a
+    // result. There is no resume — the AI pass walks the session list once, and if the worker
+    // stops (deploy, restart) the remaining sessions are simply never reviewed and nothing
+    // retries them. Re-running is the only fix, and it starts from zero.
+    if (rollup.notReviewed > 0) {
+        warnings.push({
+            level: 'red',
+            text: 'INCOMPLETE RUN — ' + rollup.notReviewed + ' of ' + rollup.images + ' images were never reviewed'
+                + (rollup.unstarted ? (', including ' + rollup.unstarted + ' FLW audit' + (rollup.unstarted === 1 ? '' : 's') + ' with no review at all') : '')
+                + '. The AI pass stopped before finishing; it does not resume. Re-run to complete.',
+        });
+    }
     if (rollup.reviewed > 0 && rollup.errorPct >= 20) {
         warnings.push({
             level: 'red',
@@ -441,7 +470,9 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                         <Card label="FLW audits" value={num(rollup.flws)} sub={rollup.byOpp.length + ' opportunit' + (rollup.byOpp.length === 1 ? 'y' : 'ies')} tone="border-blue-400" />
                         <Card label="Images extracted" value={num(rollup.images)} sub={num(rollup.withReading) + ' with a reading'} tone="border-gray-300" />
-                        <Card label="AI reviewed" value={num(rollup.reviewed)} sub={pct(rollup.reviewed, rollup.withReading) + ' of readable'} tone="border-indigo-400" />
+                        <Card label="AI reviewed" value={num(rollup.reviewed)}
+                            sub={rollup.notReviewed ? (rollup.notReviewed + ' never reviewed') : (pct(rollup.reviewed, rollup.withReading) + ' of readable')}
+                            tone={rollup.notReviewed ? 'border-red-500' : 'border-indigo-400'} />
                         <Card label="Match" value={num(rollup.match)} sub={pct(rollup.match, rollup.scored) + ' of scored'} tone="border-green-500" />
                         <Card label="No match" value={num(rollup.noMatch)} sub={rollup.noMatchPct + '% of scored'} tone="border-amber-500" />
                         <Card label="Errored" value={num(rollup.error)} sub={rollup.errorPct + '% of attempts'} tone="border-red-500" />
@@ -674,8 +705,9 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                         <table className="min-w-full text-sm">
                             <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
                                 <tr>
-                                    {['Opportunity', 'Scale', 'Agent', 'FLWs', 'Images', 'With reading', 'Match', 'No match', 'Errored'].map((h, i) => (
-                                        <th key={h} className={'px-3 py-2 font-medium whitespace-nowrap ' + (i < 3 ? 'text-left' : 'text-right')}>{h}</th>
+                                    {['Opportunity', 'Scale', 'Agent', 'FLWs', 'Images', 'With reading', 'Match', 'No match', 'Errored', 'Never reviewed'].map((h, i) => (
+                                        <th key={h} className={'px-3 py-2 font-medium whitespace-nowrap ' + (i < 3 ? 'text-left' : 'text-right')}
+                                            title={h === 'Never reviewed' ? 'Images the AI pass never reached — not a verdict, not an error. Caused by the task stopping before it finished.' : undefined}>{h}</th>
                                     ))}
                                 </tr>
                             </thead>
@@ -695,6 +727,10 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                         <td className="px-3 py-2 text-right text-green-700">{o.match}</td>
                                         <td className="px-3 py-2 text-right text-amber-700">{o.noMatch}</td>
                                         <td className="px-3 py-2 text-right text-red-700">{o.error}</td>
+                                        <td className={'px-3 py-2 text-right font-semibold ' + (o.notReviewed ? 'text-red-700' : 'text-gray-300')}
+                                            title={o.unstarted ? (o.unstarted + ' FLW audit(s) here were never started') : undefined}>
+                                            {o.notReviewed ? o.notReviewed + (o.unstarted ? ' (' + o.unstarted + ' FLWs)' : '') : '—'}
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
