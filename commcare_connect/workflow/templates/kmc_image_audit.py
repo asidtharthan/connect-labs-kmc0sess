@@ -288,67 +288,60 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     };
 
     // ── Roll the session records up for display ───────────────────────────────
-    // Counts come from the session records themselves rather than the create response, so
-    // what is on screen is what was actually stored.
+    // IMPORTANT: /audit/api/workflow/<id>/sessions/ returns to_summary_dict() — id, title, status,
+    // opportunity_id, flw_username/flw_display_name, visit_count and assessment_stats. It does NOT
+    // return visit_images or visit_results. An earlier version of this rollup walked those two and
+    // consequently rendered 0 for every metric except the FLW count, on a run that had 858 images
+    // and 845 verdicts sitting in the records. Read assessment_stats; do not reach for the raw
+    // session data here.
+    //
+    // Substitutions, both verified against live run 13250:
+    //   visit_count == image count            858 == 858 (this audit takes one weight photo per visit)
+    //   visit_count - assessment_stats.total  == the images the AI never reached (13, exact)
     const rollup = React.useMemo(() => {
         const byOpp = {}; const byLlo = {};
-        let images = 0, withReading = 0, match = 0, noMatch = 0, error = 0, pending = 0, flws = 0;
-        let notReviewed = 0, unstarted = 0;
+        const T = { flws: 0, images: 0, assessed: 0, match: 0, noMatch: 0, error: 0, aiPending: 0,
+            humanPass: 0, humanFail: 0, humanPending: 0, notReviewed: 0, unstarted: 0 };
         sessions.forEach(s => {
             const oid = s._opp || s.opportunity_id;
             const m = meta(oid);
-            const o = byOpp[oid] || (byOpp[oid] = { opp: oid, llo: m.llo || '?', scale: m.scale || '?', sessions: 0, images: 0, withReading: 0, match: 0, noMatch: 0, error: 0, pending: 0, notReviewed: 0, unstarted: 0 });
-            o.sessions += 1; flws += 1;
-            const vres = s.visit_results || {};
-            const vimg = s.visit_images || {};
-            // Which blobs actually carry an assessment. An image whose blob is missing here was
-            // never REACHED by the AI pass — it is not a verdict, not an error and not pending,
-            // so without this it disappears from every count on screen. Observed on live run
-            // 13250: the task died with the last 5 sessions untouched, and 98% "reviewed" made
-            // that look like a rounding gap rather than 5 FLWs with no review at all.
-            const assessedBlobs = {};
-            Object.keys(vres).forEach(vid => {
-                const a = (vres[vid] || {}).assessments || {};
-                Object.keys(a).forEach(bid => { assessedBlobs[bid] = true; });
-            });
-            let seenAssessed = 0;
-            Object.keys(vimg).forEach(vid => (vimg[vid] || []).forEach(im => {
-                o.images += 1; images += 1;
-                const rf = im.related_fields || [];
-                if (rf.some(f => f && f.value)) { o.withReading += 1; withReading += 1; }
-                if (assessedBlobs[im.blob_id]) { seenAssessed += 1; }
-                else { o.notReviewed += 1; notReviewed += 1; }
-            }));
-            if (!seenAssessed && Object.keys(vimg).length) { o.unstarted += 1; unstarted += 1; }
-            Object.keys(vres).forEach(vid => {
-                const ass = (vres[vid] || {}).assessments || {};
-                Object.keys(ass).forEach(bid => {
-                    const ai = ass[bid] ? ass[bid].ai_result : null;
-                    if (ai === 'match') { o.match += 1; match += 1; }
-                    else if (ai === 'no_match') { o.noMatch += 1; noMatch += 1; }
-                    else if (ai === 'error') { o.error += 1; error += 1; }
-                    else { o.pending += 1; pending += 1; }
-                });
-            });
+            const o = byOpp[oid] || (byOpp[oid] = { opp: oid, llo: m.llo || '?', scale: m.scale || '?',
+                sessions: 0, images: 0, assessed: 0, match: 0, noMatch: 0, error: 0, aiPending: 0,
+                humanPass: 0, humanFail: 0, humanPending: 0, notReviewed: 0, unstarted: 0 });
+            const st = s.assessment_stats || {};
+            const imgs = s.visit_count || 0;
+            const assessed = st.total || 0;
+            const gap = Math.max(0, imgs - assessed);
+            o.sessions += 1; T.flws += 1;
+            o.images += imgs; T.images += imgs;
+            o.assessed += assessed; T.assessed += assessed;
+            o.match += st.ai_match || 0; T.match += st.ai_match || 0;
+            o.noMatch += st.ai_no_match || 0; T.noMatch += st.ai_no_match || 0;
+            o.error += st.ai_error || 0; T.error += st.ai_error || 0;
+            o.aiPending += st.ai_pending || 0; T.aiPending += st.ai_pending || 0;
+            o.humanPass += st.pass || 0; T.humanPass += st.pass || 0;
+            o.humanFail += st.fail || 0; T.humanFail += st.fail || 0;
+            o.humanPending += st.pending || 0; T.humanPending += st.pending || 0;
+            o.notReviewed += gap; T.notReviewed += gap;
+            if (imgs > 0 && assessed === 0) { o.unstarted += 1; T.unstarted += 1; }
         });
         Object.keys(byOpp).forEach(k => {
             const o = byOpp[k];
-            const l = byLlo[o.llo] || (byLlo[o.llo] = { llo: o.llo, scale: o.scale, opps: 0, sessions: 0, images: 0, withReading: 0, match: 0, noMatch: 0, error: 0, pending: 0, notReviewed: 0, unstarted: 0 });
-            l.opps += 1; l.sessions += o.sessions; l.images += o.images; l.withReading += o.withReading;
-            l.match += o.match; l.noMatch += o.noMatch; l.error += o.error; l.pending += o.pending;
+            const l = byLlo[o.llo] || (byLlo[o.llo] = { llo: o.llo, scale: o.scale, opps: 0, sessions: 0,
+                images: 0, assessed: 0, match: 0, noMatch: 0, error: 0, notReviewed: 0, unstarted: 0 });
+            l.opps += 1; l.sessions += o.sessions; l.images += o.images; l.assessed += o.assessed;
+            l.match += o.match; l.noMatch += o.noMatch; l.error += o.error;
             l.notReviewed += o.notReviewed; l.unstarted += o.unstarted;
         });
-        const scored = match + noMatch;
-        return {
+        const scored = T.match + T.noMatch;
+        const attempts = scored + T.error;
+        return Object.assign({}, T, {
             byOpp: Object.keys(byOpp).map(k => byOpp[k]).sort((a, b) => a.llo.localeCompare(b.llo) || a.opp - b.opp),
             byLlo: Object.keys(byLlo).map(k => byLlo[k]).sort((a, b) => a.llo.localeCompare(b.llo)),
-            images: images, withReading: withReading, match: match, noMatch: noMatch,
-            error: error, pending: pending, flws: flws, scored: scored,
-            notReviewed: notReviewed, unstarted: unstarted,
-            reviewed: scored + error,
-            errorPct: (scored + error) > 0 ? Math.round(100 * error / (scored + error)) : 0,
-            noMatchPct: scored > 0 ? Math.round(100 * noMatch / scored) : 0,
-        };
+            scored: scored, reviewed: attempts,
+            errorPct: attempts > 0 ? Math.round(100 * T.error / attempts) : 0,
+            noMatchPct: scored > 0 ? Math.round(100 * T.noMatch / scored) : 0,
+        });
     }, [sessions]);
 
     // ── Warnings: things a reader would otherwise mis-conclude ────────────────
@@ -372,12 +365,11 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                 + 'Errored images were NOT reviewed — treat this run as incomplete, not as a clean result.',
         });
     }
-    if (rollup.images > 0 && rollup.withReading < rollup.images) {
-        const n = rollup.images - rollup.withReading;
+    if (rollup.aiPending > 0) {
         warnings.push({
             level: 'amber',
-            text: n + ' of ' + rollup.images + ' extracted images carry no typed reading, so the AI skipped them '
-                + 'and they fall to human review. Visit selection pulls every image on a matched visit, not only the weight photo.',
+            text: rollup.aiPending + ' assessment' + (rollup.aiPending === 1 ? '' : 's') + ' exist with no AI verdict — '
+                + 'the image was extracted and queued but the agent returned nothing for it.',
         });
     }
     const unverifiedSel = selected.filter(id => meta(id).unverified);
@@ -469,9 +461,9 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                 <div>
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                         <Card label="FLW audits" value={num(rollup.flws)} sub={rollup.byOpp.length + ' opportunit' + (rollup.byOpp.length === 1 ? 'y' : 'ies')} tone="border-blue-400" />
-                        <Card label="Images extracted" value={num(rollup.images)} sub={num(rollup.withReading) + ' with a reading'} tone="border-gray-300" />
+                        <Card label="Weight photos" value={num(rollup.images)} sub="one per audited visit" tone="border-gray-300" />
                         <Card label="AI reviewed" value={num(rollup.reviewed)}
-                            sub={rollup.notReviewed ? (rollup.notReviewed + ' never reviewed') : (pct(rollup.reviewed, rollup.withReading) + ' of readable')}
+                            sub={rollup.notReviewed ? (rollup.notReviewed + ' never reviewed') : (pct(rollup.reviewed, rollup.images) + ' of photos')}
                             tone={rollup.notReviewed ? 'border-red-500' : 'border-indigo-400'} />
                         <Card label="Match" value={num(rollup.match)} sub={pct(rollup.match, rollup.scored) + ' of scored'} tone="border-green-500" />
                         <Card label="No match" value={num(rollup.noMatch)} sub={rollup.noMatchPct + '% of scored'} tone="border-amber-500" />
@@ -495,7 +487,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                         <table className="min-w-full text-sm">
                             <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
                                 <tr>
-                                    {['LLO', 'Scale', 'Opps', 'FLWs', 'Images', 'With reading', 'Match', 'No match', 'Errored', 'Error %'].map((h, i) => (
+                                    {['LLO', 'Scale', 'Opps', 'FLWs', 'Photos', 'Reviewed', 'Match', 'No match', 'Errored', 'Never reviewed', 'Error %'].map((h, i) => (
                                         <th key={h} className={'px-3 py-2 font-medium whitespace-nowrap ' + (i < 2 ? 'text-left' : 'text-right')}>{h}</th>
                                     ))}
                                 </tr>
@@ -511,10 +503,11 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                             <td className="px-3 py-2 text-right">{l.opps}</td>
                                             <td className="px-3 py-2 text-right">{l.sessions}</td>
                                             <td className="px-3 py-2 text-right">{l.images}</td>
-                                            <td className="px-3 py-2 text-right">{l.withReading}</td>
+                                            <td className="px-3 py-2 text-right">{l.assessed}</td>
                                             <td className="px-3 py-2 text-right text-green-700 font-semibold">{l.match}</td>
                                             <td className="px-3 py-2 text-right text-amber-700 font-semibold">{l.noMatch}</td>
                                             <td className="px-3 py-2 text-right text-red-700 font-semibold">{l.error}</td>
+                                            <td className={'px-3 py-2 text-right font-semibold ' + (l.notReviewed ? 'text-red-700' : 'text-gray-300')}>{l.notReviewed || '—'}</td>
                                             <td className={'px-3 py-2 text-right font-semibold ' + (ep >= 20 ? 'text-red-700' : 'text-gray-600')}>{ep}%</td>
                                         </tr>
                                     );
@@ -705,7 +698,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                         <table className="min-w-full text-sm">
                             <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
                                 <tr>
-                                    {['Opportunity', 'Scale', 'Agent', 'FLWs', 'Images', 'With reading', 'Match', 'No match', 'Errored', 'Never reviewed'].map((h, i) => (
+                                    {['Opportunity', 'Scale', 'Agent', 'FLWs', 'Photos', 'Reviewed', 'Match', 'No match', 'Errored', 'Never reviewed'].map((h, i) => (
                                         <th key={h} className={'px-3 py-2 font-medium whitespace-nowrap ' + (i < 3 ? 'text-left' : 'text-right')}
                                             title={h === 'Never reviewed' ? 'Images the AI pass never reached — not a verdict, not an error. Caused by the task stopping before it finished.' : undefined}>{h}</th>
                                     ))}
@@ -723,7 +716,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                         <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{agentName(effectiveAgent(o.opp))}</td>
                                         <td className="px-3 py-2 text-right">{o.sessions}</td>
                                         <td className="px-3 py-2 text-right">{o.images}</td>
-                                        <td className="px-3 py-2 text-right">{o.withReading}</td>
+                                        <td className="px-3 py-2 text-right">{o.assessed}</td>
                                         <td className="px-3 py-2 text-right text-green-700">{o.match}</td>
                                         <td className="px-3 py-2 text-right text-amber-700">{o.noMatch}</td>
                                         <td className="px-3 py-2 text-right text-red-700">{o.error}</td>
@@ -763,14 +756,15 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                             <th className="px-3 py-2 text-left font-medium">FLW</th>
                                             <th className="px-3 py-2 text-left font-medium">Opportunity</th>
                                             <th className="px-3 py-2 text-left font-medium">Status</th>
-                                            <th className="px-3 py-2 text-right font-medium">Images</th>
+                                            <th className="px-3 py-2 text-right font-medium">Photos</th>
+                                            <th className="px-3 py-2 text-right font-medium" title="match / no-match / errored, and +N! for photos never reviewed">M / NM / Err</th>
                                             <th className="px-3 py-2 text-left font-medium"></th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {sessions.map(s => (
                                             <tr key={s.id} className="border-t border-gray-100 hover:bg-gray-50">
-                                                <td className="px-3 py-2">{s.title || s.username || ('Session ' + s.id)}</td>
+                                                <td className="px-3 py-2">{s.flw_display_name || s.flw_username || s.title || ('Session ' + s.id)}</td>
                                                 <td className="px-3 py-2 text-xs text-gray-600">{oppLabel(s._opp || s.opportunity_id)}</td>
                                                 <td className="px-3 py-2 text-xs">
                                                     <span className={'px-2 py-0.5 rounded font-semibold '
@@ -778,7 +772,21 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                                         {s.status || 'open'}
                                                     </span>
                                                 </td>
-                                                <td className="px-3 py-2 text-right">{s.image_count != null ? s.image_count : '—'}</td>
+                                                <td className="px-3 py-2 text-right">{s.visit_count != null ? s.visit_count : '—'}</td>
+                                                <td className="px-3 py-2 text-right text-xs">
+                                                    {(() => {
+                                                        const st = s.assessment_stats || {};
+                                                        const gap = Math.max(0, (s.visit_count || 0) - (st.total || 0));
+                                                        return (
+                                                            <span>
+                                                                <span className="text-green-700">{st.ai_match || 0}</span>{' / '}
+                                                                <span className="text-amber-700">{st.ai_no_match || 0}</span>{' / '}
+                                                                <span className="text-red-700">{st.ai_error || 0}</span>
+                                                                {gap ? <span className="ml-1 text-red-700 font-semibold" title="never reviewed">+{gap}!</span> : null}
+                                                            </span>
+                                                        );
+                                                    })()}
+                                                </td>
                                                 <td className="px-3 py-2">
                                                     <a className="text-xs text-blue-600 hover:underline" href={'/audit/' + s.id + '/bulk/'}>Review →</a>
                                                 </td>
