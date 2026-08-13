@@ -739,63 +739,101 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
             {/* Sessions list */}
             {hasCreated ? (
                 <div className="bg-white rounded-lg shadow-sm p-6">
-                    <div className="text-sm font-semibold text-gray-800 mb-3">Audit sessions</div>
-                    {window.LabsAudit && window.LabsAudit.renderFlwBreakdown
-                        ? window.LabsAudit.renderFlwBreakdown(React, {
-                            sessions: sessions,
-                            oppNames: allOppIds.reduce((acc, id) => { acc[String(id)] = oppLabel(id); return acc; }, {}),
-                            workflowRunId: instance.id,
-                            loading: loadingSessions,
-                            emptyText: 'No sessions yet — select opportunities, set a window and create audits.',
-                        })
-                        : (
-                            <div className="overflow-x-auto">
-                                <table className="min-w-full text-sm">
-                                    <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
-                                        <tr>
-                                            <th className="px-3 py-2 text-left font-medium">FLW</th>
-                                            <th className="px-3 py-2 text-left font-medium">Opportunity</th>
-                                            <th className="px-3 py-2 text-left font-medium">Status</th>
-                                            <th className="px-3 py-2 text-right font-medium">Photos</th>
-                                            <th className="px-3 py-2 text-right font-medium" title="match / no-match / errored, and +N! for photos never reviewed">M / NM / Err</th>
-                                            <th className="px-3 py-2 text-left font-medium"></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {sessions.map(s => (
-                                            <tr key={s.id} className="border-t border-gray-100 hover:bg-gray-50">
-                                                <td className="px-3 py-2">{s.flw_display_name || s.flw_username || s.title || ('Session ' + s.id)}</td>
-                                                <td className="px-3 py-2 text-xs text-gray-600">{oppLabel(s._opp || s.opportunity_id)}</td>
-                                                <td className="px-3 py-2 text-xs">
-                                                    <span className={'px-2 py-0.5 rounded font-semibold '
-                                                        + (s.status === 'completed' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800')}>
-                                                        {s.status || 'open'}
-                                                    </span>
-                                                </td>
-                                                <td className="px-3 py-2 text-right">{s.visit_count != null ? s.visit_count : '—'}</td>
-                                                <td className="px-3 py-2 text-right text-xs">
-                                                    {(() => {
-                                                        const st = s.assessment_stats || {};
-                                                        const gap = Math.max(0, (s.visit_count || 0) - (st.total || 0));
-                                                        return (
-                                                            <span>
-                                                                <span className="text-green-700">{st.ai_match || 0}</span>{' / '}
-                                                                <span className="text-amber-700">{st.ai_no_match || 0}</span>{' / '}
-                                                                <span className="text-red-700">{st.ai_error || 0}</span>
-                                                                {gap ? <span className="ml-1 text-red-700 font-semibold" title="never reviewed">+{gap}!</span> : null}
+                    <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                        <div className="text-sm font-semibold text-gray-800">
+                            Audit sessions — open a field worker's photos
+                        </div>
+                        <div className="text-xs text-gray-400">grouped by opportunity · worst first</div>
+                    </div>
+                    {/* Deliberately NOT window.LabsAudit.renderFlwBreakdown. That shared component is
+                        built for the dual-track model and keys off sessions tagged 'muac' / 'rest';
+                        against our 'kmc_weight_photo' tag it reported "MUAC: not created / Other:
+                        not created" for every FLW and rendered no links at all. */}
+                    <div className="space-y-5">
+                        {rollup.byOpp.map(o => {
+                            const rows = sessions
+                                .filter(s => (s._opp || s.opportunity_id) === o.opp)
+                                .map(s => {
+                                    const st = s.assessment_stats || {};
+                                    const photos = s.visit_count || 0;
+                                    const gap = Math.max(0, photos - (st.total || 0));
+                                    return {
+                                        s: s, photos: photos, gap: gap,
+                                        match: st.ai_match || 0, noMatch: st.ai_no_match || 0, error: st.ai_error || 0,
+                                        humanDone: (st.pass || 0) + (st.fail || 0),
+                                    };
+                                })
+                                // Worst first: never-reviewed, then no-match (the ones a human must
+                                // actually look at), then errors.
+                                .sort((a, b) => (b.gap - a.gap) || (b.noMatch - a.noMatch) || (b.error - a.error)
+                                    || String(a.s.flw_display_name || '').localeCompare(String(b.s.flw_display_name || '')));
+                            return (
+                                <div key={o.opp}>
+                                    <div className="flex items-center gap-2 mb-1.5">
+                                        <span className="text-sm font-semibold text-gray-900">{o.llo}</span>
+                                        <span className="text-xs text-gray-500">{meta(o.opp).version} · {meta(o.opp).country}</span>
+                                        <span className="text-xs text-gray-400 font-mono">#{o.opp}</span>
+                                        <ScalePill kind={o.scale} unverified={meta(o.opp).unverified} />
+                                        <span className="text-xs text-gray-400">{rows.length} field worker{rows.length === 1 ? '' : 's'}</span>
+                                    </div>
+                                    <div className="overflow-x-auto border border-gray-100 rounded-lg">
+                                        <table className="min-w-full text-sm">
+                                            <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+                                                <tr>
+                                                    <th className="px-3 py-2 text-left font-medium">Field worker</th>
+                                                    <th className="px-3 py-2 text-right font-medium">Photos</th>
+                                                    <th className="px-3 py-2 text-right font-medium">Match</th>
+                                                    <th className="px-3 py-2 text-right font-medium">No match</th>
+                                                    <th className="px-3 py-2 text-right font-medium">Errored</th>
+                                                    <th className="px-3 py-2 text-right font-medium">Never reviewed</th>
+                                                    <th className="px-3 py-2 text-left font-medium">Status</th>
+                                                    <th className="px-3 py-2 text-right font-medium">Images</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {rows.map(r => (
+                                                    <tr key={r.s.id} className="border-t border-gray-100 hover:bg-gray-50">
+                                                        <td className="px-3 py-2 whitespace-nowrap">
+                                                            <span className="font-medium text-gray-900">
+                                                                {r.s.flw_display_name || r.s.flw_username || ('Session ' + r.s.id)}
                                                             </span>
-                                                        );
-                                                    })()}
-                                                </td>
-                                                <td className="px-3 py-2">
-                                                    <a className="text-xs text-blue-600 hover:underline" href={'/audit/' + s.id + '/bulk/'}>Review →</a>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
+                                                            {r.noMatch > 0
+                                                                ? <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-xs font-semibold"
+                                                                    title="The AI says the photo does not match the typed weight — review these first.">
+                                                                    {r.noMatch} to check
+                                                                </span>
+                                                                : null}
+                                                        </td>
+                                                        <td className="px-3 py-2 text-right">{r.photos}</td>
+                                                        <td className="px-3 py-2 text-right text-green-700">{r.match || '—'}</td>
+                                                        <td className={'px-3 py-2 text-right font-semibold ' + (r.noMatch ? 'text-amber-700' : 'text-gray-300')}>{r.noMatch || '—'}</td>
+                                                        <td className={'px-3 py-2 text-right ' + (r.error ? 'text-red-700' : 'text-gray-300')}>{r.error || '—'}</td>
+                                                        <td className={'px-3 py-2 text-right font-semibold ' + (r.gap ? 'text-red-700' : 'text-gray-300')}
+                                                            title={r.gap ? 'The AI pass never reached these photos' : undefined}>{r.gap || '—'}</td>
+                                                        <td className="px-3 py-2 text-xs">
+                                                            <span className={'px-2 py-0.5 rounded font-semibold '
+                                                                + (r.s.status === 'completed' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800')}>
+                                                                {r.s.status || 'open'}
+                                                            </span>
+                                                            {r.humanDone ? <span className="ml-1 text-gray-400">{r.humanDone} human-marked</span> : null}
+                                                        </td>
+                                                        <td className="px-3 py-2 text-right whitespace-nowrap">
+                                                            <a className="text-xs font-medium text-blue-600 hover:underline"
+                                                                href={'/audit/' + r.s.id + '/bulk/?opportunity_id=' + o.opp}
+                                                                target="_blank" rel="noopener noreferrer"
+                                                                title="Open this field worker's photos for this run">
+                                                                Open images →
+                                                            </a>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
             ) : null}
         </div>
