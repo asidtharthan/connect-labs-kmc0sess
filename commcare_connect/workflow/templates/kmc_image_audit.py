@@ -26,13 +26,16 @@ Design notes worth knowing before editing
 * **Sessions are stored scoped per opportunity**, so the results fetch loops the opp set
   and merges. Fetching ``/sessions/`` without ``?opportunity_id=`` only ever returns the
   home opp's sessions, which reads as "0 sessions" for everything else.
-* **Track B carries no AI on purpose.** Equipment/wrap/immunization photos have no
-  numeric reading, so an image-validation agent skips them. Measured on a real run: 161
-  of 308 extracted images (52%) had no reading. Sampling them instead of taking all of
-  them is what keeps the human queue survivable.
-* ``filter_by_image`` filters *visits*, not images — every image on a selected visit is
-  extracted regardless. That is why Track B's percentage matters even when you only
-  asked for weight photos.
+* ``filter_by_image`` filters *visits*, not images — every image on a matched visit is
+  extracted regardless of type. A "weight photo audit" therefore also collects equipment,
+  wrap and immunization photos, which carry no reading and so cannot be AI-scored.
+  Measured on a real run: 161 of 308 extracted images (52%) had no reading. The summary
+  reports that split instead of implying the run was weight-only.
+* **There is no per-image-type sampling and no FLW cap.** ``AuditCriteria`` accepts only
+  ``sample_percentage`` for a date-range audit (``count_per_flw`` applies solely to
+  ``last_n_per_flw``, and ``max_flws`` does not exist — passing it is silently ignored).
+  An earlier draft of this template exposed both; they were removed rather than shipped
+  as controls that quietly do nothing.
 """
 
 # Scale hardware per LLO drives which AI agent scores the photo. Sources: per-project
@@ -77,8 +80,8 @@ DEFINITION = {
     "description": (
         "Scale-photo audit across KMC's LLOs with the AI agent chosen per opportunity by scale "
         "hardware — digital LLOs scored by Scale [Digital], analog-dial LLOs by Scale [Dial]. "
-        "Track A audits every weight photo; Track B samples the remaining photo types for human "
-        "review only."
+        "Audits the follow-up weight photo against the typed reading, per FLW, across every "
+        "selected opportunity in one run."
     ),
     "version": 1,
     "templateType": "kmc_image_audit",
@@ -95,7 +98,6 @@ DEFINITION = {
         "weight_image_path": WEIGHT_IMAGE_PATH,
         "weight_field_path": WEIGHT_FIELD_PATH,
         "agent_for_scale": AGENT_FOR_SCALE,
-        "track_b_sample_percentage": 10,
     },
     "pipeline_sources": [],
 }
@@ -123,10 +125,12 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     const [datePreset, setDatePreset] = React.useState(runState.date_preset || 'last_week');
     const [startDate, setStartDate] = React.useState(runState.window_start || '');
     const [endDate, setEndDate] = React.useState(runState.window_end || '');
-    const [maxFlws, setMaxFlws] = React.useState(runState.max_flws != null ? runState.max_flws : '');
-    const [trackBPct, setTrackBPct] = React.useState(
-        runState.track_b_pct != null ? runState.track_b_pct : (cfg.track_b_sample_percentage != null ? cfg.track_b_sample_percentage : 10));
-    const [includeTrackB, setIncludeTrackB] = React.useState(!!runState.include_track_b);
+    // Volume control. sample_percentage is the ONLY lever this backend honours for a
+    // date_range audit: count_per_flw applies solely to last_n_per_flw, and there is no
+    // max_flws in AuditCriteria at all (passing one is silently ignored). Sampling is per
+    // FLW, so every worker keeps representation rather than the busiest ones crowding out
+    // the rest -- see filter_visits_for_audit.
+    const [samplePct, setSamplePct] = React.useState(runState.sample_percentage != null ? runState.sample_percentage : 100);
     // Per-opp agent override. Defaults come from scale hardware; an override is kept per
     // opportunity so a mixed-hardware program (46 has both) stays correct.
     const [agentOverride, setAgentOverride] = React.useState(runState.agent_override || {});
@@ -204,28 +208,28 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     const selectScale = (kind) => setSelected(allOppIds.filter(id => scaleOf(id) === kind));
 
     const buildCriteria = (oppId) => {
-        // Track A: the weight photo, census. filter_by_image narrows visit selection to
-        // visits that actually carry it, so we do not drag in visits with no photo at all.
+        // filter_by_image narrows VISIT selection to visits carrying the weight photo, so we
+        // do not pull visits with no photo at all. It does not narrow the images themselves:
+        // every image on a matched visit is extracted, which is why the summary reports how
+        // many arrived without a reading rather than pretending the run is weight-only.
         const relatedFields = [{
             image_path: WEIGHT_IMAGE_PATH,
             field_path: WEIGHT_FIELD_PATH,
             label: 'Scale Weight Reading',
             filter_by_image: true,
         }];
-        const c = {
+        return {
             audit_type: 'date_range',
             granularity: 'per_flw',
             start_date: startDate,
             end_date: endDate,
-            sample_percentage: 100,
+            sample_percentage: Number(samplePct) > 0 ? Number(samplePct) : 100,
             related_fields: relatedFields,
             title: 'KMC Image Audit · ' + oppLabel(oppId) + ' · ' + startDate + ' → ' + endDate,
+            // Stamped onto every session the backend creates, so these are findable later
+            // without inferring intent from the title string.
+            tag: 'kmc_weight_photo',
         };
-        if (maxFlws !== '' && Number(maxFlws) > 0) c.max_flws = Number(maxFlws);
-        if (includeTrackB && Number(trackBPct) > 0 && Number(trackBPct) < 100) {
-            c.sample_percentage = Number(trackBPct);
-        }
-        return c;
     };
 
     const handleCreate = async () => {
@@ -235,8 +239,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
 
         await onUpdateState({
             selected_opps: selected, window_start: startDate, window_end: endDate,
-            date_preset: datePreset, max_flws: maxFlws === '' ? null : Number(maxFlws),
-            track_b_pct: Number(trackBPct), include_track_b: includeTrackB,
+            date_preset: datePreset, sample_percentage: Number(samplePct),
             agent_override: agentOverride,
         });
 
@@ -404,7 +407,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                 <p className="text-gray-600 mt-1 text-sm">{definition.description}</p>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs">
                     <span className="px-2 py-1 rounded bg-gray-100 text-gray-700">
-                        Track A · <span className="font-mono">{WEIGHT_IMAGE_PATH}</span> · 100%
+                        Audited photo · <span className="font-mono">{WEIGHT_IMAGE_PATH}</span>
                     </span>
                     <span className="px-2 py-1 rounded bg-gray-100 text-gray-700">
                         Reading · <span className="font-mono">{WEIGHT_FIELD_PATH}</span>
@@ -606,27 +609,23 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                 className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
                         </div>
                         <div>
-                            <label className="block text-xs text-gray-500 mb-1" title="Blank audits every FLW active in the window.">
-                                Max FLWs per opp
+                            <label className="block text-xs text-gray-500 mb-1"
+                                title="Percentage of each FLW's qualifying visits to audit. Sampling is applied per FLW, so every worker keeps representation instead of the busiest crowding out the rest. 100 = census.">
+                                Sample %
                             </label>
-                            <input type="number" min="1" value={maxFlws} placeholder="all"
-                                onChange={(e) => setMaxFlws(e.target.value === '' ? '' : Number(e.target.value))}
-                                className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm w-24" />
-                        </div>
-                        <label className="flex items-center gap-2 text-sm text-gray-700"
-                            title="Track B samples the non-weight photo types for HUMAN review. They carry no reading, so no AI agent can score them.">
-                            <input type="checkbox" checked={includeTrackB} onChange={(e) => setIncludeTrackB(e.target.checked)} />
-                            Sample other photo types
-                        </label>
-                        {includeTrackB ? (
-                            <div>
-                                <label className="block text-xs text-gray-500 mb-1">Track B %</label>
-                                <input type="number" min="1" max="99" value={trackBPct}
-                                    onChange={(e) => setTrackBPct(Number(e.target.value))}
+                            <div className="flex items-center gap-2">
+                                <input type="number" min="1" max="100" value={samplePct}
+                                    onChange={(e) => setSamplePct(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
                                     className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm w-20" />
+                                <span className="text-xs text-gray-400">{Number(samplePct) >= 100 ? 'census' : 'per FLW'}</span>
                             </div>
-                        ) : null}
+                        </div>
                     </div>
+                    <p className="text-xs text-gray-500 mt-3">
+                        Sample % is the only volume control this backend honours for a date-range audit —
+                        there is no cap on FLW count, and per-FLW visit limits apply only to "last N per FLW"
+                        audits. Reduce the window or the percentage to keep a run small.
+                    </p>
                 </div>
 
                 {/* Submit */}
