@@ -204,6 +204,16 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     const cleanupsRef = React.useRef([]);
     React.useEffect(() => () => { cleanupsRef.current.forEach(c => { try { if (c) c(); } catch (e) {} }); }, []);
 
+    // Poll while a run is in flight so the live panel shows OUR counts. The server's progress
+    // string reports "(N passed, M failed)" and omits errors entirely — on run 13575 it read
+    // "110/140 images (1 passed, 0 failed)" while 109 of those 110 had errored. Read literally,
+    // that line says a healthy run is in progress.
+    React.useEffect(() => {
+        if (!isRunning) return undefined;
+        const t = setInterval(() => { refreshSessions(); }, 20000);
+        return () => clearInterval(t);
+    }, [isRunning]);
+
     const toggleOpp = (id) => setSelected(prev =>
         prev.indexOf(id) >= 0 ? prev.filter(x => x !== id) : prev.concat([id]).sort((a, b) => a - b));
     const selectAll = () => setSelected(allOppIds.slice());
@@ -677,6 +687,53 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                 : progress.status === 'completed' ? 'fa-circle-check' : 'fa-spinner fa-spin')}></i>
                             {progress.message || progress.error || 'Working…'}
                             {progress.total ? <span className="ml-2 text-xs">({progress.processed || 0}/{progress.total})</span> : null}
+                            <div className="mt-1 text-xs opacity-70">
+                                Server message — it counts only passes and no-matches, so errored images are not
+                                reflected in it. The live figures below are the real state.
+                            </div>
+                        </div>
+                    ) : null}
+
+                    {/* Live state, computed from the sessions actually written so far. Refreshes every
+                        20s while a run is in flight, so a run that is failing looks like it is failing. */}
+                    {(isRunning || rollup.reviewed > 0) ? (
+                        <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                            <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+                                <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                    {isRunning ? 'Live — refreshing every 20s' : 'Result'}
+                                </span>
+                                <button onClick={refreshSessions} className="text-xs underline text-gray-500 hover:text-gray-800">
+                                    refresh now
+                                </button>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 text-sm">
+                                <span className="px-2 py-1 rounded bg-white border border-gray-200">
+                                    <span className="font-semibold">{rollup.reviewed}</span>
+                                    <span className="text-gray-500"> of {rollup.images} photos reviewed</span>
+                                </span>
+                                <span className="px-2 py-1 rounded bg-green-50 text-green-800 border border-green-200">
+                                    <span className="font-semibold">{rollup.match}</span> match
+                                </span>
+                                <span className="px-2 py-1 rounded bg-amber-50 text-amber-800 border border-amber-200">
+                                    <span className="font-semibold">{rollup.noMatch}</span> no match
+                                </span>
+                                <span className={'px-2 py-1 rounded border '
+                                    + (rollup.error ? 'bg-red-50 text-red-800 border-red-200' : 'bg-white text-gray-400 border-gray-200')}>
+                                    <span className="font-semibold">{rollup.error}</span> errored
+                                    {rollup.reviewed ? <span className="ml-1">({rollup.errorPct}%)</span> : null}
+                                </span>
+                                {rollup.notReviewed ? (
+                                    <span className="px-2 py-1 rounded bg-red-50 text-red-800 border border-red-200">
+                                        <span className="font-semibold">{rollup.notReviewed}</span> never reviewed
+                                    </span>
+                                ) : null}
+                            </div>
+                            {rollup.reviewed > 0 && rollup.errorPct >= 20 ? (
+                                <div className="mt-2 text-xs text-red-700">
+                                    Most calls are failing. Errored photos get no verdict and still need a human —
+                                    this run will not give a usable read on scale-photo quality.
+                                </div>
+                            ) : null}
                         </div>
                     ) : null}
                     {runError ? (
