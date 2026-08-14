@@ -9,7 +9,8 @@ Chains the existing build steps into one hands-off run for the scheduler (Celery
   5. build_dashboard_data.py     -> dashboard_data.json
   6. audit_e2e.py + build_dashboard_data_audit.py   (ABORTS the run if any check fails)
   7. inject dashboard_data.json into docs/interviews_render_template.js -> docs/interviews_master_v3_render.js
-  7b. brutal_verify.py   independent re-derivation from RAW sources + cross-place + render-binding gate (ABORTS on mismatch)
+  7b. brutal_verify.py   independent re-derivation from RAW sources + cross-place + render-binding
+                         gate (ABORTS on mismatch)
   8. (--push)         update workflow 3962 render_code on Labs   [needs CONNECT_TOKEN/PAT]
 
 Defaults: steps 1-3 are SKIPPED (uses existing local source files) so the build+audit+inject
@@ -95,7 +96,8 @@ def inject():
         sys.exit(1)
     # Guard against embedding a stale pruned payload if someone rebuilt dashboard_data.json by hand.
     if os.path.getmtime(rd_path) < os.path.getmtime(dd_path) - 1:
-        print(f"ABORT: {RENDER_DATA_JSON} is older than {DATA_JSON} — rebuild with build_dashboard_data.py.", flush=True)
+        print(f"ABORT: {RENDER_DATA_JSON} is older than {DATA_JSON} — rebuild with "
+              "build_dashboard_data.py.", flush=True)
         sys.exit(1)
     with open(rd_path, encoding="utf-8") as f:
         data = f.read().strip()
@@ -135,7 +137,7 @@ def _mcp_creds():
         return None, None
 
 
-def _mcp_call(url, auth, tool, args, _sid):
+def _mcp_call(url, auth, tool, args, _sid, timeout=180):
     """Invoke one MCP tool over streamable-HTTP JSON-RPC. Returns the unwrapped result dict."""
     import urllib.request
 
@@ -149,7 +151,7 @@ def _mcp_call(url, auth, tool, args, _sid):
         if _sid["v"]:
             h["Mcp-Session-Id"] = _sid["v"]
         req = urllib.request.Request(url, data=body, method="POST", headers=h)
-        with urllib.request.urlopen(req, timeout=180) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             if r.headers.get("Mcp-Session-Id"):
                 _sid["v"] = r.headers["Mcp-Session-Id"]
             raw = r.read().decode()
@@ -193,36 +195,67 @@ def push(render_code):
         return False
     print(f"\n=== 8. push render to workflow {WORKFLOW_ID} via MCP ({url}) ===", flush=True)
     sid = {"v": None}
-    try:
-        wf = _mcp_call(
-            url,
-            auth,
-            "workflow_get",
+
+    def _live_version():
+        """Current published version, on a fresh session so a wedged one cannot mask the answer."""
+        return _mcp_call(
+            url, auth, "workflow_get",
             {"workflow_id": WORKFLOW_ID, "opportunity_id": OWNER_OPP, "include_render_code": False},
-            sid,
-        )
-        v0 = wf.get("render_code_version")
-        res = _mcp_call(
-            url,
-            auth,
-            "workflow_update_render_code",
-            {
-                "workflow_id": WORKFLOW_ID,
-                "opportunity_id": OWNER_OPP,
-                "expected_version": v0,
-                "component_code": render_code,
-            },
-            sid,
-        )
-        new_v = res.get("new_version")
-        ok = new_v == (v0 + 1) if isinstance(v0, int) else bool(new_v)
-        print(
-            f"--- push: render_code_version {v0} -> {new_v}  {'OK' if ok else 'UNEXPECTED: ' + str(res)}", flush=True
-        )
-        return new_v if ok else False
+            {"v": None}, timeout=60,
+        ).get("render_code_version")
+
+    try:
+        v0 = _live_version()
     except Exception as e:
-        print(f"--- push FAILED: {repr(e)[:300]}", flush=True)
+        print(f"--- push FAILED: could not read current version: {repr(e)[:200]}", flush=True)
         return False
+
+    # The write is retried, but a read TIMEOUT is ambiguous — the server may well have applied the
+    # update and only the response was lost (this is exactly what failed the 2026-08-14 06:00 run:
+    # all 198 gates passed, then the push read-timed-out at 180s). So after any failure, re-read the
+    # published version: if it already advanced, the write landed and retrying would either
+    # double-publish or trip the expected_version guard and be misreported as a failure.
+    # `expected_version` makes the write itself safe to repeat; this makes the REPORT truthful.
+    attempts = 3
+    for attempt in range(1, attempts + 1):
+        try:
+            res = _mcp_call(
+                url, auth, "workflow_update_render_code",
+                {
+                    "workflow_id": WORKFLOW_ID,
+                    "opportunity_id": OWNER_OPP,
+                    "expected_version": v0,
+                    "component_code": render_code,
+                },
+                sid,
+                timeout=600,  # was 180: a ~1MB render write past the gates is slow, not broken
+            )
+            new_v = res.get("new_version")
+            ok = new_v == (v0 + 1) if isinstance(v0, int) else bool(new_v)
+            print(f"--- push: render_code_version {v0} -> {new_v}  "
+                  f"{'OK' if ok else 'UNEXPECTED: ' + str(res)}", flush=True)
+            if ok:
+                return new_v
+        except Exception as e:
+            print(f"--- push attempt {attempt}/{attempts} failed: {repr(e)[:200]}", flush=True)
+            try:
+                landed = _live_version()
+            except Exception as e2:
+                print(f"    could not re-read version to check: {repr(e2)[:120]}", flush=True)
+                landed = None
+            if isinstance(v0, int) and landed == v0 + 1:
+                print(f"--- push: the write DID land despite the error "
+                      f"(version {v0} -> {landed}); treating as success", flush=True)
+                return landed
+            if isinstance(landed, int) and isinstance(v0, int) and landed > v0 + 1:
+                print(f"--- push: version moved {v0} -> {landed}, i.e. something else published "
+                      f"meanwhile. NOT retrying to avoid clobbering it.", flush=True)
+                return False
+        if attempt < attempts:
+            sid["v"] = None  # a timed-out session can be wedged; start a clean one
+            time.sleep(15 * attempt)
+    print(f"--- push FAILED after {attempts} attempts (version still {v0})", flush=True)
+    return False
 
 
 def write_github_summary(pushed_version):
@@ -243,7 +276,8 @@ def write_github_summary(pushed_version):
             f"- **Interviews started:** {c.get('started')}  ·  **completed:** {c.get('completed')}",
             f"- **Data as of:** {d.get('today', '')}",
             "",
-            f"[Open the dashboard »](https://labs.connect.dimagi.com/labs/workflow/{WORKFLOW_ID}/run/?opportunity_id={OWNER_OPP})",
+            f"[Open the dashboard »](https://labs.connect.dimagi.com/labs/workflow/{WORKFLOW_ID}"
+            f"/run/?opportunity_id={OWNER_OPP})",
         ]
         with open(path, "a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
