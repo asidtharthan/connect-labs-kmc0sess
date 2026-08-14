@@ -376,17 +376,15 @@ if HR.get("groups") and len(HR["groups"]) == 2:
     )
     _pd = round(u["probes_per_window"] - a["probes_per_window"], 2)
     para(
-        (
-            "**Sessions the team judged poor were probed more and recovered less** "
-            f"({u['probes_per_window']} vs {a['probes_per_window']} probes per question; "
-            f"{u['recovery_pct']}% vs {a['recovery_pct']}% turned around). So heavy probing is a **symptom** "
-            "of a struggling session, not the cause of one — and the reviewer who reads a probe as the bot "
-            "working correctly has the evidence on their side: the probe is what rescues the recoverable cases."
-            if _pd > 0
-            else f"Probing intensity is {'similar' if abs(_pd) < 0.1 else 'lower'} in sessions the team judged "
-            f"poor ({u['probes_per_window']} vs {a['probes_per_window']} probes per question), so \"needed "
-            "probing\" does not track the team's own judgement and should not count against the FLW."
-        )
+        "**Sessions the team judged poor were probed more and recovered less** "
+        f"({u['probes_per_window']} vs {a['probes_per_window']} probes per question; "
+        f"{u['recovery_pct']}% vs {a['recovery_pct']}% turned around). So heavy probing is a **symptom** "
+        "of a struggling session, not the cause of one — and the reviewer who reads a probe as the bot "
+        "working correctly has the evidence on their side: the probe is what rescues the recoverable cases."
+        if _pd > 0
+        else f"Probing intensity is {'similar' if abs(_pd) < 0.1 else 'lower'} in sessions the team judged "
+        f"poor ({u['probes_per_window']} vs {a['probes_per_window']} probes per question), so \"needed "
+        "probing\" does not track the team's own judgement and should not count against the FLW."
     )
     para(
         "Suggested change to the annotation guidance: record bot prompting as its own flag, and do not "
