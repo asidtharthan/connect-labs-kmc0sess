@@ -169,8 +169,19 @@ def build_records():
                 "cohorts_known": n_known,
                 "cohorts_offered_full": n_offered,
                 "max_design_len": max_design_len,
-                # the comparable quantity: share of THIS FLW's cohorts they finished (no max-over-N inflation)
+                # Share of THIS FLW's cohorts they finished — no max-over-N inflation. TWO bases, because
+                # the choice materially changes the headline and neither is wrong:
+                #   _known   = every cohort with a known design, INCLUDING ones whose full schedule has
+                #              not been triggered yet. Honest "so far", but ~22% of enrolment slots have
+                #              not been fully offered, so it counts un-offered work as unfinished — and
+                #              it does so unevenly: multi-cohort FLWs are ~2.3x more likely to be
+                #              carrying a still-rolling schedule, which biases the multi-vs-single
+                #              comparison against exactly the group that comparison is about.
+                #   _offered = only cohorts whose whole schedule was actually put to them. The fair
+                #              like-for-like rate, but silent about work still in flight.
+                # Both are published and the dashboard shows both, rather than picking one silently.
                 "finish_rate_per_cohort": round(n_fin / n_known, 3) if n_known else 0,
+                "finish_rate_offered": round(n_fin / n_offered, 3) if n_offered else None,
                 "n_sessions": n_sess,
                 "first_session": dates[0].isoformat() if dates else "",
                 "last_session": dates[-1].isoformat() if dates else "",
@@ -582,6 +593,10 @@ def micro(records):
         ("depth", 3, lambda x: round(x["avg_words_per_session"])),  # words/session, 0..46655
         ("fdepth", 3, lambda x: round(x["first_session_words"])),
         ("pcf", 2, lambda x: round(100 * x["finish_rate_per_cohort"])),  # 0..100
+        # offered-basis twin of pcf, so the drill-down can show both bases under any filter combination.
+        # None (no cohort fully offered yet) is encoded as 101 = "not measurable", never as 0, because a
+        # 0 would drag the average down and read as "finished nothing".
+        ("pcfo", 2, lambda x: 101 if x.get("finish_rate_offered") is None else round(100 * x["finish_rate_offered"])),
         ("deep", 1, lambda x: x["progression_depth"]),  # deepest interview reached, 0..35
     ]:
         out["num"][name] = {"w": width, "s": pack((fn(x) for x in records), width)}
@@ -625,6 +640,7 @@ CSV_COLS = [
     "cohorts_known",
     "cohorts_offered_full",
     "finish_rate_per_cohort",
+    "finish_rate_offered",
     "max_design_len",
     "first_session_words",
     "n_sessions",

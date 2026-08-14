@@ -407,3 +407,16 @@ connect_snapshots/
 # per-FLW analysis outputs (flw_analysis.csv has connect_ids + names — participant data; payload is a regenerated artifact)
 flw_analysis.csv
 flw_analysis_payload.json
+
+# Raw OCS interview transcripts (verbatim FLW-written content + participant identifiers).
+# ~500k messages / >170MB — archived locally under ocs_transcript_dump/, never committed.
+# question_catalogue.* and probing_payload.json ARE tracked: programme question text and
+# aggregates, no participant data.
+_ocs_messages.jsonl
+ocs_transcript_dump/
+probing_windows.csv
+probing_probes.csv
+probe_validation_sample.txt
+probe_validation_labels.csv
+pull_msgs.log
+pull_all.log

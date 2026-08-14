@@ -1,0 +1,1003 @@
+{
+  "generated": "2026-08-13",
+  "source": "_ocs_messages.jsonl",
+  "universe": {
+    "sessions_in_file": 9852,
+    "sessions_with_detected_questions": 9817,
+    "sessions_detection_failed": 35,
+    "detection_coverage_pct": 99.6,
+    "flws": 1461,
+    "codes": 27,
+    "messages": 514296,
+    "ai_turns": 259929,
+    "windows": 112864,
+    "languages": {
+      "english": 5541,
+      "hausa": 4204,
+      "unknown": 83,
+      "mixed": 24
+    },
+    "ask_channel_mix": {
+      "default": 116110,
+      "declared": 96933,
+      "admin": 21624,
+      "bold": 10227,
+      "advance": 6738,
+      "overlap": 6654,
+      "preamble": 1643
+    },
+    "sessions_excluded": {
+      "untagged": 11775,
+      "test_code": 52,
+      "test_tag": 21
+    },
+    "sessions_excluded_total": 11848
+  },
+  "census": {
+    "windows": 112864,
+    "windows_probed": 70655,
+    "probe_rate_pct": 62.6,
+    "probing_turns": 123798,
+    "reasks": 7688,
+    "probes_per_window_mean": 1.1,
+    "probes_per_probed_window_mean": 1.75,
+    "turns_per_window_mean": 2.06,
+    "distribution": {
+      "0": 42209,
+      "1": 44419,
+      "2": 15701,
+      "3": 5651,
+      "4": 2176,
+      "5+": 2708
+    },
+    "triggers": {
+      "needs_depth": {
+        "n": 37603,
+        "pct": 53.2
+      },
+      "too_short": {
+        "n": 22947,
+        "pct": 32.5
+      },
+      "no_number_given": {
+        "n": 9096,
+        "pct": 12.9
+      },
+      "no_answer": {
+        "n": 419,
+        "pct": 0.6
+      },
+      "dont_know": {
+        "n": 401,
+        "pct": 0.6
+      },
+      "confused": {
+        "n": 189,
+        "pct": 0.3
+      }
+    },
+    "probe_types": {
+      "descriptive_detail": {
+        "n": 52517,
+        "pct": 42.4
+      },
+      "other": {
+        "n": 34988,
+        "pct": 28.3
+      },
+      "clarifying": {
+        "n": 22415,
+        "pct": 18.1
+      },
+      "idiographic_memory": {
+        "n": 6988,
+        "pct": 5.6
+      },
+      "explanatory": {
+        "n": 4236,
+        "pct": 3.4
+      },
+      "elaboration": {
+        "n": 2654,
+        "pct": 2.1
+      }
+    },
+    "by_topic": [
+      {
+        "k": "Community Demographics",
+        "windows": 15751,
+        "probe_rate_pct": 52.2,
+        "probes_per_window": 0.76,
+        "turns_per_window": 1.73
+      },
+      {
+        "k": "Malaria",
+        "windows": 13632,
+        "probe_rate_pct": 60.5,
+        "probes_per_window": 0.86,
+        "turns_per_window": 1.83
+      },
+      {
+        "k": "Bed Net Usage",
+        "windows": 12088,
+        "probe_rate_pct": 51.0,
+        "probes_per_window": 0.77,
+        "turns_per_window": 1.74
+      },
+      {
+        "k": "Seasonal Malaria Chemoprevention 2",
+        "windows": 9837,
+        "probe_rate_pct": 65.9,
+        "probes_per_window": 1.12,
+        "turns_per_window": 2.09
+      },
+      {
+        "k": "Malaria 5",
+        "windows": 9815,
+        "probe_rate_pct": 74.3,
+        "probes_per_window": 2.02,
+        "turns_per_window": 3.0
+      },
+      {
+        "k": "Seasonal Malaria Chemoprevention",
+        "windows": 9613,
+        "probe_rate_pct": 69.5,
+        "probes_per_window": 1.2,
+        "turns_per_window": 2.15
+      },
+      {
+        "k": "Health Worker Experience",
+        "windows": 8879,
+        "probe_rate_pct": 46.3,
+        "probes_per_window": 0.77,
+        "turns_per_window": 1.74
+      },
+      {
+        "k": "Vitamin A Supplementation",
+        "windows": 5560,
+        "probe_rate_pct": 68.5,
+        "probes_per_window": 1.28,
+        "turns_per_window": 2.26
+      },
+      {
+        "k": "Community & FLW Profile 2",
+        "windows": 4114,
+        "probe_rate_pct": 62.7,
+        "probes_per_window": 1.15,
+        "turns_per_window": 2.12
+      },
+      {
+        "k": "Nutrition Prevalance and Programs",
+        "windows": 3719,
+        "probe_rate_pct": 76.0,
+        "probes_per_window": 1.18,
+        "turns_per_window": 2.15
+      },
+      {
+        "k": "Water & Diarrhea 2",
+        "windows": 3690,
+        "probe_rate_pct": 80.0,
+        "probes_per_window": 1.5,
+        "turns_per_window": 2.47
+      },
+      {
+        "k": "Vaccines",
+        "windows": 3304,
+        "probe_rate_pct": 72.2,
+        "probes_per_window": 1.23,
+        "turns_per_window": 2.18
+      },
+      {
+        "k": "Antibiotics and ACT Use",
+        "windows": 2792,
+        "probe_rate_pct": 64.7,
+        "probes_per_window": 1.18,
+        "turns_per_window": 2.15
+      },
+      {
+        "k": "Family Planning",
+        "windows": 2219,
+        "probe_rate_pct": 71.4,
+        "probes_per_window": 1.12,
+        "turns_per_window": 2.07
+      },
+      {
+        "k": "Malaria 2",
+        "windows": 1782,
+        "probe_rate_pct": 88.1,
+        "probes_per_window": 1.67,
+        "turns_per_window": 2.64
+      },
+      {
+        "k": "Medicine Quality and Counterfeiting 2",
+        "windows": 1551,
+        "probe_rate_pct": 67.4,
+        "probes_per_window": 1.02,
+        "turns_per_window": 1.99
+      },
+      {
+        "k": "Internal Topic",
+        "windows": 1272,
+        "probe_rate_pct": 51.8,
+        "probes_per_window": 0.77,
+        "turns_per_window": 1.75
+      },
+      {
+        "k": "Medicine Quality & Counterfeiting 3",
+        "windows": 545,
+        "probe_rate_pct": 61.8,
+        "probes_per_window": 1.07,
+        "turns_per_window": 2.06
+      },
+      {
+        "k": "Medicine Quality & Counterfeiting",
+        "windows": 535,
+        "probe_rate_pct": 52.3,
+        "probes_per_window": 0.75,
+        "turns_per_window": 1.69
+      },
+      {
+        "k": "Antibiotics and ACT Use 3",
+        "windows": 502,
+        "probe_rate_pct": 75.1,
+        "probes_per_window": 1.37,
+        "turns_per_window": 2.35
+      },
+      {
+        "k": "Water & Diarrhea 4",
+        "windows": 392,
+        "probe_rate_pct": 72.4,
+        "probes_per_window": 1.68,
+        "turns_per_window": 2.66
+      },
+      {
+        "k": "Malaria 4",
+        "windows": 311,
+        "probe_rate_pct": 78.1,
+        "probes_per_window": 1.5,
+        "turns_per_window": 2.48
+      },
+      {
+        "k": "Antibiotics and ACT Use 2",
+        "windows": 258,
+        "probe_rate_pct": 77.9,
+        "probes_per_window": 1.57,
+        "turns_per_window": 2.5
+      },
+      {
+        "k": "Water & Diarrhea 3",
+        "windows": 227,
+        "probe_rate_pct": 83.3,
+        "probes_per_window": 2.24,
+        "turns_per_window": 3.18
+      },
+      {
+        "k": "Community & FLW Profile",
+        "windows": 173,
+        "probe_rate_pct": 59.0,
+        "probes_per_window": 0.93,
+        "turns_per_window": 1.91
+      },
+      {
+        "k": "Malaria 3",
+        "windows": 170,
+        "probe_rate_pct": 90.6,
+        "probes_per_window": 2.08,
+        "turns_per_window": 3.01
+      },
+      {
+        "k": "Water & Diarrhea",
+        "windows": 121,
+        "probe_rate_pct": 55.4,
+        "probes_per_window": 0.81,
+        "turns_per_window": 1.75
+      },
+      {
+        "k": "te001_topic",
+        "windows": 5,
+        "probe_rate_pct": 100.0,
+        "probes_per_window": 2.2,
+        "turns_per_window": 1.6
+      },
+      {
+        "k": "code B",
+        "windows": 5,
+        "probe_rate_pct": 20.0,
+        "probes_per_window": 0.2,
+        "turns_per_window": 0.8
+      },
+      {
+        "k": "code A",
+        "windows": 2,
+        "probe_rate_pct": 50.0,
+        "probes_per_window": 2.0,
+        "turns_per_window": 3.5
+      }
+    ],
+    "by_language": [
+      {
+        "k": "english",
+        "windows": 65500,
+        "probe_rate_pct": 63.9,
+        "probes_per_window": 1.13,
+        "turns_per_window": 2.12
+      },
+      {
+        "k": "hausa",
+        "windows": 46415,
+        "probe_rate_pct": 60.9,
+        "probes_per_window": 1.05,
+        "turns_per_window": 1.99
+      },
+      {
+        "k": "unknown",
+        "windows": 656,
+        "probe_rate_pct": 58.7,
+        "probes_per_window": 0.98,
+        "turns_per_window": 1.93
+      },
+      {
+        "k": "mixed",
+        "windows": 293,
+        "probe_rate_pct": 59.4,
+        "probes_per_window": 0.89,
+        "turns_per_window": 1.89
+      }
+    ]
+  },
+  "counterfactual": {
+    "windows": 112864,
+    "usable_final": 97013,
+    "usable_first": 76469,
+    "rescued_by_probing": 20651,
+    "rescued_share_of_usable_pct": 21.3,
+    "form_equivalent_usable_pct": 67.8,
+    "actual_usable_pct": 86.0,
+    "mcnemar": {
+      "fixed": 20651,
+      "broke": 107,
+      "chi2": 20330.23,
+      "p": "< 1e-300",
+      "exact": false
+    },
+    "words": {
+      "first_mean": 10.7,
+      "final_mean": 22.1,
+      "first_median": 6.0,
+      "final_median": 14.0,
+      "probed_first_mean": 9.7,
+      "probed_final_mean": 27.9
+    },
+    "by_topic": [
+      {
+        "k": "Community Demographics",
+        "windows": 15751,
+        "form_equivalent_usable_pct": 54.5,
+        "actual_usable_pct": 75.8,
+        "rescued": 3345,
+        "words_first_mean": 7.3,
+        "words_final_mean": 13.2
+      },
+      {
+        "k": "Malaria",
+        "windows": 13632,
+        "form_equivalent_usable_pct": 67.6,
+        "actual_usable_pct": 84.2,
+        "rescued": 2261,
+        "words_first_mean": 11.0,
+        "words_final_mean": 20.1
+      },
+      {
+        "k": "Bed Net Usage",
+        "windows": 12088,
+        "form_equivalent_usable_pct": 75.2,
+        "actual_usable_pct": 86.9,
+        "rescued": 1426,
+        "words_first_mean": 11.4,
+        "words_final_mean": 18.8
+      },
+      {
+        "k": "Seasonal Malaria Chemoprevention 2",
+        "windows": 9837,
+        "form_equivalent_usable_pct": 68.1,
+        "actual_usable_pct": 89.0,
+        "rescued": 2079,
+        "words_first_mean": 10.8,
+        "words_final_mean": 22.6
+      },
+      {
+        "k": "Malaria 5",
+        "windows": 9815,
+        "form_equivalent_usable_pct": 63.1,
+        "actual_usable_pct": 87.1,
+        "rescued": 2385,
+        "words_first_mean": 10.0,
+        "words_final_mean": 29.3
+      },
+      {
+        "k": "Seasonal Malaria Chemoprevention",
+        "windows": 9613,
+        "form_equivalent_usable_pct": 73.3,
+        "actual_usable_pct": 91.3,
+        "rescued": 1737,
+        "words_first_mean": 12.5,
+        "words_final_mean": 25.3
+      },
+      {
+        "k": "Health Worker Experience",
+        "windows": 8879,
+        "form_equivalent_usable_pct": 66.5,
+        "actual_usable_pct": 79.8,
+        "rescued": 1181,
+        "words_first_mean": 11.1,
+        "words_final_mean": 19.7
+      },
+      {
+        "k": "Vitamin A Supplementation",
+        "windows": 5560,
+        "form_equivalent_usable_pct": 70.7,
+        "actual_usable_pct": 89.5,
+        "rescued": 1056,
+        "words_first_mean": 10.7,
+        "words_final_mean": 23.8
+      },
+      {
+        "k": "Community & FLW Profile 2",
+        "windows": 4114,
+        "form_equivalent_usable_pct": 74.4,
+        "actual_usable_pct": 87.0,
+        "rescued": 521,
+        "words_first_mean": 13.1,
+        "words_final_mean": 28.9
+      },
+      {
+        "k": "Nutrition Prevalance and Programs",
+        "windows": 3719,
+        "form_equivalent_usable_pct": 63.7,
+        "actual_usable_pct": 90.0,
+        "rescued": 981,
+        "words_first_mean": 10.6,
+        "words_final_mean": 24.7
+      },
+      {
+        "k": "Water & Diarrhea 2",
+        "windows": 3690,
+        "form_equivalent_usable_pct": 70.6,
+        "actual_usable_pct": 92.5,
+        "rescued": 815,
+        "words_first_mean": 11.6,
+        "words_final_mean": 27.5
+      },
+      {
+        "k": "Vaccines",
+        "windows": 3304,
+        "form_equivalent_usable_pct": 67.6,
+        "actual_usable_pct": 91.3,
+        "rescued": 786,
+        "words_first_mean": 9.8,
+        "words_final_mean": 23.3
+      },
+      {
+        "k": "Antibiotics and ACT Use",
+        "windows": 2792,
+        "form_equivalent_usable_pct": 75.5,
+        "actual_usable_pct": 90.3,
+        "rescued": 417,
+        "words_first_mean": 11.8,
+        "words_final_mean": 25.8
+      },
+      {
+        "k": "Family Planning",
+        "windows": 2219,
+        "form_equivalent_usable_pct": 73.6,
+        "actual_usable_pct": 91.1,
+        "rescued": 389,
+        "words_first_mean": 11.9,
+        "words_final_mean": 27.6
+      },
+      {
+        "k": "Malaria 2",
+        "windows": 1782,
+        "form_equivalent_usable_pct": 81.3,
+        "actual_usable_pct": 94.0,
+        "rescued": 231,
+        "words_first_mean": 16.9,
+        "words_final_mean": 39.4
+      },
+      {
+        "k": "Medicine Quality and Counterfeiting 2",
+        "windows": 1551,
+        "form_equivalent_usable_pct": 75.0,
+        "actual_usable_pct": 90.4,
+        "rescued": 239,
+        "words_first_mean": 12.4,
+        "words_final_mean": 24.1
+      },
+      {
+        "k": "Internal Topic",
+        "windows": 1272,
+        "form_equivalent_usable_pct": 79.2,
+        "actual_usable_pct": 89.8,
+        "rescued": 137,
+        "words_first_mean": 12.1,
+        "words_final_mean": 20.2
+      },
+      {
+        "k": "Medicine Quality & Counterfeiting 3",
+        "windows": 545,
+        "form_equivalent_usable_pct": 65.1,
+        "actual_usable_pct": 85.1,
+        "rescued": 109,
+        "words_first_mean": 8.2,
+        "words_final_mean": 16.2
+      },
+      {
+        "k": "Medicine Quality & Counterfeiting",
+        "windows": 535,
+        "form_equivalent_usable_pct": 73.8,
+        "actual_usable_pct": 82.8,
+        "rescued": 49,
+        "words_first_mean": 14.5,
+        "words_final_mean": 24.7
+      },
+      {
+        "k": "Antibiotics and ACT Use 3",
+        "windows": 502,
+        "form_equivalent_usable_pct": 58.2,
+        "actual_usable_pct": 85.5,
+        "rescued": 138,
+        "words_first_mean": 7.5,
+        "words_final_mean": 16.7
+      },
+      {
+        "k": "Water & Diarrhea 4",
+        "windows": 392,
+        "form_equivalent_usable_pct": 62.8,
+        "actual_usable_pct": 86.2,
+        "rescued": 92,
+        "words_first_mean": 9.4,
+        "words_final_mean": 22.2
+      },
+      {
+        "k": "Malaria 4",
+        "windows": 311,
+        "form_equivalent_usable_pct": 68.2,
+        "actual_usable_pct": 90.7,
+        "rescued": 70,
+        "words_first_mean": 11.6,
+        "words_final_mean": 27.5
+      },
+      {
+        "k": "Antibiotics and ACT Use 2",
+        "windows": 258,
+        "form_equivalent_usable_pct": 60.1,
+        "actual_usable_pct": 93.0,
+        "rescued": 85,
+        "words_first_mean": 6.4,
+        "words_final_mean": 17.6
+      },
+      {
+        "k": "Water & Diarrhea 3",
+        "windows": 227,
+        "form_equivalent_usable_pct": 65.6,
+        "actual_usable_pct": 89.4,
+        "rescued": 54,
+        "words_first_mean": 8.9,
+        "words_final_mean": 26.9
+      },
+      {
+        "k": "Community & FLW Profile",
+        "windows": 173,
+        "form_equivalent_usable_pct": 84.4,
+        "actual_usable_pct": 91.3,
+        "rescued": 12,
+        "words_first_mean": 18.1,
+        "words_final_mean": 35.2
+      },
+      {
+        "k": "Malaria 3",
+        "windows": 170,
+        "form_equivalent_usable_pct": 76.5,
+        "actual_usable_pct": 95.9,
+        "rescued": 33,
+        "words_first_mean": 10.8,
+        "words_final_mean": 28.8
+      },
+      {
+        "k": "Water & Diarrhea",
+        "windows": 121,
+        "form_equivalent_usable_pct": 73.6,
+        "actual_usable_pct": 90.9,
+        "rescued": 21,
+        "words_first_mean": 15.6,
+        "words_final_mean": 24.0
+      },
+      {
+        "k": "te001_topic",
+        "windows": 5,
+        "form_equivalent_usable_pct": 0.0,
+        "actual_usable_pct": 40.0,
+        "rescued": 2,
+        "words_first_mean": 1.0,
+        "words_final_mean": 6.8
+      },
+      {
+        "k": "code B",
+        "windows": 5,
+        "form_equivalent_usable_pct": 20.0,
+        "actual_usable_pct": 20.0,
+        "rescued": 0,
+        "words_first_mean": 2.0,
+        "words_final_mean": 2.0
+      },
+      {
+        "k": "code A",
+        "windows": 2,
+        "form_equivalent_usable_pct": 100.0,
+        "actual_usable_pct": 100.0,
+        "rescued": 0,
+        "words_first_mean": 14.0,
+        "words_final_mean": 31.5
+      }
+    ],
+    "by_language": [
+      {
+        "k": "english",
+        "windows": 65500,
+        "form_equivalent_usable_pct": 64.2,
+        "actual_usable_pct": 84.5,
+        "rescued": 13340,
+        "words_first_mean": 10.8,
+        "words_final_mean": 22.9
+      },
+      {
+        "k": "hausa",
+        "windows": 46415,
+        "form_equivalent_usable_pct": 72.7,
+        "actual_usable_pct": 88.1,
+        "rescued": 7132,
+        "words_first_mean": 10.6,
+        "words_final_mean": 21.1
+      },
+      {
+        "k": "unknown",
+        "windows": 656,
+        "form_equivalent_usable_pct": 62.2,
+        "actual_usable_pct": 83.7,
+        "rescued": 141,
+        "words_first_mean": 9.4,
+        "words_final_mean": 19.2
+      },
+      {
+        "k": "mixed",
+        "windows": 293,
+        "form_equivalent_usable_pct": 75.1,
+        "actual_usable_pct": 88.1,
+        "rescued": 38,
+        "words_first_mean": 12.6,
+        "words_final_mean": 25.7
+      }
+    ],
+    "sensitivity": {
+      "marginal_rescues_le5_words": 3098,
+      "marginal_share_of_rescues_pct": 15.0,
+      "strict_actual_usable_pct": 83.2,
+      "strict_rescued": 17553,
+      "strict_rescued_share_of_usable_pct": 18.7,
+      "rescue_size_distribution": {
+        "4-5 words": 3098,
+        "6-10 words": 6424,
+        "11-25 words": 7712,
+        "26+ words": 3417
+      }
+    }
+  },
+  "cost": {
+    "dose_response": [
+      {
+        "probes": "0",
+        "windows": 42209,
+        "usable_final_pct": 70.3,
+        "started_unusable": 12540,
+        "recovery_pct": 0.0,
+        "words_final_mean": 12.6
+      },
+      {
+        "probes": "1",
+        "windows": 44419,
+        "usable_final_pct": 94.0,
+        "started_unusable": 13425,
+        "recovery_pct": 80.2,
+        "words_final_mean": 23.0
+      },
+      {
+        "probes": "2",
+        "windows": 15701,
+        "usable_final_pct": 97.3,
+        "started_unusable": 5942,
+        "recovery_pct": 93.5,
+        "words_final_mean": 28.4
+      },
+      {
+        "probes": "3+",
+        "windows": 10535,
+        "usable_final_pct": 97.9,
+        "started_unusable": 4488,
+        "recovery_pct": 96.5,
+        "words_final_mean": 47.5
+      }
+    ],
+    "marginal_probe": [
+      {
+        "probe_seq": "1",
+        "n": 70655,
+        "answered_after_pct": 97.9,
+        "words_before_mean": 9.6,
+        "words_after_mean": 11.3
+      },
+      {
+        "probe_seq": "2",
+        "n": 26236,
+        "answered_after_pct": 96.0,
+        "words_before_mean": 9.0,
+        "words_after_mean": 9.6
+      },
+      {
+        "probe_seq": "3",
+        "n": 10535,
+        "answered_after_pct": 95.7,
+        "words_before_mean": 8.6,
+        "words_after_mean": 8.9
+      },
+      {
+        "probe_seq": "4+",
+        "n": 16372,
+        "answered_after_pct": 96.2,
+        "words_before_mean": 8.6,
+        "words_after_mean": 8.7
+      }
+    ],
+    "abandonment": [
+      {
+        "probes_per_window": "0",
+        "sessions": 1263,
+        "completed_pct": 94.4,
+        "windows_reached_mean": 12.9
+      },
+      {
+        "probes_per_window": "0.5-1",
+        "sessions": 3362,
+        "completed_pct": 97.6,
+        "windows_reached_mean": 12.4
+      },
+      {
+        "probes_per_window": "1-2",
+        "sessions": 4070,
+        "completed_pct": 94.8,
+        "windows_reached_mean": 11.0
+      },
+      {
+        "probes_per_window": "2+",
+        "sessions": 1122,
+        "completed_pct": 86.5,
+        "windows_reached_mean": 9.2
+      }
+    ]
+  },
+  "version_trend": [
+    {
+      "version": "v32",
+      "windows": 1937,
+      "probe_rate_pct": 44.5,
+      "probes_per_window": 0.62,
+      "usable_final_pct": 78.0,
+      "form_equivalent_usable_pct": 62.5,
+      "topics": 2
+    },
+    {
+      "version": "v33",
+      "windows": 470,
+      "probe_rate_pct": 47.7,
+      "probes_per_window": 0.68,
+      "usable_final_pct": 70.0,
+      "form_equivalent_usable_pct": 52.3,
+      "topics": 2
+    },
+    {
+      "version": "v34",
+      "windows": 8549,
+      "probe_rate_pct": 48.2,
+      "probes_per_window": 0.7,
+      "usable_final_pct": 74.0,
+      "form_equivalent_usable_pct": 56.6,
+      "topics": 5
+    },
+    {
+      "version": "v35",
+      "windows": 9114,
+      "probe_rate_pct": 49.0,
+      "probes_per_window": 0.72,
+      "usable_final_pct": 78.9,
+      "form_equivalent_usable_pct": 63.5,
+      "topics": 6
+    },
+    {
+      "version": "v37",
+      "windows": 10694,
+      "probe_rate_pct": 65.5,
+      "probes_per_window": 0.92,
+      "usable_final_pct": 87.3,
+      "form_equivalent_usable_pct": 66.4,
+      "topics": 5
+    },
+    {
+      "version": "v38",
+      "windows": 9525,
+      "probe_rate_pct": 55.9,
+      "probes_per_window": 0.8,
+      "usable_final_pct": 86.1,
+      "form_equivalent_usable_pct": 70.8,
+      "topics": 10
+    },
+    {
+      "version": "v39",
+      "windows": 7663,
+      "probe_rate_pct": 55.7,
+      "probes_per_window": 0.84,
+      "usable_final_pct": 86.2,
+      "form_equivalent_usable_pct": 71.6,
+      "topics": 11
+    },
+    {
+      "version": "v41",
+      "windows": 5144,
+      "probe_rate_pct": 54.8,
+      "probes_per_window": 0.83,
+      "usable_final_pct": 87.1,
+      "form_equivalent_usable_pct": 74.2,
+      "topics": 12
+    },
+    {
+      "version": "v43",
+      "windows": 1096,
+      "probe_rate_pct": 43.2,
+      "probes_per_window": 0.61,
+      "usable_final_pct": 85.3,
+      "form_equivalent_usable_pct": 75.3,
+      "topics": 9
+    },
+    {
+      "version": "v46",
+      "windows": 4556,
+      "probe_rate_pct": 74.5,
+      "probes_per_window": 1.4,
+      "usable_final_pct": 89.9,
+      "form_equivalent_usable_pct": 67.9,
+      "topics": 14
+    },
+    {
+      "version": "v48",
+      "windows": 429,
+      "probe_rate_pct": 73.7,
+      "probes_per_window": 1.48,
+      "usable_final_pct": 86.7,
+      "form_equivalent_usable_pct": 64.3,
+      "topics": 6
+    },
+    {
+      "version": "v49",
+      "windows": 3144,
+      "probe_rate_pct": 71.3,
+      "probes_per_window": 1.46,
+      "usable_final_pct": 90.1,
+      "form_equivalent_usable_pct": 70.7,
+      "topics": 12
+    },
+    {
+      "version": "v50",
+      "windows": 1468,
+      "probe_rate_pct": 65.4,
+      "probes_per_window": 1.24,
+      "usable_final_pct": 89.6,
+      "form_equivalent_usable_pct": 72.5,
+      "topics": 11
+    },
+    {
+      "version": "v51",
+      "windows": 12820,
+      "probe_rate_pct": 69.4,
+      "probes_per_window": 1.51,
+      "usable_final_pct": 87.5,
+      "form_equivalent_usable_pct": 66.4,
+      "topics": 21
+    },
+    {
+      "version": "v52",
+      "windows": 16776,
+      "probe_rate_pct": 69.3,
+      "probes_per_window": 1.44,
+      "usable_final_pct": 88.3,
+      "form_equivalent_usable_pct": 68.2,
+      "topics": 24
+    },
+    {
+      "version": "v54",
+      "windows": 14673,
+      "probe_rate_pct": 69.8,
+      "probes_per_window": 1.25,
+      "usable_final_pct": 89.6,
+      "form_equivalent_usable_pct": 70.6,
+      "topics": 22
+    },
+    {
+      "version": "v55",
+      "windows": 4777,
+      "probe_rate_pct": 71.4,
+      "probes_per_window": 1.18,
+      "usable_final_pct": 89.5,
+      "form_equivalent_usable_pct": 71.7,
+      "topics": 15
+    }
+  ],
+  "human_review": {
+    "groups": [
+      {
+        "tag": "acceptable",
+        "sessions": 8761,
+        "windows": 103321,
+        "probes_per_window": 1.07,
+        "probe_rate_pct": 62.5,
+        "usable_final_pct": 86.9,
+        "form_equivalent_usable_pct": 69.2,
+        "recovery_pct": 57.9,
+        "completed_pct": 99.6
+      },
+      {
+        "tag": "unacceptable",
+        "sessions": 569,
+        "windows": 7282,
+        "probes_per_window": 1.32,
+        "probe_rate_pct": 62.4,
+        "usable_final_pct": 76.0,
+        "form_equivalent_usable_pct": 52.0,
+        "recovery_pct": 50.2,
+        "completed_pct": 98.1
+      }
+    ],
+    "contrast": {
+      "usable_final_z": 26.06,
+      "usable_final_p": "9.80e-150"
+    },
+    "tag_counts": {
+      "acceptable": 8762,
+      "unacceptable": 572,
+      "n/a": 499,
+      "suspected_ai": 184,
+      "run-on session": 3,
+      "user_ai_response": 1,
+      "potential_improvement": 1,
+      "session_end_bug": 1,
+      "bot_performance_bad": 1
+    }
+  },
+  "hand_validation": {
+    "labelled": 67,
+    "agreement_pct": 89.6,
+    "ask_precision_pct": 91.7,
+    "probe_precision_pct": 80.0,
+    "by_channel": {
+      "admin": 100.0,
+      "advance": 50.0,
+      "bold": 100.0,
+      "declared": 93.8,
+      "default": 82.4,
+      "overlap": 66.7
+    }
+  },
+  "validation": {
+    "windows_opened_by_declared_position": 95019,
+    "resolved_to_a_catalogue_subpart_pct": 78.4,
+    "needed_a_synthetic_slot": 20549,
+    "note": "share of bot-declared positions that landed on a sub-part the question split derived; the remainder are asks the bot separated but the no-space split left joined"
+  }
+}

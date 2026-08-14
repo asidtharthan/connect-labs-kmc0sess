@@ -60,6 +60,7 @@ function WorkflowUI(props) {
   var esg = React.useState("ALL"); var engSg = esg[0], setEngSg = esg[1];              // cohort-engagement: selected cohort (default ALL — meaningful first view)
   var ell = React.useState("all"); var engLlo = ell[0], setEngLlo = ell[1];            // cohort-engagement: LLO filter (all | COWACDI | EHA)
   var ewin = React.useState("active"); var engWin = ewin[0], setEngWin = ewin[1];      // cohort-engagement: active window | full timeline
+  var emk = React.useState(false); var engMark = emk[0], setEngMark = emk[1];          // full timeline: opt-in active-window boundary annotation (off = clean)
   var ethr = React.useState(2); var engThr = ethr[0], setEngThr = ethr[1];             // active-window threshold: % of started FLWs newly active/week (1 tight | 2 std | 5 loose)
   var eng1Ref = React.useRef(null), eng1Inst = React.useRef(null);
   var eng2Ref = React.useRef(null), eng2Inst = React.useRef(null);
@@ -305,10 +306,44 @@ function WorkflowUI(props) {
     var st = ce.started, fin = ce.finished, N = st.length, tot = st[N - 1] || 1;
     var thr = Math.max(2, (thrPct / 100) * tot), last = 0;
     for (var n = 1; n < N; n++) { if ((st[n] - st[n - 1]) + (fin[n] - fin[n - 1]) >= thr) last = n; }
+    // The final point is an "as of today" stub, not a full week — build_payload_agg appends the data's
+    // last date, which is typically 1-6 days after the previous week-end. Measured against a FULL-WEEK
+    // threshold it almost never qualifies, which silently froze the right-hand edge one period behind:
+    // PANEL charted 83 FLWs finished while the true current figure was 85, so the chart and the KPI
+    // tile above it disagreed on the same screen (Andrea, 2026-08-13).
+    // Include that stub ONLY when it directly continues the active window (last === N-2). The slice is
+    // contiguous, so pulling in the final point of a long-finished cohort would drag every dead week
+    // between along with it — measured: a single late TRS finish would have re-expanded its window from
+    // 7 weeks back to the full 19, which is precisely the inactive tail the trimming exists to remove.
+    if (N >= 2 && last === N - 2 && (st[N - 1] - st[N - 2]) + (fin[N - 1] - fin[N - 2]) > 0) last = N - 1;
     // keep >= 2 points, but never index past the last week: a 1-week series (every newly onboarded
     // cohort passes through one, and per-LLO splits are shorter than the parent) would otherwise
     // return 1 for N===1 and blow up the whole render at full.weeks[aEnd].
     return Math.min(Math.max(last, 1), Math.max(N - 1, 0));
+  }
+  // ALL is a special case. Thresholding the AGGREGATE series is wrong for it: the cutoff is a % of the
+  // WHOLE population (2% of ~1,400 FLWs ~= 28 newly active per week), which a small late-starting
+  // cohort can never reach on its own. That cut the ALL active window at 2026-07-14 while PANEL was
+  // active to 08-11 and EXT to 08-12, hiding 5 weeks of real activity (reported by Mansi 2026-08-13).
+  // The programme is active for as long as ANY cohort is, so take the LATEST per-cohort active end and
+  // map that date back onto the ALL week axis. Week labels are ISO dates, so string compare is safe.
+  function activeEndIdxAll(CE, thrPct) {
+    var all = CE["ALL"];
+    if (!all || !all.weeks || !all.weeks.length) return 0;
+    var latest = "";
+    Object.keys(CE).forEach(function (k) {
+      var c = CE[k];
+      if (k === "ALL" || !c || !Array.isArray(c.weeks) || !c.weeks.length) return;
+      var e = c.weeks[activeEndIdx(c, thrPct)];
+      if (e && e > latest) latest = e;
+    });
+    if (!latest) return activeEndIdx(all, thrPct);
+    for (var i = 0; i < all.weeks.length; i++) { if (all.weeks[i] >= latest) return i; }
+    return all.weeks.length - 1;
+  }
+  // Active-window end for whatever is selected: per-cohort normally, any-cohort-active for ALL.
+  function activeEndFor(sg, ce, thrPct) {
+    return sg === "ALL" ? activeEndIdxAll(DATA.cohortEngagement || {}, thrPct) : activeEndIdx(ce, thrPct);
   }
   // Return a copy of an engagement series sliced to weeks [0..endIdx].
   function sliceCe(ce, endIdx) {
@@ -356,11 +391,14 @@ function WorkflowUI(props) {
     [eng1Inst, eng2Inst, eng3Inst].forEach(function (r) { if (r.current) { r.current.destroy(); r.current = null; } });
     var full = engData(engSg, engLlo);
     if (!full) return;
-    var aEnd = activeEndIdx(full, engThr);
+    var aEnd = activeEndFor(engSg, full, engThr);
     var ce = engWin === "active" ? sliceCe(full, aEnd) : full;
     var labels = ce.weeks.map(fmtWk), gt = ce.gap_thresh;
-    // marker only in full mode (active mode has no tail); shows where the active window ended
-    var apm = activePeriodMarker(full, engWin === "full" ? aEnd : null);
+    // Full timeline is CLEAN by default. The dashed boundary + greyed tail is now opt-in (engMark),
+    // because "Full timeline" reading as "the whole timeline, unannotated" is what people expect and
+    // the marker was being read as part of the data (Mansi, 2026-08-13). The annotation still exists
+    // for the case it was built for — explaining why a finished cohort has a long flat tail.
+    var apm = activePeriodMarker(full, engWin === "full" && engMark ? aEnd : null);
     if (eng1Ref.current) {
       eng1Inst.current = new window.Chart(eng1Ref.current.getContext("2d"), {
         type: "bar",
@@ -378,7 +416,7 @@ function WorkflowUI(props) {
       eng2Inst.current = new window.Chart(eng2Ref.current.getContext("2d"), {
         type: "line",
         data: { labels: labels, datasets: [
-          { label: "Finished: completed all interviews", data: ce.finished_pct, borderColor: "#00695C", backgroundColor: "#00695C" },
+          { label: "Finished: completed all interviews", data: ce.finished_pct, borderColor: "#5E35B1", backgroundColor: "#5E35B1" },
           { label: "Steady: never a gap > " + gt + " days", data: ce.steady_pct, borderColor: "#2E7D32", backgroundColor: "#2E7D32" },
           { label: "Inconsistent: at least one " + (gt + 1) + "+ day gap", data: ce.incons_pct, borderColor: "#F9A825", backgroundColor: "#F9A825" },
           { label: "Dropped off: silent 14+ days (not finished)", data: ce.drop_pct, borderColor: "#C62828", backgroundColor: "#C62828" }
@@ -395,7 +433,7 @@ function WorkflowUI(props) {
       eng3Inst.current = new window.Chart(eng3Ref.current.getContext("2d"), {
         type: "bar",
         data: { labels: labels, datasets: [
-          { label: "Finished: completed all interviews", data: ce.finished, backgroundColor: "#00695C" },
+          { label: "Finished: completed all interviews", data: ce.finished, backgroundColor: "#5E35B1" },
           { label: "Active: interview within last 7 days (started earlier)", data: ce.active, backgroundColor: "#2E7D32" },
           { label: "Started this week (first-ever interview)", data: ce.new, backgroundColor: "#42A5F5" },
           { label: "Slow: last interview 8-14 days ago", data: ce.slow, backgroundColor: "#F9A825" },
@@ -410,15 +448,20 @@ function WorkflowUI(props) {
       });
     }
     return function () { [eng1Inst, eng2Inst, eng3Inst].forEach(function (r) { if (r.current) { r.current.destroy(); r.current = null; } }); };
-  }, [activeTab, funView, engSg, engLlo, engWin, engThr]);
+  }, [activeTab, funView, engSg, engLlo, engWin, engThr, engMark]);
 
   function renderEngagement() {
     var CE = DATA.cohortEngagement || {};
     var sgs = (CE["ALL"] ? ["ALL"] : []).concat(SG_ORDER.filter(function (sg) { return CE[sg]; }));
     var full = engData(engSg, engLlo);
-    var aEnd = full ? activeEndIdx(full, engThr) : 0;
+    var aEnd = full ? activeEndFor(engSg, full, engThr) : 0;
     var hasTail = full && aEnd < full.weeks.length - 1;
     var ce = full ? (engWin === "active" ? sliceCe(full, aEnd) : full) : null;
+    // Windowed vs current finished count. A trimmed cohort legitimately charts a lower final bar
+    // than the KPI tile shows, and comparing the two was exactly the confusion reported on
+    // 2026-08-13 (chart 83 vs actual 85). State both numbers rather than leaving it to be inferred.
+    var finWin = ce && ce.finished ? ce.finished[ce.finished.length - 1] : 0;
+    var finNow = full && full.finished ? full.finished[full.finished.length - 1] : 0;
     var scope = (engSg === "ALL" ? "all cohorts" : engSg) + (engLlo !== "all" ? " · " + engLlo : "");
     return (
       <React.Fragment>
@@ -431,14 +474,38 @@ function WorkflowUI(props) {
           {ce ? <button onClick={downloadEngPng} title="Download all 3 panels as one PNG" className="ml-auto px-3 py-1.5 text-sm rounded-md border border-gray-300 hover:bg-gray-100">↓ PNG</button> : null}
         </div>
         <div className="flex flex-wrap items-center gap-2 px-1">
-          <span className="text-xs font-medium text-gray-600">Window:</span>
-          {subBtn(engWin, "active", setEngWin, "Active window")}
-          {subBtn(engWin, "full", setEngWin, "Full timeline")}
-          <span className="text-gray-400" style={{ fontSize: "10px" }} title="Active window = weeks where enough FLWs were still newly starting or finishing. Full timeline shows the trailing weeks too (marked).">ℹ</span>
-          <span className="mx-1 text-gray-300">|</span>
-          <span className="text-xs font-medium text-gray-600">Cutoff:</span>
-          {[[1, "Tight"], [2, "Standard"], [5, "Loose"]].map(function (o) { return <span key={o[0]}>{subBtn(engThr, o[0], setEngThr, o[1])}</span>; })}
-          <span className="text-gray-400" style={{ fontSize: "10px" }}>min {engThr}%/wk newly active</span>
+          {/* Hide these controls when they cannot do anything, rather than leaving dead buttons that
+              look broken when clicked.
+              - No tail (active window already reaches the last week) => Active/Full render an identical
+                chart and the marker has nothing to mark. True right now for All cohorts, PANEL, ABT3-A,
+                2WT and EXT, i.e. anything still active in the latest week.
+              - All cohorts => the window is derived from the LATEST per-cohort active end, so it is the
+                last week at every cutoff (verified at Tight/Standard/Loose); the cutoff cannot move it
+                either, so that control goes too. */}
+          {hasTail ? (
+            <React.Fragment>
+              <span className="text-xs font-medium text-gray-600">Window:</span>
+              {subBtn(engWin, "active", setEngWin, "Active window")}
+              {subBtn(engWin, "full", setEngWin, "Full timeline")}
+              {engWin === "full" ? (
+                <label className="flex items-center gap-1 text-gray-600 cursor-pointer" style={{ fontSize: "11px" }}
+                       title="Draw a dashed line and shade the weeks after the active window ended. Off by default: Full timeline shows the whole period unannotated.">
+                  <input type="checkbox" checked={engMark} onChange={function (e) { setEngMark(e.target.checked); }} />
+                  mark active-window end
+                </label>
+              ) : null}
+              <span className="text-gray-400" style={{ fontSize: "10px" }} title="Active window = weeks where enough FLWs were still newly starting or finishing. Full timeline shows the trailing weeks too.">ℹ</span>
+              <span className="mx-1 text-gray-300">|</span>
+              <span className="text-xs font-medium text-gray-600">Cutoff:</span>
+              {[[1, "Tight"], [2, "Standard"], [5, "Loose"]].map(function (o) { return <span key={o[0]}>{subBtn(engThr, o[0], setEngThr, o[1])}</span>; })}
+              <span className="text-gray-400" style={{ fontSize: "10px" }}>min {engThr}%/wk newly active</span>
+            </React.Fragment>
+          ) : (
+            <span className="text-gray-500" style={{ fontSize: "11px" }}
+                  title="There is nothing to trim: this selection was still active in the most recent week, so the chart already covers the whole period. The Active window / Full timeline choice would produce an identical chart, so it is hidden.">
+              Showing the full period — {engSg === "ALL" ? "at least one cohort" : engSg} was still active in the latest week, so there are no inactive weeks to trim.
+            </span>
+          )}
         </div>
         {!ce ? (
           <div className="text-sm text-gray-500 px-2 py-6">No engagement data for {scope} yet{engLlo !== "all" ? " (this cohort has no " + engLlo + " FLWs)" : ""}.</div>
@@ -448,19 +515,28 @@ function WorkflowUI(props) {
           var started = full.total_started, finished = full.finished_pct[nf], drop = full.drop_pct[nf];
           var activeNow = full.active[nf];
           var endTxt = full.weeks[aEnd] ? fmtWk(full.weeks[aEnd]) : "";   // guarded; was an inline copy of fmtWk
+          // These four tiles are CURRENT STATE (full series). The charts below may be windowed to an
+          // earlier week, so each tile states its own as-of date. Without that, the tile and the last
+          // point of the chart read as two answers to one question: PANEL showed 12% here and 9% on
+          // the chart, and on TRE the same pair is 92% vs 71% (Andrea, 2026-08-13).
+          var asOf = DATA.today ? " · as of " + fmtWk(DATA.today) : "";
           var kpi = [
-            { label: "Started interviewing", val: started, sub: "unique FLWs", color: "#1565C0" },
-            { label: "Finished", val: finished + "%", sub: "completed all interviews", color: "#00695C" },
-            { label: "Active now", val: activeNow, sub: "interviewed in last 7d", color: "#2E7D32" },
-            { label: "Dropped off", val: drop + "%", sub: "silent 14+, not finished", color: "#C62828" }
+            { label: "Started interviewing", val: started, sub: "unique FLWs" + asOf, color: "#1565C0" },
+            { label: "Finished", val: finished + "%", sub: "completed all interviews" + asOf, color: "#5E35B1" },
+            { label: "Active now", val: activeNow, sub: "interviewed in last 7d" + asOf, color: "#2E7D32" },
+            { label: "Dropped off", val: drop + "%", sub: "silent 14+, not finished" + asOf, color: "#C62828" }
           ];
+          // Windowed reading of the same two headline metrics, for the reconciliation note below.
+          var dropWin = ce.drop_pct ? ce.drop_pct[ce.drop_pct.length - 1] : drop;
+          var finPctWin = ce.finished_pct ? ce.finished_pct[ce.finished_pct.length - 1] : finished;
+          var windowLags = engWin === "active" && hasTail && (dropWin !== drop || finPctWin !== finished);
           return (
             <React.Fragment>
               <div className="text-xs bg-indigo-50 border border-indigo-100 rounded px-3 py-2 text-gray-700">
                 {engSg === "ALL" ? (
                   <span><b>Program-wide roll-up.</b> <b>{started}</b> FLWs have started interviewing across all cohorts; <b>{finished}%</b> have <b>finished</b> their whole schedule and only <b>{drop}%</b> dropped off (silent 14+ without finishing). Cohorts run different-length schedules, so read this as the recruitment + completion picture; for one cohort's engagement detail, pick it above.</span>
                 ) : (
-                  <span><b>Read this as recruitment + engagement, not attrition.</b> Of <b>{started}</b> FLWs who started interviewing in {scope}, <b>{finished}%</b> <b>finished</b> all their interviews and <b>{activeNow}</b> are active right now; only <b>{drop}%</b> truly dropped off (silent 14+ days without finishing). A dip in the retention curve is mostly <i>finishers</i>, <i>later starts</i> and <i>slower cadence</i> — not people quitting.{engWin === "active" && hasTail ? <span> Showing the <b>active window</b> (through ~<b>{endTxt}</b>); switch to Full timeline to see the trailing weeks.</span> : null}</span>
+                  <span><b>Read this as recruitment + engagement, not attrition.</b> Of <b>{started}</b> FLWs who started interviewing in {scope}, <b>{finished}%</b> <b>finished</b> all their interviews and <b>{activeNow}</b> are active right now; only <b>{drop}%</b> truly dropped off (silent 14+ days without finishing). A dip in the retention curve is mostly <i>finishers</i>, <i>later starts</i> and <i>slower cadence</i> — not people quitting.{engWin === "active" && hasTail ? <span> <b>The tiles above are as of {fmtWk(DATA.today)}; the charts below stop at ~{endTxt}</b> (the active window).{windowLags ? <span> So the charts end on <b>{finPctWin}% finished / {dropWin}% dropped</b> while the current figures are <b>{finished}% / {drop}%</b> — the gap is activity in the trimmed weeks, not two different measures.</span> : null} Switch to Full timeline for the complete series.</span> : null}</span>
                 )}
               </div>
               <div className="flex flex-wrap gap-2 px-1">
@@ -481,7 +557,7 @@ function WorkflowUI(props) {
                 <div><b>Panel 1 — recruitment:</b> cumulative FLWs who have started interviewing (appeared in the interview data). Not invited counts.</div>
                 <div><b>Panel 2 — engagement quality:</b> each starter is <b>Finished</b> (completed all their interviews), Steady (never a gap &gt; {ce.gap_thresh} days), Inconsistent (≥1 gap of {ce.gap_thresh + 1}+ days), or Dropped off (silent 14+ days without finishing). Finished outranks the rest — a completer's silence is <i>done</i>, not dropout. <b>Steady is a one-way ratchet</b> — a single long gap moves an FLW to Inconsistent permanently.</div>
                 <div><b>Panel 3 — status now:</b> where every starter stands at each week's end — Finished, Active (≤7d), Started-this-week, Slow (8–14d), Quiet (14+d). Totals equal Panel 1 by construction.</div>
-                <div className="text-gray-400">x-axis is the week-ending date. <b>Active window</b> trims the trailing weeks once fewer than the cutoff ({engThr}%) of the cohort's FLWs are newly starting/finishing per week — so a completed cohort isn't shown as a long inactive tail; <b>Full timeline</b> shows those weeks with the active-window boundary marked. {engSg === "ALL" ? ce.gap_thresh + "-day gap threshold (program-wide default — cohorts here have mixed cadences)" : ce.gap_thresh + " = 2× the " + engSg + " interview cadence"}; the 14-day dropout window is cadence-independent.</div>
+                <div className="text-gray-400">x-axis is the week-ending date. <b>Active window</b> trims the trailing weeks once fewer than the cutoff ({engThr}%) of the cohort's FLWs are newly starting/finishing per week — so a completed cohort isn't shown as a long inactive tail; <b>Full timeline</b> shows the whole period, Apr through today, unannotated — tick “mark active-window end” if you want the boundary drawn. For <b>ALL cohorts</b> the active window runs as long as ANY cohort is still active, so it reaches close to today while individual finished cohorts trim earlier. {engSg === "ALL" ? ce.gap_thresh + "-day gap threshold (program-wide default — cohorts here have mixed cadences)" : ce.gap_thresh + " = 2× the " + engSg + " interview cadence"}; the 14-day dropout window is cadence-independent.</div>
               </Legend>
             </React.Fragment>
           );
@@ -1615,8 +1691,16 @@ function WorkflowUI(props) {
                       ["tier", "Engagement tier — right now"], ["persona", "Persona — whole history"],
                       ["nco", "Cohorts they were in"], ["fin", "Finished a schedule?"],
                       ["peers", "Co-workers in their settlement"], ["pace", "Pace vs their schedule"]];
-          var DIM_COLOR = { state: "#1565C0", llo: "#6d28d9", type: "#00695C", tier: "#0f766e", persona: "#b45309", nco: "#7c3aed", fin: "#065f46",
-                            peers: "#0e7490", pace: "#a16207" };
+          // Nine dimensions, nine clearly separated hues (~40 degrees apart). The previous palette had
+          // four near-identical teal/greens (#00695C type, #0f766e tier, #0e7490 peers, #065f46 fin),
+          // two near-identical violets (#6d28d9 llo, #7c3aed nco) and two near-identical ambers
+          // (#b45309 persona, #a16207 pace) — so at a glance half the panels looked like the same
+          // colour and the panels were hard to tell apart. Status red (#C62828, used for dropped/missed
+          // across the dashboard) is deliberately NOT reused here: these bars are a share of the
+          // selection, not a good/bad signal.
+          var DIM_COLOR = { state: "#1565C0", peers: "#3949AB", llo: "#7B1FA2", nco: "#AD1457",
+                            persona: "#D84315", pace: "#F9A825", tier: "#2E7D32", fin: "#00897B",
+                            type: "#546E7A" };
           var DIM_HELP = {
             tier: "Where the worker is TODAY: a score band blending how recently they interviewed, their completion rate and their answer depth. A worker moves between tiers over time. Because it also rewards recency and answer depth, the top tier is NOT necessarily the highest finish rate.",
             peers: "How many other FLWs work in the same settlement. A proxy for informal peer support, which the community-health-worker literature repeatedly identifies as a retention factor.",
@@ -1632,7 +1716,7 @@ function WorkflowUI(props) {
           if (dimOK) { Object.keys(M.num || {}).forEach(function (k) { NUM[k] = unpackNum(M.num[k]); }); }
           // "Other" is this build's catch-all for tail values; "others" is a REAL cadre in the source
           // data. They looked identical on screen, so the catch-all is renamed and marked everywhere.
-          function isResidual(label) { return label === "Other" || label === "(not recorded)" || label === "Other / not recorded"; }
+          function isResidual(label) { return label === "Other" || label === "(not recorded)" || label === "Other / not recorded" || label === "traditional_birth_attendants"; }
           function residualLabel(label) { return isResidual(label) ? "Other / not recorded" : label; }
           var selKeys = Object.keys(flwSel).filter(function (k) { return (flwSel[k] || []).length; });
           var filtered = selKeys.length > 0;
@@ -1655,20 +1739,26 @@ function WorkflowUI(props) {
           function median(a) { if (!a.length) return 0; var b = a.slice().sort(function (x, y) { return x - y; }); var h = b.length >> 1; return b.length % 2 ? b[h] : Math.round((b[h - 1] + b[h]) / 2); }
           var FIN_IDX = dimOK ? (M.dict.fin || []).indexOf("Finished ≥1 schedule") : -1;
           function stats(mask) {
-            var n = 0, fin = 0, pcf = 0, fd = [], dp = [], deep = [], i;
+            var n = 0, fin = 0, pcf = 0, pcfo = 0, nOff = 0, fd = [], dp = [], deep = [], i;
             for (i = 0; i < mask.length; i++) {
               if (!mask[i]) continue;
               n++;
               if (FIN_IDX >= 0 && +M.col.fin.charAt(i) === FIN_IDX) fin++;
               pcf += (NUM.pcf || [])[i] || 0;
+              // pcfo == 101 means "no cohort of theirs has been fully offered yet", i.e. not measurable.
+              // Those workers are EXCLUDED from this average — counting them as 0 would read as
+              // "finished nothing" when the schedule was never put to them.
+              var _o = (NUM.pcfo || [])[i];
+              if (_o != null && _o <= 100) { pcfo += _o; nOff++; }
               fd.push((NUM.fdepth || [])[i] || 0);
               dp.push((NUM.depth || [])[i] || 0);
               deep.push((NUM.deep || [])[i] || 0);
             }
             return { n: n, any: n ? Math.round(100 * fin / n) : 0, pc: n ? Math.round(pcf / n) : 0,
+                     pco: nOff ? Math.round(pcfo / nOff) : null, nOff: nOff,
                      fdepth: median(fd), depth: median(dp), deep: median(deep) };
           }
-          var SEL = dimOK ? stats(MASK) : { n: N, any: 0, pc: 0, fdepth: 0, depth: 0, deep: 0 };
+          var SEL = dimOK ? stats(MASK) : { n: N, any: 0, pc: 0, pco: null, nOff: 0, fdepth: 0, depth: 0, deep: 0 };
           var ALL = dimOK ? stats(MASK.map(function () { return true; })) : SEL;
           function toggle(dim, idx) {
             var cur = (flwSel[dim] || []).slice(), at = cur.indexOf(idx);
@@ -1701,7 +1791,10 @@ function WorkflowUI(props) {
             // "Engaged, Slipping, Highly engaged, Gone quiet, Lost" and cohort counts "2, 3, 1, 4, 5".
             // Nominal dimensions (state/partner/cadre) still sort by size; ordered ones keep their
             // natural order, and the pooled residual is always pinned last wherever it appears.
-            var ORDERED = { tier: 1, persona: 1, nco: 1 };
+            // peers/pace carry a monotone gradient (peers 52->59->64%, pace 68->49->41%), so they must
+            // render in their natural order. Unlisted dimensions fall through to a count sort, which
+            // printed "Very slow" above "Somewhat slow" and made both panels read as noise.
+            var ORDERED = { tier: 1, persona: 1, nco: 1, peers: 1, pace: 1 };
             if (ORDERED[dim]) rows.sort(function (a, b) { return a.idx - b.idx; });
             else rows.sort(function (a, b) { return b.n - a.n; });
             rows.sort(function (a, b) { return (isResidual(a.label) ? 1 : 0) - (isResidual(b.label) ? 1 : 0); });
@@ -1813,9 +1906,10 @@ function WorkflowUI(props) {
               <div className="flex flex-wrap gap-2 px-1">
                 {card(SEL.n.toLocaleString(), filtered ? "FLWs in selection" : "FLWs analysed",
                       filtered ? Math.round(100 * SEL.n / (M.n || 1)) + "% of all " + N.toLocaleString() : "started ≥1 interview", "#1565C0", "k1")}
-                {card(SEL.n ? SEL.pc + "%" : "—", "Per-cohort finish rate", filtered ? "all FLWs: " + ALL.pc + "%" : "share of THEIR OWN schedules finished, averaged per worker", "#065f46", "k2")}
+                {card(SEL.n ? SEL.pc + "%" : "—", "Per-cohort finish — so far", filtered ? "all FLWs: " + ALL.pc + "%" : "counts schedules still being rolled out as unfinished", "#065f46", "k2")}
+                {SEL.pco == null ? null : card(SEL.pco + "%", "Per-cohort finish — of schedules actually offered", filtered ? "all FLWs: " + (ALL.pco == null ? "—" : ALL.pco + "%") : "the like-for-like rate: only cohorts whose whole schedule was put to them", "#0277BD", "k2b")}
                 {card(SEL.n ? SEL.any + "%" : "—", "Finished ≥1 schedule", filtered ? "all FLWs: " + ALL.any + "%" : "generous — rises with # cohorts", "#2E7D32", "k3")}
-                {card(SEL.n ? SEL.fdepth : "—", "Median words, interview 1", filtered ? "all FLWs: " + ALL.fdepth : "how much they wrote first time", "#6d28d9", "k4")}
+                {card(SEL.n ? SEL.fdepth : "—", "Median words, first interview they did", filtered ? "all FLWs: " + ALL.fdepth : "their first session — not necessarily interview 1 of a schedule", "#6d28d9", "k4")}
                 {card(SEL.n ? "Int " + SEL.deep : "—", "Median furthest interview", filtered ? "all FLWs: Int " + ALL.deep : "how far through a schedule they got", "#b45309", "k5")}
               </div>
 
@@ -1842,7 +1936,7 @@ function WorkflowUI(props) {
                   </div>
                   <div>
                     <div className="text-sm font-semibold text-gray-700 mb-1">Finish rate by FLW type</div>
-                    {(FE.byType || []).map(function (s) { return bar(s.k + " (n=" + s.n + ")", s.finished, "#00695C", s.finished + "%", "ty" + s.k); })}
+                    {(FE.byType || []).map(function (s) { return bar(s.k + " (n=" + s.n + ")", s.finished, "#5E35B1", s.finished + "%", "ty" + s.k); })}
                   </div>
                   <div>
                     <div className="text-sm font-semibold text-gray-700 mb-1">Finish rate by LLO</div>
@@ -1867,7 +1961,7 @@ function WorkflowUI(props) {
               {/* How deep FLWs get */}
               <div>
                 <div className="text-sm font-semibold text-gray-700 mb-1">How far through the schedule FLWs get{globalTag}</div>
-                <p className="text-gray-400 mb-1" style={{ fontSize: "10px" }}>Share reaching each interview, as a % of the FLWs whose schedule even <i>contains</i> that interview (a 2-interview TRS worker is not a drop-out at interview 3). The grey number is the old "% of everyone" reading.</p>
+                <p className="text-gray-400 mb-1" style={{ fontSize: "10px" }}>Share reaching each interview, as a % of the FLWs whose schedule even <i>contains</i> that interview (a 2-interview TRS worker is not a drop-out at interview 3). Each row has its own denominator, so a later interview can show a HIGHER share than an earlier one — the pool shrinks as short-schedule cohorts drop out of it (e.g. the 119 TRE workers leave after interview 5). Compare each row to its own count, not to the row above.</p>
                 {(FE.survival || []).map(function (s) {
                   var p = (s.pct_elig == null ? s.pct : s.pct_elig);
                   return bar("reached Int≥" + s.d, p, "#1565C0",
@@ -1943,7 +2037,7 @@ function WorkflowUI(props) {
 
               <Legend title="How this is built">
                 <div><b>Grain:</b> one row per unique FLW (deduped across cohorts); metrics union their sessions across every arm.</div>
-                <div><b>Per-cohort finish rate:</b> of all the cohort schedules an FLW was enrolled in, the share they completed. This is the comparable measure — unlike "finished ≥1 schedule", it does not go up simply because someone was in more cohorts.</div>
+                <div><b>Per-cohort finish rate:</b> of all the cohort schedules an FLW was enrolled in, the share they have completed <b>so far</b>. Unlike "finished 1+ schedule" it does not rise simply from being in more cohorts — but read the multi-vs-single comparison with care, because it does not fall neutrally either: <b>about 22% of enrolment slots have not yet had their full schedule triggered</b>, those count as unfinished, and multi-cohort workers are more likely to be carrying one. The measure therefore understates finishing for everyone, and slightly more for multi-cohort workers.</div>
                 <div><b>Tier (RFM):</b> Recency + completion rate + answer depth, each scored 1–5. Recency is measured against the freshest session in the dataset, not the wall clock, so a lagging data pull cannot push everyone into a worse tier.</div>
                 <div><b>Persona:</b> rule-based behavioural segment. "Partial progress" means ≥50% of triggered interviews done but <i>no</i> schedule finished (it was previously labelled "Slow-but-finishing", which described the opposite of what it selects).</div>
                 <div><b>Drill-down:</b> the tab holds one character per FLW per dimension — attributes only, no identifier — so filtering happens in your browser. "×N" is the group's share of your selection divided by its share of all FLWs.</div>
