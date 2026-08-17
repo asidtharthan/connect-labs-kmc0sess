@@ -134,6 +134,12 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     // FLW, so every worker keeps representation rather than the busiest ones crowding out
     // the rest -- see filter_visits_for_audit.
     const [samplePct, setSamplePct] = React.useState(runState.sample_percentage != null ? runState.sample_percentage : 100);
+    // Hard cap on photos per field worker. sample_percentage is proportional, so a worker with 200
+    // visits still contributes ~8x one with 25 — the busiest crowd out the rest and the volume of a
+    // run is unpredictable. A flat cap fixes both: 100 workers x 20 = 2,000 photos, whatever the
+    // activity. Implemented via the preview endpoint (see previewFlwVisits) because AuditCriteria
+    // cannot express "last N per worker WITHIN a date window" — last_n_per_flw ignores the window.
+    const [maxPerFlw, setMaxPerFlw] = React.useState(runState.max_per_flw != null ? runState.max_per_flw : '');
     // Per-opp agent override. Defaults come from scale hardware; an override is kept per
     // opportunity so a mixed-hardware program (46 has both) stays correct.
     const [agentOverride, setAgentOverride] = React.useState(runState.agent_override || {});
@@ -245,6 +251,37 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
         };
     };
 
+    // Ask the server which visits an opportunity has in the window, then decide ourselves which of
+    // them to audit. The preview returns each worker with their visit ids, so capping per worker is
+    // a client-side trim — and passing the resulting ids back as flw_visit_ids also lets the
+    // creation task skip its own visit-fetch stage entirely.
+    const csrfToken = () => (
+        (document.getElementById('workflow-root') && document.getElementById('workflow-root').dataset
+            && document.getElementById('workflow-root').dataset.csrfToken)
+        || (document.querySelector('[name=csrfmiddlewaretoken]') && document.querySelector('[name=csrfmiddlewaretoken]').value)
+        || ''
+    );
+    const previewFlwVisits = async (oppId) => {
+        const res = await fetch('/audit/api/audit/preview/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
+            body: JSON.stringify({
+                opportunities: [oppId],
+                criteria: {
+                    audit_type: 'date_range',
+                    startDate: startDate,
+                    endDate: endDate,
+                    sample_percentage: Number(samplePct) > 0 ? Number(samplePct) : 100,
+                },
+            }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data || !data.success || !data.preview) {
+            throw new Error((data && data.error) || ('preview failed (HTTP ' + res.status + ')'));
+        }
+        return data.preview.flws || [];
+    };
+
     const handleCreate = async () => {
         if (!selected.length || !startDate || !endDate || isRunning) return;
         setIsRunning(true); setRunError(null);
@@ -253,6 +290,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
         await onUpdateState({
             selected_opps: selected, window_start: startDate, window_end: endDate,
             date_preset: datePreset, sample_percentage: Number(samplePct),
+            max_per_flw: maxPerFlw === '' ? null : Number(maxPerFlw),
             agent_override: agentOverride,
         });
 
@@ -274,9 +312,33 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                 const oid = selected[k];
                 // One single-opportunity audit per opp. Multi-opp routing is deliberately
                 // not used — it produced zero sessions for non-home opportunities.
+                const criteria = buildCriteria(oid);
+                let flwVisitIds = null;
+                const cap = maxPerFlw === '' ? 0 : Number(maxPerFlw);
+                if (cap > 0) {
+                    try {
+                        setProgress({ status: 'running', message: 'Selecting photos for ' + oppLabel(oid) + '…', processed: done, total: total });
+                        const flws = await previewFlwVisits(oid);
+                        flwVisitIds = {};
+                        const chosen = [];
+                        flws.forEach(f => {
+                            const ids = (f.visit_ids || []).slice(0, cap);
+                            if (ids.length) { flwVisitIds[f.username] = ids; chosen.push(f.username); }
+                        });
+                        criteria.selected_flw_user_ids = chosen;
+                    } catch (e) {
+                        // A preview failure must not silently become an uncapped run — that is how a
+                        // 2,000-photo batch turns into 20,000. Skip this opportunity and say so.
+                        failed += 1;
+                        setRunError('Could not select photos for ' + oppLabel(oid) + ' (' + (e.message || e) + ') — skipped rather than running it uncapped.');
+                        await onOne();
+                        continue;
+                    }
+                }
                 const res = await actions.createAudit({
                     opportunities: [{ id: oid, name: oppLabel(oid) }],
-                    criteria: buildCriteria(oid),
+                    criteria: criteria,
+                    flw_visit_ids: flwVisitIds || undefined,
                     workflow_run_id: instance.id,
                     ai_agent_id: effectiveAgent(oid),
                 });
@@ -678,7 +740,30 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                 <span className="text-xs text-gray-400">{Number(samplePct) >= 100 ? 'census' : 'per FLW'}</span>
                             </div>
                         </div>
+                        <div>
+                            <label className="block text-xs text-gray-500 mb-1"
+                                title="A hard ceiling on photos per field worker. Sample % is proportional, so a worker with 200 visits contributes far more than one with 25. A cap makes every worker count the same and makes the size of a run predictable.">
+                                Max photos per worker
+                            </label>
+                            <div className="flex items-center gap-2">
+                                <input type="number" min="1" value={maxPerFlw} placeholder="no cap"
+                                    onChange={(e) => setMaxPerFlw(e.target.value === '' ? '' : Math.max(1, Number(e.target.value)))}
+                                    className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm w-24" />
+                                {maxPerFlw !== '' ? (
+                                    <span className="text-xs text-gray-400">≈ {selected.length * 25 * Number(maxPerFlw)} photos max</span>
+                                ) : <span className="text-xs text-gray-400">unbounded</span>}
+                            </div>
+                        </div>
                     </div>
+                    {maxPerFlw !== '' ? (
+                        <p className="text-xs text-gray-600 mt-2 bg-gray-50 border border-gray-200 rounded px-3 py-2">
+                            <i className="fa-solid fa-circle-info mr-1 text-gray-400"></i>
+                            With a cap set, the workflow first asks which visits exist in the window, then picks up to{' '}
+                            <span className="font-medium">{maxPerFlw}</span> per worker and audits exactly those. Every
+                            worker counts equally regardless of how busy they were, and the run size is predictable.
+                            If that selection step fails for an opportunity it is skipped rather than run uncapped.
+                        </p>
+                    ) : null}
                     <p className="text-xs text-gray-500 mt-3">
                         Sample % is the only volume control this backend honours for a date-range audit —
                         there is no cap on FLW count, and per-FLW visit limits apply only to "last N per FLW"
