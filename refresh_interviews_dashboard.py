@@ -196,18 +196,35 @@ def push(render_code):
     print(f"\n=== 8. push render to workflow {WORKFLOW_ID} via MCP ({url}) ===", flush=True)
     sid = {"v": None}
 
-    def _live_version():
-        """Current published version, on a fresh session so a wedged one cannot mask the answer."""
-        return _mcp_call(
-            url, auth, "workflow_get",
-            {"workflow_id": WORKFLOW_ID, "opportunity_id": OWNER_OPP, "include_render_code": False},
-            {"v": None}, timeout=60,
-        ).get("render_code_version")
+    def _live_version(tries=3):
+        """Current published version, on a fresh session so a wedged one cannot mask the answer.
+
+        Retried: this read is small, idempotent and safe to repeat, and a single flaky attempt used to
+        sink the whole publish. The 2026-08-15 05:00 run passed all 198 gates and then aborted on
+        `could not read current version: TimeoutError` — the write path had 3 retries but this
+        pre-read had none, so one blip at the MCP endpoint discarded a good build. It is also the
+        function used to resolve an ambiguous write, so it must be the most robust call here, not the
+        most fragile.
+        """
+        last = None
+        for attempt in range(1, tries + 1):
+            try:
+                return _mcp_call(
+                    url, auth, "workflow_get",
+                    {"workflow_id": WORKFLOW_ID, "opportunity_id": OWNER_OPP, "include_render_code": False},
+                    {"v": None}, timeout=120,
+                ).get("render_code_version")
+            except Exception as e:
+                last = e
+                print(f"    version read attempt {attempt}/{tries} failed: {repr(e)[:160]}", flush=True)
+                if attempt < tries:
+                    time.sleep(10 * attempt)
+        raise last
 
     try:
         v0 = _live_version()
     except Exception as e:
-        print(f"--- push FAILED: could not read current version: {repr(e)[:200]}", flush=True)
+        print(f"--- push FAILED: could not read current version after retries: {repr(e)[:200]}", flush=True)
         return False
 
     # The write is retried, but a read TIMEOUT is ambiguous — the server may well have applied the
@@ -355,8 +372,17 @@ def main():
     # job exits green while the dashboard silently stays on the old render. (Root-caused 2026-07-07: an
     # expired MCP_BEARER made push() print "FAILED" and return False, yet the run still reported success.)
     if args.push and not pushed_version:
-        print("\nABORT: --push requested but publish FAILED (see step 8) — failing the job so it is not "
-              "silently left un-published. Most likely the MCP_BEARER token expired; re-mint it.", flush=True)
+        # Don't guess at the cause. This message used to assert "most likely the MCP_BEARER token
+        # expired", which sent the 2026-08-15 investigation down the wrong path: that run's gates all
+        # passed and the failure was a plain read TIMEOUT, not auth. Step 8 now prints the real
+        # exception per attempt — point at it instead of speculating.
+        print("\nABORT: --push requested but publish FAILED (see step 8 above for the actual error) — "
+              "failing the job so it is not silently left un-published.\n"
+              "  * TimeoutError / TransportError  -> transient MCP slowness; retries are already in "
+              "place, so a failure here means all of them timed out. Re-running usually clears it.\n"
+              "  * 401 / 403 / auth              -> MCP_BEARER expired; re-mint it.\n"
+              "  * version moved unexpectedly    -> something else published meanwhile; do not force.",
+              flush=True)
         sys.exit(1)
     # 9: record this run in the regression-guard history — ONLY after a confirmed publish. This file
     # (_run_history.json) is the baseline tomorrow's brutal_verify section H compares against, and it
