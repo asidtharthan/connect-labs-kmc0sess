@@ -112,6 +112,10 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     const WEIGHT_IMAGE_PATH = cfg.weight_image_path || 'anthropometric/upload_weight_image';
     const WEIGHT_FIELD_PATH = cfg.weight_field_path || 'child_weight_visit';
     const AGENT_FOR_SCALE = cfg.agent_for_scale || { digital: 'scale_validation', dial: 'scale_dial_read' };
+    // Sessions created by a scale-hardware probe carry this tag so they can be told apart from real
+    // audit sessions and excluded from every figure the run reports.
+    const SCALE_CHECK_TAG = 'kmc_scale_check';
+    const SCALE_CHECK_PHOTOS = 8;
 
     const allOppIds = Object.keys(OPP_META).map(s => parseInt(s, 10)).sort((a, b) => a - b);
     const meta = (id) => OPP_META[String(id)] || {};
@@ -185,8 +189,14 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     // ── Sessions, merged across every opportunity in the run ───────────────────
     // Sessions are stored scoped per opportunity, so a single unscoped fetch returns only
     // the home opp's — which is exactly how a working run comes to report "0 sessions".
-    const [sessions, setSessions] = React.useState([]);
+    const [rawSessions, setRawSessions] = React.useState([]);
     const [loadingSessions, setLoadingSessions] = React.useState(true);
+    // Scale-check probes create real audit sessions, but they are diagnostics rather than part of
+    // the audit: a handful of photos deliberately scored by the agent we believe is WRONG, to see
+    // whether it can read the scale at all. Keep them out of every roll-up — otherwise a probe
+    // surfaces as a field worker with a catastrophic score and drags the run's figures with it.
+    const sessions = React.useMemo(
+        () => rawSessions.filter(s => s.tag !== SCALE_CHECK_TAG), [rawSessions]);
     const refreshSessions = () => {
         const ids = (selected.length ? selected : allOppIds);
         if (!instance.id || !ids.length) { setLoadingSessions(false); return Promise.resolve([]); }
@@ -198,7 +208,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
         )).then(arrs => {
             const seen = {}; const all = [];
             arrs.forEach(list => list.forEach(s => { if (!seen[s.id]) { seen[s.id] = true; all.push(s); } }));
-            setSessions(all); setLoadingSessions(false); return all;
+            setRawSessions(all); setLoadingSessions(false); return all;
         }).catch(() => { setLoadingSessions(false); return []; });
     };
     React.useEffect(() => { refreshSessions(); }, [instance.id]);
@@ -592,6 +602,117 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
         setCompleting(false);
     };
 
+    // ── Scale hardware check ──────────────────────────────────────────────────
+    // Three opportunities ship with unverified: true and fall back to the digital agent. If that
+    // guess is wrong every verdict they produce is worthless — and it fails silently, because a
+    // wrong-hardware agent returns confident no-matches rather than errors. The probe runs the
+    // agent we are NOT using over a few photos: a wrong-hardware agent scores near zero (the digital
+    // agent on NAMA's dial photos previously returned 0 pass / 18 fail), so a real match rate from
+    // the other agent is the tell. Only the non-default agent is run — half the classifier calls,
+    // and less exposed to the timeouts that are currently costing digital two calls in three.
+    // Classify the probe. Errors are excluded from the denominator on purpose: a timeout is the
+    // service failing, not evidence about the hardware, and counting it as a non-match would let a
+    // bad afternoon on the classifier silently "prove" the wrong answer. Too few real verdicts and
+    // the honest result is 'inconclusive' rather than a guess dressed up as a finding.
+    const scaleVerdict = (match, noMatch, errored, testedName, testedKind) => {
+        const scored = match + noMatch;
+        if (scored < 3) {
+            return { verdict: 'inconclusive',
+                detail: 'Only ' + scored + ' of ' + (scored + errored) + ' calls returned a verdict — the rest '
+                    + 'failed. That is a service problem, not an answer about the hardware. Try again later.' };
+        }
+        if (match / scored >= 0.5) {
+            return { verdict: testedKind,
+                detail: testedName + ' read ' + match + ' of ' + scored + ' photos correctly. It can read this '
+                    + 'scale, so this opportunity looks like ' + testedKind + ' — not what it is set to now.' };
+        }
+        if (match === 0) {
+            return { verdict: 'keep',
+                detail: testedName + ' read none of ' + scored + ' photos. It cannot read this scale, so the '
+                    + 'current setting is very likely right.' };
+        }
+        return { verdict: 'unclear',
+            detail: testedName + ' read only ' + match + ' of ' + scored + '. Not a clean answer — widen the '
+                + 'window for a bigger sample, or open a photo and look.' };
+    };
+    const [scaleMode, setScaleMode] = React.useState({});   // oppId -> 'dial' | 'digital' | 'test'
+    const [scaleTest, setScaleTest] = React.useState({});   // oppId -> probe state/result
+    const setMode = (id, mode) => {
+        setScaleMode(prev => Object.assign({}, prev, { [String(id)]: mode }));
+        if (mode === 'dial' || mode === 'digital') {
+            setAgentOverride(prev => Object.assign({}, prev, { [String(id)]: AGENT_FOR_SCALE[mode] }));
+        }
+    };
+    const modeOf = (id) => scaleMode[String(id)]
+        || (effectiveAgent(id) === AGENT_FOR_SCALE.dial ? 'dial' : 'digital');
+
+    const runScaleCheck = async (oid) => {
+        const cur = effectiveAgent(oid);
+        const other = cur === AGENT_FOR_SCALE.dial ? AGENT_FOR_SCALE.digital : AGENT_FOR_SCALE.dial;
+        const otherKind = other === AGENT_FOR_SCALE.dial ? 'dial' : 'digital';
+        if (!startDate || !endDate) {
+            setScaleTest(p => Object.assign({}, p, { [oid]: { error: 'Set the window first.' } }));
+            return;
+        }
+        setScaleTest(p => Object.assign({}, p, { [oid]: { running: true, tested: other, kind: otherKind } }));
+        try {
+            const flws = await previewFlwVisits(oid);
+            const picked = {}; let count = 0;
+            flws.forEach(f => {
+                if (count >= SCALE_CHECK_PHOTOS) return;
+                const ids = (f.visit_ids || []).slice(0, SCALE_CHECK_PHOTOS - count);
+                if (ids.length) { picked[f.username] = ids; count += ids.length; }
+            });
+            if (!count) {
+                setScaleTest(p => Object.assign({}, p, { [oid]: {
+                    error: 'No weight photos for this opportunity between ' + startDate + ' and ' + endDate
+                        + '. Widen the window and try again.' } }));
+                return;
+            }
+            const criteria = buildCriteria(oid);
+            criteria.title = 'Scale hardware check · ' + oppLabel(oid);
+            criteria.tag = SCALE_CHECK_TAG;
+            criteria.selected_flw_user_ids = Object.keys(picked);
+            const res = await actions.createAudit({
+                opportunities: [{ id: oid, name: oppLabel(oid) }],
+                criteria: criteria,
+                flw_visit_ids: picked,
+                workflow_run_id: instance.id,
+                ai_agent_id: other,
+            });
+            if (!(res && res.success && res.task_id)) throw new Error('could not start the check');
+            setScaleTest(p => Object.assign({}, p, { [oid]: {
+                running: true, tested: other, kind: otherKind, photos: count,
+                message: 'Scoring ' + count + ' photos with ' + agentName(other) + '…' } }));
+            await new Promise((resolve) => {
+                let settled = false;
+                const finish = () => { if (!settled) { settled = true; resolve(); } };
+                const guard = setTimeout(finish, 15 * 60 * 1000);
+                cleanupsRef.current.push(actions.streamAuditProgress(res.task_id,
+                    () => {},
+                    () => { clearTimeout(guard); finish(); },
+                    () => { clearTimeout(guard); finish(); }));
+            });
+            const all = await refreshSessions();
+            let match = 0, noMatch = 0, errored = 0, seen = 0;
+            (all || []).forEach(s => {
+                if (s.tag !== SCALE_CHECK_TAG) return;
+                if ((s._opp || s.opportunity_id) !== oid) return;
+                const st = s.assessment_stats || {};
+                seen += s.visit_count || 0;
+                match += st.ai_match || 0; noMatch += st.ai_no_match || 0; errored += st.ai_error || 0;
+            });
+            const v = scaleVerdict(match, noMatch, errored, agentName(other), otherKind);
+            const verdict = v.verdict, detail = v.detail;
+            setScaleTest(p => Object.assign({}, p, { [oid]: {
+                tested: other, kind: otherKind, photos: seen, match: match, noMatch: noMatch,
+                errored: errored, verdict: verdict, detail: detail } }));
+        } catch (e) {
+            setScaleTest(p => Object.assign({}, p, { [oid]: {
+                error: String(e && e.message ? e.message : e) } }));
+        }
+    };
+
     const downloadCsv = () => {
         const head = ['FLW', 'Username', 'LLO', 'Opportunity', 'Opp ID', 'Scale', 'Agent', 'Photos',
             'AI reviewed', 'AI match', 'AI no match', 'AI errored', 'Never reviewed',
@@ -946,10 +1067,25 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {selected.map(id => (
+                                    {selected.map(id => {
+                                        const t = scaleTest[id] || {};
+                                        return [
                                         <tr key={id} className="border-t border-gray-100">
                                             <td className="px-3 py-2 whitespace-nowrap">{oppLabel(id)}</td>
-                                            <td className="px-3 py-2"><ScalePill kind={scaleOf(id)} unverified={meta(id).unverified} /></td>
+                                            <td className="px-3 py-2">
+                                                <select value={modeOf(id)} onChange={(e) => setMode(id, e.target.value)}
+                                                    className={'border rounded-lg px-2 py-1 text-sm '
+                                                        + (modeOf(id) === 'test' ? 'border-amber-400 text-amber-800' : 'border-gray-300')}>
+                                                    <option value="dial">Dial (analog)</option>
+                                                    <option value="digital">Digital</option>
+                                                    <option value="test">Test &amp; confirm…</option>
+                                                </select>
+                                                {meta(id).unverified ? (
+                                                    <div className="text-xs text-amber-700 mt-1">
+                                                        <i className="fa-solid fa-circle-question mr-1"></i>unconfirmed hardware
+                                                    </div>
+                                                ) : null}
+                                            </td>
                                             <td className="px-3 py-2">
                                                 <select
                                                     value={effectiveAgent(id)}
@@ -964,8 +1100,62 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                                     ))}
                                                 </select>
                                             </td>
-                                        </tr>
-                                    ))}
+                                        </tr>,
+                                        modeOf(id) === 'test' ? (
+                                            <tr key={id + '-check'} className="bg-amber-50/50 border-t border-amber-100">
+                                                <td colSpan={3} className="px-3 py-3">
+                                                    <div className="text-xs text-gray-700 mb-2">
+                                                        Runs <span className="font-medium">{agentName(
+                                                            effectiveAgent(id) === AGENT_FOR_SCALE.dial
+                                                                ? AGENT_FOR_SCALE.digital : AGENT_FOR_SCALE.dial)}</span> —
+                                                        the agent this opportunity is <span className="font-medium">not</span> using —
+                                                        over {SCALE_CHECK_PHOTOS} photos. If it can read the scale, the hardware is
+                                                        set wrong. Creates a small audit tagged as a check; it is kept out of every
+                                                        figure this run reports.
+                                                    </div>
+                                                    <button onClick={() => runScaleCheck(id)} disabled={!!t.running}
+                                                        className="px-3 py-1.5 text-sm rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50">
+                                                        <i className={'mr-1.5 fa-solid ' + (t.running ? 'fa-spinner fa-spin' : 'fa-flask')}></i>
+                                                        {t.running ? (t.message || 'Checking…') : 'Run hardware check'}
+                                                    </button>
+                                                    {t.error ? (
+                                                        <div className="text-xs text-red-700 mt-2">{t.error}</div>
+                                                    ) : null}
+                                                    {t.verdict ? (
+                                                        <div className={'mt-2 text-xs rounded p-2 border '
+                                                            + (t.verdict === 'inconclusive' || t.verdict === 'unclear'
+                                                                ? 'bg-gray-50 border-gray-200 text-gray-700'
+                                                                : 'bg-white border-amber-300 text-gray-800')}>
+                                                            <div className="font-semibold mb-0.5">
+                                                                {t.verdict === 'dial' || t.verdict === 'digital'
+                                                                    ? 'Looks like ' + t.verdict.toUpperCase()
+                                                                    : t.verdict === 'keep' ? 'Current setting looks right'
+                                                                        : t.verdict === 'unclear' ? 'Unclear' : 'Inconclusive'}
+                                                            </div>
+                                                            <div>{t.detail}</div>
+                                                            <div className="text-gray-500 mt-1">
+                                                                {agentName(t.tested)} on {t.photos} photo(s): {t.match} match ·
+                                                                {' '}{t.noMatch} no match · {t.errored} errored
+                                                            </div>
+                                                            {(t.verdict === 'dial' || t.verdict === 'digital') ? (
+                                                                <div className="mt-2">
+                                                                    <button onClick={() => setMode(id, t.kind)}
+                                                                        className="px-2 py-1 rounded bg-amber-600 text-white hover:bg-amber-700">
+                                                                        Use {t.kind} for this run
+                                                                    </button>
+                                                                    <span className="ml-2 text-gray-600">
+                                                                        To make it permanent, tell Claude: "set opportunity {id} to {t.kind}".
+                                                                        The page cannot write workflow config — there is no API for it.
+                                                                    </span>
+                                                                </div>
+                                                            ) : null}
+                                                        </div>
+                                                    ) : null}
+                                                </td>
+                                            </tr>
+                                        ) : null,
+                                        ];
+                                    })}
                                 </tbody>
                             </table>
                         </div>
