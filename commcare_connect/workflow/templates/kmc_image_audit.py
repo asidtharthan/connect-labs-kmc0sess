@@ -207,6 +207,31 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     const [isRunning, setIsRunning] = React.useState(false);
     const [progress, setProgress] = React.useState(null);
     const [runError, setRunError] = React.useState(null);
+    // One screen, one job. Showing the trigger controls next to the results of a finished run
+    // invites re-firing by accident and makes it unclear whether what is on screen is a plan or an
+    // outcome. Phase is derived rather than stored, so a page reload lands in the right place;
+    // 'newRun' is the only manual override, for deliberately configuring another run.
+    const [newRun, setNewRun] = React.useState(false);
+    const phase = isRunning ? 'running' : ((sessions.length && !newRun) ? 'results' : 'config');
+
+    // Per-session image detail, loaded on demand. The sessions list carries only counts, so the
+    // reason a photo failed (the classifier's own message) has to come from the bulk-data endpoint.
+    const [expanded, setExpanded] = React.useState(null);
+    const [detail, setDetail] = React.useState({});
+    const loadDetail = (sessionId) => {
+        if (expanded === sessionId) { setExpanded(null); return; }
+        setExpanded(sessionId);
+        if (detail[sessionId]) return;
+        setDetail(prev => Object.assign({}, prev, { [sessionId]: { loading: true } }));
+        fetch('/audit/api/' + sessionId + '/bulk-data/')
+            .then(r => r.json())
+            .then(d => {
+                const rows = (d && (d.assessments || (d.data && d.data.assessments))) || [];
+                setDetail(prev => Object.assign({}, prev, { [sessionId]: { loading: false, rows: rows } }));
+            })
+            .catch(e => setDetail(prev => Object.assign({}, prev,
+                { [sessionId]: { loading: false, error: String(e && e.message ? e.message : e) } })));
+    };
     const cleanupsRef = React.useRef([]);
     React.useEffect(() => () => { cleanupsRef.current.forEach(c => { try { if (c) c(); } catch (e) {} }); }, []);
 
@@ -437,6 +462,57 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
         });
     }, [sessions]);
 
+    // ── One row per field worker, the unit people actually act on ─────────────
+    // Human review status is deliberately separate from the AI verdict: a photo the AI matched is
+    // still "pending" until a person signs it off, which is what "unless reviewed by a user the
+    // status is pending" means. Conflating the two would let an unreviewed run look complete.
+    const flwRows = React.useMemo(() => {
+        return sessions.map(s => {
+            const st = s.assessment_stats || {};
+            const oid = s._opp || s.opportunity_id;
+            const photos = s.visit_count || 0;
+            const assessed = st.total || 0;
+            const pass = st.pass || 0;
+            const fail = st.fail || 0;
+            const pending = st.pending || 0;
+            const humanDone = pass + fail;
+            return {
+                id: s.id, opp: oid, llo: (meta(oid).llo || '?'),
+                flw: s.flw_display_name || s.flw_username || ('Session ' + s.id),
+                username: s.flw_username || '',
+                photos: photos, assessed: assessed,
+                match: st.ai_match || 0, noMatch: st.ai_no_match || 0, error: st.ai_error || 0,
+                pass: pass, fail: fail, pending: pending,
+                neverReviewed: Math.max(0, photos - assessed),
+                pctPassed: humanDone > 0 ? Math.round(100 * pass / humanDone) : null,
+                reviewStatus: humanDone === 0 ? 'Pending' : (pending > 0 ? 'In review' : 'Reviewed'),
+                sessionStatus: s.status || 'open',
+            };
+        }).sort((a, b) => (b.neverReviewed - a.neverReviewed) || (b.noMatch - a.noMatch)
+            || (b.error - a.error) || String(a.flw).localeCompare(String(b.flw)));
+    }, [sessions]);
+
+    const downloadCsv = () => {
+        const head = ['FLW', 'Username', 'LLO', 'Opportunity', 'Opp ID', 'Scale', 'Agent', 'Photos',
+            'AI reviewed', 'AI match', 'AI no match', 'AI errored', 'Never reviewed',
+            'Human pass', 'Human fail', 'Human pending', '% passed', 'Review status'];
+        const esc = (v) => {
+            const s = (v == null ? '' : String(v));
+            return /[",\\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+        };
+        const lines = [head.join(',')].concat(flwRows.map(r => [
+            r.flw, r.username, r.llo, oppLabel(r.opp), r.opp, scaleOf(r.opp), agentName(effectiveAgent(r.opp)),
+            r.photos, r.assessed, r.match, r.noMatch, r.error, r.neverReviewed,
+            r.pass, r.fail, r.pending, (r.pctPassed == null ? '' : r.pctPassed), r.reviewStatus,
+        ].map(esc).join(',')));
+        // Leading BOM so Excel opens the file as UTF-8 rather than mangling non-ASCII worker names.
+        const blob = new Blob(['\\ufeff' + lines.join('\\r\\n')], { type: 'text/csv;charset=utf-8;' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'kmc-image-audit-run' + instance.id + '.csv';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    };
+
     // ── Warnings: things a reader would otherwise mis-conclude ────────────────
     const warnings = [];
     // Leads the list on purpose. An unfinished run is worse than a failed one: it looks like a
@@ -516,6 +592,13 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
 
     const hasCreated = sessions.length > 0;
 
+    // In config the coverage list is what you have picked; afterwards it is what the run actually
+    // produced, with FLW and photo counts filled in. Same component, two truths, never mixed.
+    const coverage = (phase === 'config')
+        ? selected.map(id => ({ opp: id, llo: meta(id).llo || ('#' + id), flws: null, photos: null }))
+        : rollup.byOpp.map(o => ({ opp: o.opp, llo: o.llo, flws: o.sessions, photos: o.images }));
+    const winLabel = (startDate && endDate) ? (startDate + ' → ' + endDate) : 'no window set';
+
     return (
         <div className="space-y-5 pb-10">
             {/* Header */}
@@ -534,6 +617,71 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                         Registration photos not audited
                     </span>
                 </div>
+
+                {/* Which LLOs and opportunities this run covers — stated on every phase, so it is
+                    never ambiguous what a screenful of numbers is about. */}
+                <div className="mt-4 pt-4 border-t border-gray-100">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                            {phase === 'config' ? 'Selected for this run' : 'This run covers'}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                            {winLabel}
+                            {Number(samplePct) < 100 ? ' · ' + samplePct + '% sample' : ' · census'}
+                            {maxPerFlw !== '' ? ' · max ' + maxPerFlw + '/worker' : ''}
+                        </span>
+                    </div>
+                    {coverage.length ? (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                            {coverage.map(c => (
+                                <span key={c.opp} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border border-gray-200 bg-gray-50 text-xs">
+                                    <span className="font-semibold text-gray-900">{c.llo}</span>
+                                    <span className="text-gray-500">{meta(c.opp).version}</span>
+                                    <span className="text-gray-400">{meta(c.opp).country}</span>
+                                    <span className="text-gray-400 font-mono">#{c.opp}</span>
+                                    <ScalePill kind={scaleOf(c.opp)} unverified={meta(c.opp).unverified} />
+                                    {c.flws != null ? <span className="text-gray-500">{c.flws} FLW{c.flws === 1 ? '' : 's'}</span> : null}
+                                    {c.photos != null ? <span className="text-gray-500">{c.photos} photos</span> : null}
+                                </span>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="mt-2 text-xs text-gray-400">No opportunities selected yet.</div>
+                    )}
+                </div>
+            </div>
+
+            {/* Where we are — three steps, only one active at a time. */}
+            <div className="bg-white rounded-lg shadow-sm px-4 py-3">
+                <div className="flex items-center gap-2 flex-wrap text-sm">
+                    {[['config', '1. Configure'], ['running', '2. Processing'], ['results', '3. Results']].map((st, i) => {
+                        const active = phase === st[0];
+                        const passedStep = (phase === 'running' && i === 0) || (phase === 'results' && i < 2);
+                        return (
+                            <span key={st[0]} className="flex items-center gap-2">
+                                {i > 0 ? <i className="fa-solid fa-chevron-right text-gray-300 text-xs"></i> : null}
+                                <span className={'px-3 py-1 rounded-full font-medium '
+                                    + (active ? 'bg-blue-600 text-white'
+                                        : passedStep ? 'bg-green-50 text-green-700 border border-green-200'
+                                            : 'bg-gray-100 text-gray-400')}>
+                                    {passedStep ? <i className="fa-solid fa-check mr-1"></i> : null}{st[1]}
+                                </span>
+                            </span>
+                        );
+                    })}
+                    {phase === 'results' ? (
+                        <button onClick={() => { setNewRun(true); setProgress(null); setRunError(null); }}
+                            className="ml-auto px-3 py-1.5 text-sm rounded-lg border border-gray-300 hover:border-blue-400 hover:text-blue-700">
+                            <i className="fa-solid fa-rotate-right mr-1.5"></i>Configure another run
+                        </button>
+                    ) : null}
+                    {phase === 'config' && sessions.length ? (
+                        <button onClick={() => setNewRun(false)}
+                            className="ml-auto px-3 py-1.5 text-sm rounded-lg border border-gray-300 hover:border-blue-400 hover:text-blue-700">
+                            <i className="fa-solid fa-list-check mr-1.5"></i>Back to results
+                        </button>
+                    ) : null}
+                </div>
             </div>
 
             {/* Warnings */}
@@ -550,7 +698,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
             ) : null}
 
             {/* Summary */}
-            {hasCreated ? (
+            {(phase !== 'config' && hasCreated) ? (
                 <div>
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                         <Card label="FLW audits" value={num(rollup.flws)} sub={rollup.byOpp.length + ' opportunit' + (rollup.byOpp.length === 1 ? 'y' : 'ies')} tone="border-blue-400" />
@@ -570,7 +718,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
             ) : null}
 
             {/* Per-LLO rollup */}
-            {hasCreated ? (
+            {(phase !== 'config' && hasCreated) ? (
                 <div className="bg-white rounded-lg shadow-sm overflow-hidden">
                     <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
                         <span className="text-sm font-semibold text-gray-800">Results by LLO</span>
@@ -611,7 +759,10 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                 </div>
             ) : null}
 
-            {/* Configuration */}
+            {/* Configuration — config phase only. Leaving these controls on screen beside a
+                finished run's results is what made the page confusing and invited accidental
+                re-fires. */}
+            {phase === 'config' ? (
             <div className="bg-white rounded-lg shadow-sm p-6 space-y-5">
                 <div>
                     <div className="flex items-center justify-between flex-wrap gap-2">
@@ -796,72 +947,88 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                             {' '}for a typical KMC window — reduce Sample % or the date range to shorten it.
                         </p>
                     ) : null}
-                    {progress ? (
-                        <div className={'mt-3 rounded-lg px-4 py-3 text-sm border '
-                            + (progress.status === 'failed' ? 'bg-red-50 border-red-200 text-red-800'
-                                : progress.status === 'completed' ? 'bg-green-50 border-green-200 text-green-800'
-                                    : 'bg-blue-50 border-blue-200 text-blue-800')}>
-                            <i className={'mr-2 fa-solid ' + (progress.status === 'failed' ? 'fa-circle-exclamation'
-                                : progress.status === 'completed' ? 'fa-circle-check' : 'fa-spinner fa-spin')}></i>
-                            {progress.message || progress.error || 'Working…'}
-                            {progress.total ? <span className="ml-2 text-xs">({progress.processed || 0}/{progress.total})</span> : null}
-                            <div className="mt-1 text-xs opacity-70">
-                                Server message — it counts only passes and no-matches, so errored images are not
-                                reflected in it. The live figures below are the real state.
+                </div>
+            </div>
+            ) : null}
+
+            {/* Processing — its own screen. While a run is in flight this is all there is to look
+                at, so there is nothing to misread as "ready to trigger". */}
+            {(phase === 'running' || (progress && phase !== 'config')) ? (
+                <div className="bg-white rounded-lg shadow-sm p-6">
+                    <div className="flex items-center gap-3">
+                        <i className={'fa-solid text-xl ' + (progress && progress.status === 'failed' ? 'fa-circle-exclamation text-red-600'
+                            : progress && progress.status === 'completed' ? 'fa-circle-check text-green-600'
+                                : 'fa-spinner fa-spin text-blue-600')}></i>
+                        <div>
+                            <div className="text-sm font-semibold text-gray-900">
+                                {progress && progress.status === 'completed' ? 'Run finished'
+                                    : progress && progress.status === 'failed' ? 'Run failed'
+                                        : 'Processing — you can leave this page'}
                             </div>
+                            <div className="text-xs text-gray-600 mt-0.5">
+                                {(progress && (progress.message || progress.error)) || 'Working…'}
+                                {progress && progress.total
+                                    ? <span className="ml-1 text-gray-400">(opportunity {progress.processed || 0} of {progress.total})</span>
+                                    : null}
+                            </div>
+                        </div>
+                    </div>
+                    {progress && progress.total ? (
+                        <div className="mt-3 w-full bg-gray-100 rounded-full h-2">
+                            <div className="bg-blue-600 h-2 rounded-full transition-all"
+                                style={{ width: Math.round(100 * (progress.processed || 0) / progress.total) + '%' }}></div>
                         </div>
                     ) : null}
 
-                    {/* Live state, computed from the sessions actually written so far. Refreshes every
-                        20s while a run is in flight, so a run that is failing looks like it is failing. */}
-                    {(isRunning || rollup.reviewed > 0) ? (
-                        <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-                            <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
-                                <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                    {isRunning ? 'Live — refreshing every 20s' : 'Result'}
+                    {/* The real state, from the sessions written so far. The server's own message
+                        counts only passes and no-matches, so it omits errors entirely — on one run
+                        it read "110/140 (1 passed, 0 failed)" while 109 had errored. */}
+                    <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                        <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+                            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                {isRunning ? 'Live — refreshing every 20s' : 'Result so far'}
+                            </span>
+                            <button onClick={refreshSessions} className="text-xs underline text-gray-500 hover:text-gray-800">
+                                refresh now
+                            </button>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 text-sm">
+                            <span className="px-2 py-1 rounded bg-white border border-gray-200">
+                                <span className="font-semibold">{rollup.reviewed}</span>
+                                <span className="text-gray-500"> of {rollup.images} photos reviewed</span>
+                            </span>
+                            <span className="px-2 py-1 rounded bg-green-50 text-green-800 border border-green-200">
+                                <span className="font-semibold">{rollup.match}</span> match
+                            </span>
+                            <span className="px-2 py-1 rounded bg-amber-50 text-amber-800 border border-amber-200">
+                                <span className="font-semibold">{rollup.noMatch}</span> no match
+                            </span>
+                            <span className={'px-2 py-1 rounded border '
+                                + (rollup.error ? 'bg-red-50 text-red-800 border-red-200' : 'bg-white text-gray-400 border-gray-200')}>
+                                <span className="font-semibold">{rollup.error}</span> errored
+                                {rollup.reviewed ? <span className="ml-1">({rollup.errorPct}%)</span> : null}
+                            </span>
+                            {rollup.notReviewed ? (
+                                <span className="px-2 py-1 rounded bg-red-50 text-red-800 border border-red-200">
+                                    <span className="font-semibold">{rollup.notReviewed}</span> never reviewed
                                 </span>
-                                <button onClick={refreshSessions} className="text-xs underline text-gray-500 hover:text-gray-800">
-                                    refresh now
-                                </button>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2 text-sm">
-                                <span className="px-2 py-1 rounded bg-white border border-gray-200">
-                                    <span className="font-semibold">{rollup.reviewed}</span>
-                                    <span className="text-gray-500"> of {rollup.images} photos reviewed</span>
-                                </span>
-                                <span className="px-2 py-1 rounded bg-green-50 text-green-800 border border-green-200">
-                                    <span className="font-semibold">{rollup.match}</span> match
-                                </span>
-                                <span className="px-2 py-1 rounded bg-amber-50 text-amber-800 border border-amber-200">
-                                    <span className="font-semibold">{rollup.noMatch}</span> no match
-                                </span>
-                                <span className={'px-2 py-1 rounded border '
-                                    + (rollup.error ? 'bg-red-50 text-red-800 border-red-200' : 'bg-white text-gray-400 border-gray-200')}>
-                                    <span className="font-semibold">{rollup.error}</span> errored
-                                    {rollup.reviewed ? <span className="ml-1">({rollup.errorPct}%)</span> : null}
-                                </span>
-                                {rollup.notReviewed ? (
-                                    <span className="px-2 py-1 rounded bg-red-50 text-red-800 border border-red-200">
-                                        <span className="font-semibold">{rollup.notReviewed}</span> never reviewed
-                                    </span>
-                                ) : null}
-                            </div>
-                            {rollup.reviewed > 0 && rollup.errorPct >= 20 ? (
-                                <div className="mt-2 text-xs text-red-700">
-                                    Most calls are failing. Errored photos get no verdict and still need a human —
-                                    this run will not give a usable read on scale-photo quality.
-                                </div>
                             ) : null}
                         </div>
-                    ) : null}
+                        {rollup.reviewed > 0 && rollup.errorPct >= 20 ? (
+                            <div className="mt-2 text-xs text-red-700">
+                                Most calls are failing. Errored photos get no verdict and still need a human —
+                                this run will not give a usable read on scale-photo quality.
+                            </div>
+                        ) : null}
+                    </div>
                     {runError ? (
                         <div className="mt-3 rounded-lg px-4 py-3 text-sm border bg-red-50 border-red-200 text-red-800">{runError}</div>
                     ) : null}
                 </div>
-            </div>
+            ) : null}
 
             {/* Per-opportunity detail */}
-            {hasCreated ? (
+            {(phase !== 'config' && hasCreated) ? (
                 <div className="bg-white rounded-lg shadow-sm overflow-hidden">
                     <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
                         <span className="text-sm font-semibold text-gray-800">Per-opportunity detail</span>
@@ -911,103 +1078,194 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                 </div>
             ) : null}
 
-            {/* Sessions list */}
-            {hasCreated ? (
-                <div className="bg-white rounded-lg shadow-sm p-6">
-                    <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-                        <div className="text-sm font-semibold text-gray-800">
-                            Audit sessions — open a field worker's photos
+            {/* Field-worker results — one row per worker, the unit people act on. Expand a row to
+                see the photos the AI flagged, with the classifier's own reason. */}
+            {phase === 'results' ? (
+                <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+                    <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
+                        <div>
+                            <span className="text-sm font-semibold text-gray-800">Results by field worker</span>
+                            <span className="ml-2 text-xs text-gray-400">
+                                {flwRows.length} worker{flwRows.length === 1 ? '' : 's'} · worst first · a worker stays
+                                Pending until a person reviews their photos
+                            </span>
                         </div>
-                        <div className="text-xs text-gray-400">grouped by opportunity · worst first</div>
+                        <div className="flex items-center gap-2">
+                            <button onClick={refreshSessions} className="text-xs underline text-gray-500 hover:text-gray-800">
+                                {loadingSessions ? 'Refreshing…' : 'Refresh'}
+                            </button>
+                            <button onClick={downloadCsv}
+                                className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 hover:border-blue-400 hover:text-blue-700">
+                                <i className="fa-solid fa-download mr-1.5"></i>Export CSV
+                            </button>
+                        </div>
                     </div>
-                    {/* Deliberately NOT window.LabsAudit.renderFlwBreakdown. That shared component is
-                        built for the dual-track model and keys off sessions tagged 'muac' / 'rest';
-                        against our 'kmc_weight_photo' tag it reported "MUAC: not created / Other:
-                        not created" for every FLW and rendered no links at all. */}
-                    <div className="space-y-5">
-                        {rollup.byOpp.map(o => {
-                            const rows = sessions
-                                .filter(s => (s._opp || s.opportunity_id) === o.opp)
-                                .map(s => {
-                                    const st = s.assessment_stats || {};
-                                    const photos = s.visit_count || 0;
-                                    const gap = Math.max(0, photos - (st.total || 0));
-                                    return {
-                                        s: s, photos: photos, gap: gap,
-                                        match: st.ai_match || 0, noMatch: st.ai_no_match || 0, error: st.ai_error || 0,
-                                        humanDone: (st.pass || 0) + (st.fail || 0),
-                                    };
-                                })
-                                // Worst first: never-reviewed, then no-match (the ones a human must
-                                // actually look at), then errors.
-                                .sort((a, b) => (b.gap - a.gap) || (b.noMatch - a.noMatch) || (b.error - a.error)
-                                    || String(a.s.flw_display_name || '').localeCompare(String(b.s.flw_display_name || '')));
-                            return (
-                                <div key={o.opp}>
-                                    <div className="flex items-center gap-2 mb-1.5">
-                                        <span className="text-sm font-semibold text-gray-900">{o.llo}</span>
-                                        <span className="text-xs text-gray-500">{meta(o.opp).version} · {meta(o.opp).country}</span>
-                                        <span className="text-xs text-gray-400 font-mono">#{o.opp}</span>
-                                        <ScalePill kind={o.scale} unverified={meta(o.opp).unverified} />
-                                        <span className="text-xs text-gray-400">{rows.length} field worker{rows.length === 1 ? '' : 's'}</span>
-                                    </div>
-                                    <div className="overflow-x-auto border border-gray-100 rounded-lg">
-                                        <table className="min-w-full text-sm">
-                                            <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
-                                                <tr>
-                                                    <th className="px-3 py-2 text-left font-medium">Field worker</th>
-                                                    <th className="px-3 py-2 text-right font-medium">Photos</th>
-                                                    <th className="px-3 py-2 text-right font-medium">Match</th>
-                                                    <th className="px-3 py-2 text-right font-medium">No match</th>
-                                                    <th className="px-3 py-2 text-right font-medium">Errored</th>
-                                                    <th className="px-3 py-2 text-right font-medium">Never reviewed</th>
-                                                    <th className="px-3 py-2 text-left font-medium">Status</th>
-                                                    <th className="px-3 py-2 text-right font-medium">Images</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {rows.map(r => (
-                                                    <tr key={r.s.id} className="border-t border-gray-100 hover:bg-gray-50">
-                                                        <td className="px-3 py-2 whitespace-nowrap">
-                                                            <span className="font-medium text-gray-900">
-                                                                {r.s.flw_display_name || r.s.flw_username || ('Session ' + r.s.id)}
-                                                            </span>
-                                                            {r.noMatch > 0
-                                                                ? <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-xs font-semibold"
-                                                                    title="The AI says the photo does not match the typed weight — review these first.">
-                                                                    {r.noMatch} to check
-                                                                </span>
-                                                                : null}
-                                                        </td>
-                                                        <td className="px-3 py-2 text-right">{r.photos}</td>
-                                                        <td className="px-3 py-2 text-right text-green-700">{r.match || '—'}</td>
-                                                        <td className={'px-3 py-2 text-right font-semibold ' + (r.noMatch ? 'text-amber-700' : 'text-gray-300')}>{r.noMatch || '—'}</td>
-                                                        <td className={'px-3 py-2 text-right ' + (r.error ? 'text-red-700' : 'text-gray-300')}>{r.error || '—'}</td>
-                                                        <td className={'px-3 py-2 text-right font-semibold ' + (r.gap ? 'text-red-700' : 'text-gray-300')}
-                                                            title={r.gap ? 'The AI pass never reached these photos' : undefined}>{r.gap || '—'}</td>
-                                                        <td className="px-3 py-2 text-xs">
-                                                            <span className={'px-2 py-0.5 rounded font-semibold '
-                                                                + (r.s.status === 'completed' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800')}>
-                                                                {r.s.status || 'open'}
-                                                            </span>
-                                                            {r.humanDone ? <span className="ml-1 text-gray-400">{r.humanDone} human-marked</span> : null}
-                                                        </td>
-                                                        <td className="px-3 py-2 text-right whitespace-nowrap">
-                                                            <a className="text-xs font-medium text-blue-600 hover:underline"
-                                                                href={'/audit/' + r.s.id + '/bulk/?opportunity_id=' + o.opp}
-                                                                target="_blank" rel="noopener noreferrer"
-                                                                title="Open this field worker's photos for this run">
-                                                                Open images →
-                                                            </a>
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                            );
-                        })}
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full text-sm">
+                            <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+                                <tr>
+                                    <th className="px-3 py-2 text-left font-medium">Field worker</th>
+                                    <th className="px-3 py-2 text-left font-medium">LLO · Opportunity</th>
+                                    <th className="px-3 py-2 text-right font-medium">Photos</th>
+                                    <th className="px-3 py-2 text-center font-medium"
+                                        title="What the AI concluded: matched the typed weight / did not match / the call failed">
+                                        AI: match / no match / errored
+                                    </th>
+                                    <th className="px-3 py-2 text-center font-medium"
+                                        title="What a person has signed off. Pending means nobody has reviewed it yet.">
+                                        Human: pass / fail / pending
+                                    </th>
+                                    <th className="px-3 py-2 text-right font-medium"
+                                        title="Of the photos a person has judged, the share marked pass">% passed</th>
+                                    <th className="px-3 py-2 text-left font-medium">Review status</th>
+                                    <th className="px-3 py-2 text-right font-medium">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {flwRows.map(r => {
+                                    const d = detail[r.id] || {};
+                                    const flagged = (d.rows || []).filter(x => x.ai_result === 'no_match' || x.ai_result === 'error');
+                                    return [
+                                        <tr key={r.id} className="border-t border-gray-100 hover:bg-gray-50">
+                                            <td className="px-3 py-2 whitespace-nowrap">
+                                                <span className="font-medium text-gray-900">{r.flw}</span>
+                                                {r.noMatch > 0 ? (
+                                                    <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-xs font-semibold"
+                                                        title="The AI says the photo does not match the typed weight — review these first.">
+                                                        {r.noMatch} to check
+                                                    </span>
+                                                ) : null}
+                                                {r.neverReviewed > 0 ? (
+                                                    <span className="ml-1 px-1.5 py-0.5 rounded bg-red-100 text-red-800 text-xs font-semibold"
+                                                        title="The AI pass never reached these photos">
+                                                        {r.neverReviewed} not reviewed
+                                                    </span>
+                                                ) : null}
+                                            </td>
+                                            <td className="px-3 py-2 whitespace-nowrap text-xs">
+                                                <span className="font-medium text-gray-800">{r.llo}</span>
+                                                <span className="text-gray-500 ml-1">{meta(r.opp).version} · {meta(r.opp).country}</span>
+                                                <span className="text-gray-400 font-mono ml-1">#{r.opp}</span>
+                                                <span className="ml-1"><ScalePill kind={scaleOf(r.opp)} unverified={meta(r.opp).unverified} /></span>
+                                            </td>
+                                            <td className="px-3 py-2 text-right">{r.photos}</td>
+                                            <td className="px-3 py-2 text-center whitespace-nowrap">
+                                                <span className="text-green-700 font-semibold">{r.match}</span>
+                                                <span className="text-gray-300"> / </span>
+                                                <span className={r.noMatch ? 'text-amber-700 font-semibold' : 'text-gray-300'}>{r.noMatch}</span>
+                                                <span className="text-gray-300"> / </span>
+                                                <span className={r.error ? 'text-red-700 font-semibold' : 'text-gray-300'}>{r.error}</span>
+                                            </td>
+                                            <td className="px-3 py-2 text-center whitespace-nowrap">
+                                                <span className={r.pass ? 'text-green-700 font-semibold' : 'text-gray-300'}>{r.pass}</span>
+                                                <span className="text-gray-300"> / </span>
+                                                <span className={r.fail ? 'text-red-700 font-semibold' : 'text-gray-300'}>{r.fail}</span>
+                                                <span className="text-gray-300"> / </span>
+                                                <span className={r.pending ? 'text-gray-700' : 'text-gray-300'}>{r.pending}</span>
+                                            </td>
+                                            <td className="px-3 py-2 text-right font-semibold">
+                                                {r.pctPassed == null ? <span className="text-gray-300">—</span>
+                                                    : <span className={r.pctPassed >= 90 ? 'text-green-700' : r.pctPassed >= 70 ? 'text-amber-700' : 'text-red-700'}>{r.pctPassed}%</span>}
+                                            </td>
+                                            <td className="px-3 py-2 text-xs">
+                                                <span className={'px-2 py-0.5 rounded font-semibold '
+                                                    + (r.reviewStatus === 'Reviewed' ? 'bg-green-100 text-green-800'
+                                                        : r.reviewStatus === 'In review' ? 'bg-blue-100 text-blue-800'
+                                                            : 'bg-gray-100 text-gray-600')}>
+                                                    {r.reviewStatus}
+                                                </span>
+                                            </td>
+                                            <td className="px-3 py-2 text-right whitespace-nowrap">
+                                                <button onClick={() => loadDetail(r.id)}
+                                                    className="text-xs underline text-gray-600 hover:text-gray-900 mr-3">
+                                                    {expanded === r.id ? 'Hide flagged' : 'Why flagged'}
+                                                </button>
+                                                <a className="text-xs font-medium text-blue-600 hover:underline"
+                                                    href={'/audit/' + r.id + '/bulk/?opportunity_id=' + r.opp}
+                                                    target="_blank" rel="noopener noreferrer">
+                                                    Open images →
+                                                </a>
+                                            </td>
+                                        </tr>,
+                                        expanded === r.id ? (
+                                            <tr key={r.id + '-detail'} className="bg-gray-50 border-t border-gray-100">
+                                                <td colSpan={8} className="px-4 py-3">
+                                                    {d.loading ? <div className="text-xs text-gray-500">Loading photo detail…</div> : null}
+                                                    {d.error ? <div className="text-xs text-red-700">Could not load detail: {d.error}</div> : null}
+                                                    {d.rows && !flagged.length ? (
+                                                        <div className="text-xs text-gray-500">
+                                                            Nothing flagged for this worker — every photo either matched or was never reviewed.
+                                                        </div>
+                                                    ) : null}
+                                                    {flagged.length ? (
+                                                        <div>
+                                                            <div className="text-xs font-semibold text-gray-700 mb-2">
+                                                                {flagged.length} photo{flagged.length === 1 ? '' : 's'} the AI flagged — with its reason
+                                                            </div>
+                                                            <div className="overflow-x-auto">
+                                                                <table className="min-w-full text-xs">
+                                                                    <thead className="text-gray-500 uppercase">
+                                                                        <tr>
+                                                                            <th className="px-2 py-1 text-left font-medium">Visit</th>
+                                                                            <th className="px-2 py-1 text-left font-medium">Child / entity</th>
+                                                                            <th className="px-2 py-1 text-right font-medium">Typed weight</th>
+                                                                            <th className="px-2 py-1 text-left font-medium">AI verdict</th>
+                                                                            <th className="px-2 py-1 text-left font-medium">Why — classifier output</th>
+                                                                            <th className="px-2 py-1 text-left font-medium">Human</th>
+                                                                            <th className="px-2 py-1 text-right font-medium"></th>
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tbody>
+                                                                        {flagged.map(x => {
+                                                                            const rf = (x.related_fields || []).filter(f => f && f.value)[0];
+                                                                            const reading = rf ? rf.value : null;
+                                                                            return (
+                                                                                <tr key={x.id} className="border-t border-gray-200">
+                                                                                    <td className="px-2 py-1 whitespace-nowrap text-gray-600">{x.visit_date || '—'}</td>
+                                                                                    <td className="px-2 py-1 whitespace-nowrap text-gray-600">{x.entity_name || '—'}</td>
+                                                                                    <td className="px-2 py-1 text-right font-mono">{reading != null ? reading : '—'}</td>
+                                                                                    <td className="px-2 py-1 whitespace-nowrap">
+                                                                                        <span className={'px-1.5 py-0.5 rounded font-semibold '
+                                                                                            + (x.ai_result === 'no_match' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800')}>
+                                                                                            {x.ai_result === 'no_match' ? 'No match' : 'Errored'}
+                                                                                        </span>
+                                                                                    </td>
+                                                                                    <td className="px-2 py-1 text-gray-700">
+                                                                                        {x.ai_notes ? x.ai_notes
+                                                                                            : (x.ai_result === 'no_match'
+                                                                                                ? 'The classifier read the scale and it did not match the typed weight; no further detail was returned.'
+                                                                                                : 'No reason recorded.')}
+                                                                                    </td>
+                                                                                    <td className="px-2 py-1 whitespace-nowrap">
+                                                                                        {x.result
+                                                                                            ? <span className={'font-semibold ' + (x.result === 'pass' ? 'text-green-700' : 'text-red-700')}>{x.result}</span>
+                                                                                            : <span className="text-gray-400">pending</span>}
+                                                                                    </td>
+                                                                                    <td className="px-2 py-1 text-right">
+                                                                                        {x.image_url ? (
+                                                                                            <a href={x.image_url} target="_blank" rel="noopener noreferrer"
+                                                                                                className="text-blue-600 hover:underline">photo →</a>
+                                                                                        ) : null}
+                                                                                    </td>
+                                                                                </tr>
+                                                                            );
+                                                                        })}
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+                                                        </div>
+                                                    ) : null}
+                                                </td>
+                                            </tr>
+                                        ) : null,
+                                    ];
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="px-4 py-2 text-xs text-gray-500 border-t border-gray-100">
+                        "Pending" means nobody has reviewed that worker's photos yet — an AI match is a suggestion,
+                        not a sign-off. "% passed" is computed only over photos a person has actually judged.
                     </div>
                 </div>
             ) : null}
