@@ -514,6 +514,121 @@ function WorkflowUI(props) {
         risk: "Read the actual error first. A timeout is transient; an authentication error means the token needs re-minting." }
     ],
 
+    // ---- CREATING THE OPPORTUNITY (CommCare HQ + Connect). This happens BEFORE Labs is touched at all:
+    // no opportunity means no cohort, no forms and nothing for the pipeline to read. Transcribed from the
+    // team's "Interviews: Opportunity Creation Checklist", which is the operational source of truth.
+    // Two variants exist; they differ only at step 3.
+    opportunity: {
+      note: "Do this first. Steps 1–2 happen in CommCare HQ, steps 3–6 in the Connect dashboard. Cohort-specific values (payment, total interviews, max users, cadence) all come from the Cohort Tracker — do not invent them.",
+      variants: [
+        ["Standard experimental", "The opportunity is created directly from the opportunities list."],
+        ["Program-based (generic)", "The opportunity is created inside a Program, so it inherits that program's settings. Only step 3 differs."]
+      ],
+      steps: [
+        { n: 1, title: "Prepare the apps", where: "CommCare HQ",
+          items: [
+            "Copy the existing app from the master connect-interviews project space — once per cohort, for BOTH the Learn app and the Deliver app — into the delivering partner's project space (EHA or COWACDI).",
+            "Rename each copy by changing the bracketed value to the new Cohort ID (e.g. 09TRE).",
+            "Publish a new version of both apps and mark it released."
+          ],
+          why: "The Deliver app is what submits the Trigger-Bot forms Labs reads. An unreleased app submits nothing, so the cohort would silently never appear.",
+          gotcha: "Both apps, not just one. Learn gates payment eligibility; Deliver produces the interview records." },
+        { n: 2, title: "Update the user field and the lookup table", where: "CommCare HQ",
+          items: [
+            "User field: in the MAIN project space add the new Cohort ID as a choice, then push it down to the downstream projects.",
+            "Lookup table: add one row per interview topic for the new cohort, each with its frequency in days (from the Cohort Tracker).",
+            "Set the FIRST topic's frequency to empty (a double dash) and the LAST topic's frequency to 9999.",
+            "Push the lookup table down to the two downstream projects — excluding the test project domain."
+          ],
+          why: "THIS TABLE IS THE DESIGN. Labs reads it to learn which topics a cohort should receive, in what order and how far apart — which is what defines “finished” for that cohort and therefore every completion and drop-off percentage on the dashboard.",
+          gotcha: "The first-empty / last-9999 convention is how the chain start and end are detected. Get it wrong and the derived schedule is wrong: a missing 9999 can leave the chain open, and a real topic mistaken for an end-marker drops a whole interview from the design. That exact mistake has happened — a genuine third interview was read as a terminal marker and disappeared from the dashboard until it was corrected." },
+        { n: "2b", title: "If the workers are re-used from an existing cohort", where: "CommCare HQ",
+          items: [
+            "FIRST — case update via Excel import on commcare-user, keeping ONLY case-id, name and cohort-id (remove every other property).",
+            "SECOND — update the mobile worker user field via bulk upload with the new cohort_id."
+          ],
+          why: "The same person can appear in several cohorts. Both the case and the user field must carry the new cohort_id or their interviews attach to the wrong cohort.",
+          gotcha: "Order matters: case update first, then the user field. This is also why the dashboard counts a person once but their enrolments separately." },
+        { n: 3, title: "Create the opportunity", where: "Connect dashboard",
+          items: [
+            "STANDARD: go to the opportunities section and click Add Opportunity.",
+            "PROGRAM-BASED: open the Dimagi program-manager profile, go to Programs, click View Status on the relevant program, then Create Opportunity — and confirm the info panel reads “This opportunity will be created under the … program”.",
+            "Name it with the Cohort ID (e.g. 09TRE). Currency NGN, country Nigeria.",
+            "HQ server: CommCare HQ. Select the API query, and make sure that API is configured for ALL projects.",
+            "Copy the long description from an existing opportunity and change the cohort reference to the new Cohort ID. Add a short description (e.g. “Connect Interviews : EHA Cohort 08TRS”).",
+            "Select the newly created Learn and Deliver apps. Learn app passing score is 4."
+          ],
+          why: "The opportunity is what FLWs are invited to, and its name is the cohort id that flows through every downstream join.",
+          gotcha: "If the API query is not configured for all projects the opportunity cannot see its own app data. Check the program info panel before submitting — an opportunity created outside its program is awkward to move." },
+        { n: 4, title: "Configure payment and budget", where: "Connect dashboard",
+          items: [
+            "Add a payment unit, named for the cohort (e.g. “08TRS interview completed successfully”).",
+            "Payment amount: from the Cohort Tracker.",
+            "Maximum visits per user = the cohort's TOTAL INTERVIEWS.",
+            "Maximum visits per day = 1.",
+            "Start date: today is fine — but it CANNOT be changed afterwards.",
+            "Worker budget: from the Cohort Tracker's max users, rounded up (e.g. 33 or 35 → 40).",
+            "End date: optional. Leaving it blank avoids problems later if the end date moves."
+          ],
+          why: "Maximum visits per user caps how many interviews a worker can be paid for, so it must equal the design length or the last interviews cannot be completed.",
+          gotcha: "The start date is immutable — set it deliberately. One visit per day is what keeps interviews spaced rather than done back to back." },
+        { n: 5, title: "Create the conditional alert", where: "CommCare HQ",
+          items: [
+            "One alert per opportunity, on commcare-user.",
+            "Conditions: cohort_id = the new Cohort ID, and session_completion = session completed."
+          ],
+          why: "This is what triggers payment on a completed interview session.",
+          gotcha: "The cohort_id in the alert must match the new cohort exactly — copying an alert and forgetting to change it pays the wrong cohort." },
+        { n: 6, title: "Verify the configuration", where: "Connect dashboard → hamburger menu",
+          items: [
+            "Delivery Type: change to “Interviews”.",
+            "Verification flags: REMOVE the GPS verification check.",
+            "“Is Test”: make sure it is switched OFF.",
+            "Active status: set active when it is ready to launch."
+          ],
+          why: "These four are easy to miss and each one breaks something quietly.",
+          gotcha: "GPS verification left on stops workers being auto-approved for payment. “Is Test” left on marks the cohort as test data, and Labs deliberately EXCLUDES test-flagged data — so the cohort would be invisible on the dashboard while looking fine in Connect." }
+      ]
+    },
+
+    // ---- what to do when a figure looks wrong. Every entry here is a failure that has actually occurred.
+    troubleshooting: [
+      { symptom: "A new cohort does not appear at all, and there is no error anywhere.",
+        cause: "Its domain is missing from the list the BUILD reads, so the downloaded files are never opened.",
+        fix: "Add the domain to ALL_DOMAINS in the master build, not just to the pull scripts. This is the single most common onboarding mistake." },
+      { symptom: "Interview counts look right but the Connect funnel reads zero for one cohort.",
+        cause: "The Connect pull filters opportunities by a cohort pattern and the new cohort does not match it.",
+        fix: "Add the pattern to the Connect pull as well as the master build — they keep separate copies." },
+      { symptom: "The build aborts with a key error naming a subgroup.",
+        cause: "A gate script does not know that subgroup yet.",
+        fix: "Add it to all four gate scripts. This is the gates working correctly: stopping is safer than publishing a half-loaded cohort." },
+      { symptom: "A cohort appears but its schedule length is wrong, so completion looks impossible or too easy.",
+        cause: "The lookup table's frequency convention was not followed, so the topic chain was derived incorrectly.",
+        fix: "Check the first topic is an empty/double-dash frequency and the last is 9999, then confirm the derived design on this dashboard matches the Cohort Tracker." },
+      { symptom: "Two figures on the same screen disagree about the same thing.",
+        cause: "Almost always different denominators, or one figure is current while the other is windowed.",
+        fix: "Check the Indicators section for both — every one states its base. Chart tiles are current-state; a trimmed chart can legitimately end earlier, and the page says so where they differ." },
+      { symptom: "The dashboard did not refresh today.",
+        cause: "The daily job failed. Data problems abort at a gate; publishing problems abort at the upload.",
+        fix: "Read the run log. If the gates passed and the upload failed, the data was fine and a re-run usually fixes it — the upload is version-guarded and re-checks whether the write actually landed." },
+      { symptom: "A brand-new cohort shows odd values — a negative average, or nothing on the line charts.",
+        cause: "Too little data yet. Release status is not-available until the window opens, and an average over one interview is meaningless.",
+        fix: "Nothing. These settle as interviews accrue over the following daily runs." },
+      { symptom: "A number here disagrees with a number someone calculated locally.",
+        cause: "A local build reads whatever files are on that machine, which may be weeks stale.",
+        fix: "Always quote the published dashboard. Local builds are for development only." }
+    ],
+
+    // ---- honest limitations. Stated in the product so nobody discovers them by being wrong in a meeting.
+    limits: [
+      ["The Connect funnel is the least live part.", "Interview data refreshes from HQ and OCS every day. The Connect leg depends on a credential that has broken before, and when it does the funnel silently falls back to the last good snapshot — invitation and claim numbers can be older than the interview numbers beside them."],
+      ["“Per-cohort finish — so far” understates finishing.", "It counts schedules the programme has not finished rolling out as unfinished, and does so slightly more often for multi-cohort workers. The offered-only figure beside it is the fair like-for-like rate. Read both."],
+      ["The survival ladder is not a single funnel.", "Each row has its own eligible pool, so a later interview can show a higher share than an earlier one when short-schedule cohorts leave the pool. Compare each row to its own count."],
+      ["The dotted-line rule is a heuristic.", "A subgroup's line is dotted while it is inside its expected rollout window, computed from the design. A late-firing interview can make a line look settled while it is still rolling out. Two subgroups whose real schedule cannot be derived have their end date pinned from the Cohort Tracker."],
+      ["Word counts measure effort, not quality.", "Average FLW words counts words in the worker's own messages. It says nothing about whether an answer was accurate, relevant or deep."],
+      ["Cross-arm totals are not the sum of the arms.", "A worker can appear in more than one arm, so per-arm counts add up to more than the number of people. Quote the subgroup or overall total, not a sum of arms."],
+      ["The render has a hard size limit.", "The platform caps the dashboard file at 512 KB, so the payload is pruned to the keys the interface reads. A new chart may require pruning something else first."]
+    ],
     glossary: [
       ["FLW", "Front-line worker — the community health worker being interviewed. One person, even if they appear in several cohorts."],
       ["Cohort", "One recruited group in one place, with its own id. The smallest unit the programme runs."],
@@ -553,22 +668,48 @@ function WorkflowUI(props) {
     };
   }
 
-  // ---- Markdown export. Structured as llms.txt-style: a compact index plus an optional full body, so
-  // it can be pasted straight into an LLM as project context. Plain Markdown, no HTML, stable headings.
+  // ---- Markdown export. llms.txt-style (llmstxt.org): plain Markdown, one H1, stable H2 sections and a
+  // trailing Optional block a model can drop, so the whole context pastes into an LLM in one go.
   function docsMarkdown(section) {
     var F = liveFacts(), L = [], all = section === "all";
     function h(n, t) { L.push("\n" + Array(n + 1).join("#") + " " + t + "\n"); }
     L.push("# Connect Interviews Dashboard — how it works");
     L.push("\n> Generated from the live dashboard on " + F.today + " (build " + F.built + ").");
-    L.push("> Every figure below is read from the published payload at generation time, not copied by hand.");
+    L.push("> Every figure is read from the published payload at generation time, not copied by hand.");
     L.push("\n**Scale right now:** " + F.flws + " unique FLWs · " + F.cohorts + " cohorts · " + F.subgroups +
       " subgroups · " + F.topics + " topics · " + F.rows + " FLW×interview rows · " +
       F.started + " interviews started · " + F.completed + " completed.");
-    L.push("\n**Interview designs vary**, which is why almost every rule here is relative rather than absolute: " +
-      "schedules run from " + F.minLen + " to " + F.maxLen + " interviews, with cadences from " +
-      F.minCad + " to " + F.maxCad + " days.\n");
+    L.push("\n**Interview designs vary**, which is why nearly every rule is relative rather than absolute: " +
+      "schedules run from " + F.minLen + " to " + F.maxLen + " interviews at " + F.minCad + "–" + F.maxCad + " day cadences.\n");
     L.push("- " + F.designs.join("\n- "));
+    L.push("\n**Reading order:** what a cohort is and how one is created → how the data flows → what each " +
+      "tab shows → what each indicator means → what to do when something looks wrong.\n");
 
+    if (all || section === "opportunity") {
+      h(2, "Creating a cohort (the opportunity)");
+      L.push(DOCS.opportunity.note + "\n");
+      L.push("Variants:");
+      DOCS.opportunity.variants.forEach(function (v) { L.push("- **" + v[0] + "** — " + v[1]); });
+      DOCS.opportunity.steps.forEach(function (s) {
+        h(3, "Step " + s.n + " — " + s.title + "  (" + s.where + ")");
+        s.items.forEach(function (i) { L.push("- " + i); });
+        L.push("\n_Why:_ " + s.why);
+        if (s.gotcha) L.push("_Watch out:_ " + s.gotcha);
+      });
+    }
+    if (all || section === "onboarding") {
+      h(2, "Adding that cohort to Labs");
+      L.push("Ten places, in order. They are separate on purpose: the pull scripts decide what is " +
+        "downloaded, the build decides what is read, and the gates refuse to run on a half-configured subgroup.\n");
+      DOCS.onboarding.forEach(function (s) {
+        L.push("**Step " + s.n + " — " + s.title + "**  \n_File:_ `" + s.file + "`  \n" + s.what +
+          (s.gotcha && s.gotcha !== "—" ? "  \n⚠ " + s.gotcha : "") + "\n");
+      });
+      h(3, "Shortcuts, and when they are safe");
+      DOCS.shortcuts.forEach(function (s) {
+        L.push("**" + s.name + "**  \n_Use when:_ " + s.when + "  \n_How:_ " + s.how + "  \n_Risk:_ " + s.risk + "\n");
+      });
+    }
     if (all || section === "flow") {
       h(2, "Where the data comes from");
       L.push("Five upstream systems, pulled to local files, joined into one row per FLW per interview, " +
@@ -582,7 +723,7 @@ function WorkflowUI(props) {
           L.push("- Why it matters: " + n.why + "\n");
         });
       });
-      h(3, "Flow");
+      h(3, "Connections");
       DOCS.edges.forEach(function (e) {
         var a = DOCS.nodes.filter(function (n) { return n.id === e[0]; })[0];
         var b = DOCS.nodes.filter(function (n) { return n.id === e[1]; })[0];
@@ -599,8 +740,8 @@ function WorkflowUI(props) {
     }
     if (all || section === "metrics") {
       h(2, "Every indicator, and how it is calculated");
-      L.push("Grouped by area. `Base` is the denominator — the single most common cause of two numbers " +
-        "appearing to disagree is comparing percentages that use different bases.\n");
+      L.push("`Base` is the denominator. The single most common reason two figures look contradictory is " +
+        "that they use different bases, so it is stated for every one.\n");
       var groups = [];
       DOCS.metrics.forEach(function (m) { if (groups.indexOf(m.g) < 0) groups.push(m.g); });
       groups.forEach(function (g) {
@@ -611,19 +752,14 @@ function WorkflowUI(props) {
         });
       });
     }
-    if (all || section === "onboarding") {
-      h(2, "Adding a new cohort — step by step");
-      L.push("Ten places, in order. They are separate on purpose: the pull scripts decide what is " +
-        "downloaded, the build decides what is read, and the gates refuse to run on a half-configured " +
-        "subgroup.\n");
-      DOCS.onboarding.forEach(function (s) {
-        L.push("**Step " + s.n + " — " + s.title + "**  \n_File:_ `" + s.file + "`  \n" + s.what +
-          (s.gotcha && s.gotcha !== "—" ? "  \n⚠ " + s.gotcha : "") + "\n");
+    if (all || section === "trouble") {
+      h(2, "When a number looks wrong");
+      L.push("Each of these has actually happened.\n");
+      DOCS.troubleshooting.forEach(function (t) {
+        L.push("**Symptom:** " + t.symptom + "  \n_Cause:_ " + t.cause + "  \n_Fix:_ " + t.fix + "\n");
       });
-      h(3, "Shortcuts, and when they are safe");
-      DOCS.shortcuts.forEach(function (s) {
-        L.push("**" + s.name + "**  \n_Use when:_ " + s.when + "  \n_How:_ " + s.how + "  \n_Risk:_ " + s.risk + "\n");
-      });
+      h(3, "Known limitations");
+      DOCS.limits.forEach(function (l) { L.push("- **" + l[0] + "** " + l[1]); });
     }
     if (all || section === "glossary") {
       h(2, "Glossary");
@@ -631,14 +767,15 @@ function WorkflowUI(props) {
     }
     if (all) {
       h(2, "Optional");
-      L.push("Detail a reader can skip on a first pass, kept here so an LLM can drop it to save context.\n");
-      L.push("- **Payload keys present in this build:** " + Object.keys(DATA).sort().join(", "));
+      L.push("Detail a reader can skip on a first pass, kept separate so an LLM can drop it to save context.\n");
+      L.push("- **Payload keys in this build:** " + Object.keys(DATA).sort().join(", "));
       L.push("- **Subgroups present:** " + F.sgList.join(", "));
       L.push("- **Unmapped cohorts (should be 0):** " + F.unmapped);
-      L.push("- The dashboard embeds its data rather than querying live, because a live multi-cohort " +
-        "pull exceeds the platform request timeout.");
-      L.push("- The render file is capped at 512 KB by the platform, so the payload is pruned of keys " +
-        "the interface never reads.");
+      L.push("- The dashboard EMBEDS its data rather than querying live, because a live multi-cohort pull " +
+        "exceeds the platform request timeout and returns nothing.");
+      L.push("- The render file is capped at 512 KB by the platform, so the payload is pruned of keys the " +
+        "interface never reads.");
+      L.push("- Test-flagged cohorts and known test accounts are excluded from every figure.");
     }
     return L.join("\n") + "\n";
   }
@@ -649,51 +786,96 @@ function WorkflowUI(props) {
     a.href = URL.createObjectURL(blob); a.download = name; a.click();
   }
 
+  // small presentational helpers, so every section looks the same
+  function docCard(title, sub, children, accent) {
+    return (
+      <div className="rounded border border-gray-200 bg-white px-3 py-3" style={accent ? { borderLeft: "3px solid " + accent } : {}}>
+        <div className="text-sm font-semibold text-gray-800">{title}</div>
+        {sub ? <p className="text-xs text-gray-600 mt-0.5 mb-2">{sub}</p> : <div className="mb-2"></div>}
+        {children}
+      </div>
+    );
+  }
+  function docStep(n, title, where, items, why, gotcha, accent) {
+    return (
+      <div key={String(n) + title} className="flex gap-2 mb-3">
+        <div className="flex-shrink-0 rounded-md text-white font-bold flex items-center justify-center"
+          style={{ width: "22px", height: "22px", fontSize: "10px", background: accent || "#1565C0" }}>{n}</div>
+        <div style={{ minWidth: 0 }}>
+          <div className="text-xs font-semibold text-gray-800">
+            {title}{where ? <span className="ml-1 text-gray-400 font-normal">· {where}</span> : null}
+          </div>
+          {items.map(function (it, i) { return <div key={i} className="text-xs text-gray-700 mt-0.5">– {it}</div>; })}
+          {why ? <div className="text-xs text-gray-600 mt-1"><b>Why:</b> {why}</div> : null}
+          {gotcha ? <div className="text-xs mt-0.5" style={{ color: "#b45309" }}><b>Watch out:</b> {gotcha}</div> : null}
+        </div>
+      </div>
+    );
+  }
+
   function renderDocs() {
     var F = liveFacts();
-    var SEC = [["flow", "Data flow"], ["tabs", "Tabs & charts"], ["metrics", "Indicators"],
-               ["onboarding", "Add a cohort"], ["glossary", "Glossary"]];
-    // ---- flowchart geometry: one ROW per layer, nodes spread across it. Computed rather than
-    // hand-placed so adding a node cannot break the picture.
-    var W = 1180, ROW = 128, PAD = 58, NW = 196, NH = 66;
+    var SEC = [["opportunity", "1 · Create a cohort"], ["onboarding", "2 · Add it to Labs"],
+               ["flow", "3 · Data flow"], ["tabs", "4 · Tabs & charts"], ["metrics", "5 · Indicators"],
+               ["trouble", "6 · Troubleshooting"], ["glossary", "7 · Glossary"]];
+    // ---- diagram geometry. One ROW per layer; nodes are laid out from the node list, so adding a node
+    // cannot break the picture. Connectors are ORTHOGONAL (down, across, down) with arrowheads rather
+    // than long bezier swoops — with 16 edges the curves crossed each other and were unreadable.
+    var W = 1180, ROW = 132, PAD = 40, NH = 62, TOP = 34;
     var pos = {};
     DOCS.layers.forEach(function (ly, li) {
       var ns = DOCS.nodes.filter(function (n) { return n.layer === ly.id; });
-      var gap = (W - 2 * PAD - ns.length * NW) / Math.max(ns.length - 1, 1);
+      var nw = Math.min(212, (W - 2 * PAD - (ns.length - 1) * 16) / ns.length);
+      var gap = ns.length > 1 ? (W - 2 * PAD - ns.length * nw) / (ns.length - 1) : 0;
       ns.forEach(function (n, i) {
-        pos[n.id] = { x: PAD + i * (NW + gap), y: 44 + li * ROW, w: NW, h: NH, color: ly.color };
+        pos[n.id] = { x: PAD + i * (nw + gap), y: TOP + li * ROW, w: nw, h: NH, color: ly.color, row: li };
       });
     });
-    var H = 44 + DOCS.layers.length * ROW;
+    var H = TOP + DOCS.layers.length * ROW - 30;
     var sel = docNode ? DOCS.nodes.filter(function (n) { return n.id === docNode; })[0] : null;
-    var lit = {};   // ER-style: selecting a node highlights every edge touching it
+    var lit = {};
     if (sel) DOCS.edges.forEach(function (e) { if (e[0] === sel.id || e[1] === sel.id) { lit[e[0]] = 1; lit[e[1]] = 1; } });
+
+    function wrap(txt, per) {
+      var out = [], line = "";
+      String(txt).split(" ").forEach(function (w) {
+        if ((line + " " + w).trim().length > per) { out.push(line.trim()); line = w; } else { line += " " + w; }
+      });
+      if (line.trim()) out.push(line.trim());
+      return out;
+    }
 
     return (
       <div className="space-y-3">
+        {/* ---------- header */}
         <div className="rounded border border-indigo-200 bg-indigo-50 px-3 py-2">
-          <div className="text-sm font-semibold text-gray-800 mb-1">How this dashboard is built, and how to extend it</div>
+          <div className="text-sm font-semibold text-gray-800 mb-1">How this dashboard works, end to end</div>
           <p className="text-xs text-gray-700">
-            Everything here is generated from the dashboard itself. The scale figures, the list of subgroups
-            and the payload keys are read from the live data when this page loads, so this page cannot
-            describe a version that no longer exists. Written for someone who has never seen the pipeline.
+            Written for someone who has never seen the pipeline. Sections are in the order things actually
+            happen: create a cohort, wire it into Labs, then how the data reaches each chart. Every number
+            on this page is read from the live data when the page loads, so it cannot describe a version
+            that no longer exists.
           </p>
-          <p className="text-xs text-gray-700 mt-1">
-            <b>Right now:</b> {Number(F.flws).toLocaleString()} unique FLWs · {F.cohorts} cohorts ·{" "}
-            {F.subgroups} subgroups · {F.topics} topics · {Number(F.rows).toLocaleString()} FLW×interview
-            rows · {Number(F.started).toLocaleString()} interviews started ·{" "}
-            {Number(F.completed).toLocaleString()} completed. Data as of <b>{F.today}</b>.
-          </p>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-gray-800">
+            <span><b>{Number(F.flws).toLocaleString()}</b> unique FLWs</span>
+            <span><b>{F.cohorts}</b> cohorts</span>
+            <span><b>{F.subgroups}</b> subgroups</span>
+            <span><b>{F.topics}</b> topics</span>
+            <span><b>{Number(F.rows).toLocaleString()}</b> FLW×interview rows</span>
+            <span><b>{Number(F.started).toLocaleString()}</b> started</span>
+            <span><b>{Number(F.completed).toLocaleString()}</b> completed</span>
+            <span className="text-gray-500">data as of <b>{F.today}</b></span>
+          </div>
           <p className="text-xs text-gray-600 mt-1">
             Schedules run from <b>{F.minLen}</b> to <b>{F.maxLen}</b> interviews at <b>{F.minCad}</b>–<b>{F.maxCad}</b> day
-            cadences — which is why nearly every rule below is <i>relative to the cohort</i> rather than a fixed number.
+            cadences, which is why nearly every rule here is <i>relative to the cohort</i> rather than a fixed number.
           </p>
         </div>
 
-        {/* ---- export bar */}
+        {/* ---------- export */}
         <div className="rounded border border-gray-200 bg-white px-3 py-2">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold text-gray-700">Export for sharing or for an LLM:</span>
+            <span className="text-xs font-semibold text-gray-700">Export:</span>
             <button className="px-2.5 py-1 text-xs rounded-md border border-indigo-300 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-medium"
               onClick={function () { dlText(docsMarkdown("all"), "interviews-dashboard-documentation.md"); }}>
               ↓ Everything (Markdown)
@@ -711,84 +893,150 @@ function WorkflowUI(props) {
                 var t = docsMarkdown("all");
                 if (navigator.clipboard) { navigator.clipboard.writeText(t); setDocCopied(true); setTimeout(function () { setDocCopied(false); }, 2200); }
               }}>
-              {docCopied ? "✓ copied" : "⧉ Copy all to clipboard"}
+              {docCopied ? "✓ copied" : "⧉ Copy all"}
             </button>
           </div>
           <p className="text-gray-500 mt-1" style={{ fontSize: "10px" }}>
-            The Markdown is deliberately plain and headed consistently so it can be pasted straight into a
-            model as project context — it carries the lineage, every indicator definition with its
-            denominator, and the cohort-onboarding steps. The full file ends with an <i>Optional</i> section
-            an LLM can drop to save context. JSON is the same content for programmatic use.
+            Plain Markdown with stable headings, so it can be pasted straight into a model as project
+            context — it carries the lineage, every indicator with its denominator, both onboarding
+            checklists and the troubleshooting guide. The full file ends with an <i>Optional</i> section an
+            LLM can drop to save context. JSON is the same content for programmatic use.
           </p>
         </div>
 
-        {/* ---- section nav */}
+        {/* ---------- section nav */}
         <div className="flex flex-wrap items-center gap-2 px-1">
           {SEC.map(function (s) { return <span key={s[0]}>{subBtn(docSec, s[0], setDocSec, s[1])}</span>; })}
         </div>
 
-        {/* ---- 1. FLOW */}
+        {/* ---------- 1. CREATE A COHORT */}
+        {docSec === "opportunity" ? docCard(
+          "Creating a cohort — the opportunity",
+          DOCS.opportunity.note,
+          <div>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {DOCS.opportunity.variants.map(function (v) {
+                return (
+                  <div key={v[0]} className="rounded border border-gray-200 bg-gray-50 px-2 py-1" style={{ maxWidth: "48%" }}>
+                    <div className="text-xs font-semibold text-gray-800">{v[0]}</div>
+                    <div className="text-xs text-gray-600">{v[1]}</div>
+                  </div>
+                );
+              })}
+            </div>
+            {DOCS.opportunity.steps.map(function (s) {
+              return docStep(s.n, s.title, s.where, s.items, s.why, s.gotcha, "#00695C");
+            })}
+            <div className="rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-gray-800">
+              <b>The one step that changes the dashboard most:</b> the lookup table in step 2. That table IS the
+              interview design — Labs reads it to learn a cohort’s topics, their order and their spacing, which
+              is what defines “finished” and therefore every completion and drop-off percentage shown here.
+              The dashboard currently reads these designs:
+              <div className="mt-1">{F.designs.map(function (d) { return <div key={d}>• {d}</div>; })}</div>
+              If a cohort’s row above does not match the Cohort Tracker, fix the lookup table — not the dashboard.
+            </div>
+          </div>, "#00695C") : null}
+
+        {/* ---------- 2. ADD IT TO LABS */}
+        {docSec === "onboarding" ? docCard(
+          "Adding that cohort to Labs",
+          "Ten places, in the order you should do them. They are separate on purpose: the pull scripts decide what gets downloaded, the build decides what gets read, and the gates refuse to run on a half-configured subgroup.",
+          <div>
+            {DOCS.onboarding.map(function (s) {
+              return docStep(s.n, s.title, s.file !== "—" ? s.file : "", [s.what], "", s.gotcha !== "—" ? s.gotcha : "", "#7B1FA2");
+            })}
+            <div className="text-sm font-semibold text-gray-700 mt-3 mb-1">Shortcuts, and when each is safe</div>
+            {DOCS.shortcuts.map(function (s) {
+              return (
+                <div key={s.name} className="mb-2 pl-2" style={{ borderLeft: "3px solid #2E7D32" }}>
+                  <div className="text-xs font-semibold text-gray-800">{s.name}</div>
+                  <div className="text-xs text-gray-700"><b>Use when:</b> {s.when}</div>
+                  <div className="text-xs text-gray-700"><b>How:</b> {s.how}</div>
+                  <div className="text-xs" style={{ color: "#b45309" }}><b>Risk:</b> {s.risk}</div>
+                </div>
+              );
+            })}
+            {F.unmapped
+              ? <div className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-gray-800">
+                  <b>{F.unmapped} cohort(s) are unmapped right now</b> — their data exists but no subgroup pattern
+                  matches, so they are excluded from every rollup. That is step 4.
+                </div>
+              : <div className="mt-2 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-gray-700">
+                  ✓ No unmapped cohorts right now — every cohort in the data resolves to a subgroup.
+                </div>}
+          </div>, "#7B1FA2") : null}
+
+        {/* ---------- 3. DATA FLOW */}
         {docSec === "flow" ? (
-          <div className="rounded border border-gray-200 bg-white px-3 py-3">
-            <div className="text-sm font-semibold text-gray-700 mb-1">The whole pipeline, end to end</div>
-            <p className="text-xs text-gray-600 mb-2">
-              Read top to bottom. <b>Click any box</b> to see what it produces and why it exists — the boxes it
-              connects to light up, so you can trace where a number came from or what a change would affect.
+          <div className="rounded border border-gray-200 bg-white px-3 py-3" style={{ borderLeft: "3px solid #1565C0" }}>
+            <div className="text-sm font-semibold text-gray-800">The whole pipeline, end to end</div>
+            <p className="text-xs text-gray-600 mt-0.5 mb-2">
+              Read top to bottom. <b>Click any box</b> for what it produces and why it exists — every connection
+              touching it is highlighted, so you can trace where a number came from or what a change would affect.
             </p>
             <div style={{ overflowX: "auto" }}>
-              <svg viewBox={"0 0 " + W + " " + H} style={{ width: "100%", minWidth: "820px", height: "auto" }}>
-                {/* layer bands + captions */}
+              <svg viewBox={"0 0 " + W + " " + H} style={{ width: "100%", minWidth: "860px", height: "auto" }}>
+                <defs>
+                  <marker id="docarrow" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="5" markerHeight="5" orient="auto">
+                    <path d="M0,1 L6,4 L0,7 z" fill="#94a3b8" />
+                  </marker>
+                  <marker id="docarrowOn" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="5.5" markerHeight="5.5" orient="auto">
+                    <path d="M0,1 L6,4 L0,7 z" fill="#1f2937" />
+                  </marker>
+                </defs>
                 {DOCS.layers.map(function (ly, li) {
                   return (
                     <g key={ly.id}>
-                      <rect x="0" y={30 + li * ROW} width={W} height={ROW - 6} fill={li % 2 ? "#fafafa" : "#ffffff"} />
-                      <text x="6" y={26 + li * ROW + 14} fill={ly.color} style={{ fontSize: "11px", fontWeight: 700 }}>{ly.label}</text>
+                      <rect x="0" y={TOP + li * ROW - 20} width={W} height={NH + 34} rx="4"
+                        fill={li % 2 ? "#f8fafc" : "#ffffff"} stroke="#f1f5f9" />
+                      <text x="4" y={TOP + li * ROW - 7} fill={ly.color} style={{ fontSize: "10.5px", fontWeight: 700 }}>{ly.label}</text>
                     </g>
                   );
                 })}
-                {/* edges under the nodes */}
                 {DOCS.edges.map(function (e, i) {
                   var a = pos[e[0]], b = pos[e[1]];
                   if (!a || !b) return null;
-                  var x1 = a.x + a.w / 2, y1 = a.y + a.h, x2 = b.x + b.w / 2, y2 = b.y;
+                  var x1 = a.x + a.w / 2, y1 = a.y + a.h, x2 = b.x + b.w / 2, y2 = b.y - 6;
                   var on = sel && (e[0] === sel.id || e[1] === sel.id);
-                  var my = (y1 + y2) / 2;
+                  var midY = y1 + (y2 - y1) * 0.55;
+                  // orthogonal: straight down, across on a shared lane, then down into the target
+                  var d = Math.abs(x1 - x2) < 3
+                    ? "M" + x1 + "," + y1 + " L" + x2 + "," + y2
+                    : "M" + x1 + "," + y1 + " L" + x1 + "," + midY + " L" + x2 + "," + midY + " L" + x2 + "," + y2;
                   return (
-                    <g key={"e" + i}>
-                      <path d={"M" + x1 + "," + y1 + " C" + x1 + "," + my + " " + x2 + "," + my + " " + x2 + "," + y2}
-                        fill="none" stroke={on ? "#1f2937" : "#cbd5e1"} strokeWidth={on ? 2.2 : 1.2} />
-                      <circle cx={x2} cy={y2} r={on ? 3.4 : 2.2} fill={on ? "#1f2937" : "#cbd5e1"} />
-                      {on && e[2] ? (
-                        <text x={(x1 + x2) / 2} y={my - 3} textAnchor="middle" fill="#374151" style={{ fontSize: "9.5px" }}>{e[2]}</text>
-                      ) : null}
+                    <g key={"e" + i} opacity={sel && !on ? 0.22 : 1}>
+                      <path d={d} fill="none" stroke={on ? "#1f2937" : "#94a3b8"} strokeWidth={on ? 2 : 1.1}
+                        markerEnd={on ? "url(#docarrowOn)" : "url(#docarrow)"} />
+                      {on && e[2]
+                        ? <text x={(x1 + x2) / 2} y={midY - 4} textAnchor="middle" fill="#374151" style={{ fontSize: "9px" }}>{e[2]}</text>
+                        : null}
                     </g>
                   );
                 })}
-                {/* nodes */}
                 {DOCS.nodes.map(function (n) {
                   var p = pos[n.id], on = sel && n.id === sel.id, near = lit[n.id] && !on;
+                  var nameLines = wrap(n.label, Math.floor(p.w / 6.4));
+                  var ownLines = wrap(n.owns, Math.floor(p.w / 5.2)).slice(0, 2);
                   return (
-                    <g key={n.id} onClick={function () { setDocNode(docNode === n.id ? null : n.id); }} style={{ cursor: "pointer" }}>
-                      <rect x={p.x} y={p.y} width={p.w} height={p.h} rx="7"
-                        fill={on ? p.color : near ? "#f1f5f9" : "#ffffff"}
-                        stroke={on || near ? p.color : "#d1d5db"} strokeWidth={on ? 2.4 : near ? 1.8 : 1} />
-                      {n.label.length > 26
-                        ? n.label.split(" · ").length > 1
-                          ? n.label.split(" · ").map(function (part, k) {
-                              return <text key={k} x={p.x + p.w / 2} y={p.y + 24 + k * 13} textAnchor="middle"
-                                fill={on ? "#ffffff" : "#111827"} style={{ fontSize: "10.5px", fontWeight: 600 }}>{part}</text>;
-                            })
-                          : <text x={p.x + p.w / 2} y={p.y + 26} textAnchor="middle" fill={on ? "#ffffff" : "#111827"} style={{ fontSize: "10px", fontWeight: 600 }}>{n.label}</text>
-                        : <text x={p.x + p.w / 2} y={p.y + 26} textAnchor="middle" fill={on ? "#ffffff" : "#111827"} style={{ fontSize: "11px", fontWeight: 600 }}>{n.label}</text>}
-                      <text x={p.x + p.w / 2} y={p.y + p.h - 14} textAnchor="middle"
-                        fill={on ? "#eef2ff" : "#6b7280"} style={{ fontSize: "9px" }}>{n.owns.length > 34 ? n.owns.slice(0, 33) + "…" : n.owns}</text>
+                    <g key={n.id} onClick={function () { setDocNode(docNode === n.id ? null : n.id); }} style={{ cursor: "pointer" }}
+                      opacity={sel && !on && !near ? 0.45 : 1}>
+                      <rect x={p.x} y={p.y} width={p.w} height={p.h} rx="6"
+                        fill={on ? p.color : "#ffffff"} stroke={on || near ? p.color : "#cbd5e1"} strokeWidth={on ? 2.2 : near ? 1.8 : 1} />
+                      {nameLines.slice(0, 2).map(function (ln, k) {
+                        return <text key={k} x={p.x + p.w / 2} y={p.y + 16 + k * 12} textAnchor="middle"
+                          fill={on ? "#ffffff" : "#111827"} style={{ fontSize: "10.5px", fontWeight: 600 }}>{ln}</text>;
+                      })}
+                      {ownLines.map(function (ln, k) {
+                        return <text key={"o" + k} x={p.x + p.w / 2} y={p.y + 16 + nameLines.slice(0, 2).length * 12 + 11 + k * 10}
+                          textAnchor="middle" fill={on ? "#e0e7ff" : "#6b7280"} style={{ fontSize: "8.6px" }}>{ln}</text>;
+                      })}
                     </g>
                   );
                 })}
               </svg>
             </div>
             {sel ? (
-              <div className="mt-2 rounded border-l-4 px-3 py-2 bg-gray-50" style={{ borderColor: pos[sel.id].color }}>
+              <div className="mt-2 rounded px-3 py-2 bg-gray-50" style={{ borderLeft: "4px solid " + pos[sel.id].color }}>
                 <div className="text-sm font-semibold text-gray-800">{sel.label}</div>
                 <div className="text-gray-500 mb-1" style={{ fontSize: "10px" }}>Produces: {sel.owns}</div>
                 <p className="text-xs text-gray-700"><b>What it does.</b> {sel.what}</p>
@@ -798,61 +1046,60 @@ function WorkflowUI(props) {
               </div>
             ) : (
               <p className="text-gray-500 mt-1" style={{ fontSize: "10px" }}>
-                Nothing selected — click a box above. The one-line caption under each name is what that step produces.
+                Nothing selected — click a box. The small text inside each box is what that step produces.
               </p>
             )}
             <Legend title="Two design choices worth knowing">
-              <div><b>The join comes before everything.</b> One row per FLW per interview slot is built first, and every
-                tab is an aggregate of those rows. That is why no two numbers on the dashboard can disagree — they are
-                different summaries of the same table, not separate queries.</div>
+              <div><b>The join comes first.</b> One row per FLW per interview slot is built before anything is
+                summarised, and every tab is an aggregate of those rows. That is why two numbers here cannot
+                disagree — they are different summaries of one table, not separate queries.</div>
               <div><b>Nothing publishes past a failing gate.</b> Three checks run after the build, one of which
-                re-derives the headline numbers from the raw sources with entirely separate code. If the two disagree the
-                run stops rather than shipping.</div>
+                re-derives the headline numbers from the raw sources using entirely separate code. If the two
+                disagree, the run stops rather than shipping.</div>
             </Legend>
           </div>
         ) : null}
 
-        {/* ---- 2. TABS */}
-        {docSec === "tabs" ? (
-          <div className="rounded border border-gray-200 bg-white px-3 py-3">
-            <div className="text-sm font-semibold text-gray-700 mb-2">What each tab is for</div>
+        {/* ---------- 4. TABS */}
+        {docSec === "tabs" ? docCard(
+          "What each tab is for",
+          "Each tab answers one question. If you are looking for a number, this tells you which tab owns it.",
+          <div>
             {DOCS.tabs.map(function (t) {
               return (
-                <div key={t.id} className="mb-3 pb-2 border-b border-gray-100">
+                <div key={t.id} className="mb-2 rounded border border-gray-100 bg-gray-50 px-2 py-1.5">
                   <div className="text-xs font-semibold text-gray-800">{t.name}</div>
-                  <div className="text-xs text-gray-700 mb-1">Answers: <i>{t.question}</i></div>
+                  <div className="text-xs text-gray-600 mb-1">Answers: <i>{t.question}</i></div>
                   {t.charts.map(function (c, i) {
-                    return <div key={i} className="text-xs text-gray-700 ml-2">• <b>{c[0]}</b> — {c[1]}</div>;
+                    return <div key={i} className="text-xs text-gray-700">• <b>{c[0]}</b> — {c[1]}</div>;
                   })}
-                  <div className="text-gray-400 mt-1" style={{ fontSize: "9.5px" }}>reads: {t.reads.join(", ")}</div>
+                  <div className="text-gray-400 mt-1" style={{ fontSize: "9px" }}>payload keys: {t.reads.join(", ")}</div>
                 </div>
               );
             })}
-          </div>
-        ) : null}
+          </div>, "#0277BD") : null}
 
-        {/* ---- 3. METRICS */}
-        {docSec === "metrics" ? (
-          <div className="rounded border border-gray-200 bg-white px-3 py-3">
-            <div className="text-sm font-semibold text-gray-700 mb-1">Every indicator, and the logic behind it</div>
-            <p className="text-xs text-gray-600 mb-2">
-              <b>Base</b> is the denominator. If two figures on this dashboard ever look contradictory, the
-              cause is almost always that they use different bases — so it is stated for every single one.
-            </p>
+        {/* ---------- 5. INDICATORS */}
+        {docSec === "metrics" ? docCard(
+          "Every indicator, and the logic behind it",
+          "Base is the denominator. If two figures ever look contradictory, the cause is almost always that they use different bases — so it is stated for every single one.",
+          <div>
             {(function () {
               var gs = [];
               DOCS.metrics.forEach(function (m) { if (gs.indexOf(m.g) < 0) gs.push(m.g); });
               return gs.map(function (g) {
                 return (
                   <div key={g} className="mb-3">
-                    <div className="text-xs font-bold text-indigo-800 mb-1">{g}</div>
+                    <div className="text-xs font-bold text-white inline-block rounded px-1.5 py-0.5 mb-1" style={{ background: "#0277BD" }}>{g}</div>
                     {DOCS.metrics.filter(function (m) { return m.g === g; }).map(function (m) {
                       return (
-                        <div key={m.name} className="mb-2 pl-2 border-l-2 border-gray-200">
-                          <div className="text-xs font-semibold text-gray-800">{m.name}</div>
-                          <div className="text-gray-500" style={{ fontSize: "9.5px" }}>{m.where}</div>
-                          <div className="text-xs text-gray-700"><b>How:</b> {m.how}</div>
-                          <div className="text-xs text-gray-700"><b>Base:</b> {m.base}</div>
+                        <div key={m.name} className="mb-2 rounded border border-gray-100 px-2 py-1.5">
+                          <div className="flex items-baseline justify-between gap-2">
+                            <div className="text-xs font-semibold text-gray-800">{m.name}</div>
+                            <div className="text-gray-400 text-right" style={{ fontSize: "9px" }}>{m.where}</div>
+                          </div>
+                          <div className="text-xs text-gray-700 mt-0.5"><b>How:</b> {m.how}</div>
+                          <div className="text-xs text-gray-700"><b>Base (denominator):</b> {m.base}</div>
                           {m.gotcha && m.gotcha !== "—"
                             ? <div className="text-xs mt-0.5" style={{ color: "#b45309" }}><b>Read with care:</b> {m.gotcha}</div>
                             : null}
@@ -863,60 +1110,44 @@ function WorkflowUI(props) {
                 );
               });
             })()}
+          </div>, "#0277BD") : null}
+
+        {/* ---------- 6. TROUBLESHOOTING */}
+        {docSec === "trouble" ? (
+          <div className="space-y-3">
+            {docCard("When a number looks wrong",
+              "Every entry below is a failure that has actually happened on this dashboard.",
+              <div>
+                {DOCS.troubleshooting.map(function (t, i) {
+                  return (
+                    <div key={i} className="mb-2 rounded border border-gray-100 px-2 py-1.5">
+                      <div className="text-xs font-semibold text-gray-800">{t.symptom}</div>
+                      <div className="text-xs text-gray-700 mt-0.5"><b>Cause:</b> {t.cause}</div>
+                      <div className="text-xs" style={{ color: "#1b7f3b" }}><b>Fix:</b> {t.fix}</div>
+                    </div>
+                  );
+                })}
+              </div>, "#D84315")}
+            {docCard("Known limitations",
+              "Stated here so nobody discovers them by being wrong in a meeting.",
+              <div>
+                {DOCS.limits.map(function (l, i) {
+                  return (
+                    <div key={i} className="mb-1.5 text-xs">
+                      <span className="font-semibold text-gray-800">{l[0]}</span>{" "}
+                      <span className="text-gray-700">{l[1]}</span>
+                    </div>
+                  );
+                })}
+              </div>, "#b45309")}
           </div>
         ) : null}
 
-        {/* ---- 4. ONBOARDING */}
-        {docSec === "onboarding" ? (
-          <div className="rounded border border-gray-200 bg-white px-3 py-3">
-            <div className="text-sm font-semibold text-gray-700 mb-1">Adding a new cohort, step by step</div>
-            <p className="text-xs text-gray-600 mb-2">
-              Ten places. They are separate on purpose: the pull scripts decide what gets downloaded, the
-              build decides what gets read, and the gates refuse to run on a half-configured subgroup. The
-              steps below are in the order you should do them.
-            </p>
-            {DOCS.onboarding.map(function (s) {
-              return (
-                <div key={s.n} className="mb-2 flex gap-2">
-                  <div className="flex-shrink-0 rounded-full bg-indigo-100 text-indigo-800 font-bold flex items-center justify-center"
-                    style={{ width: "20px", height: "20px", fontSize: "10px" }}>{s.n}</div>
-                  <div>
-                    <div className="text-xs font-semibold text-gray-800">{s.title}</div>
-                    {s.file !== "—" ? <div className="text-gray-500" style={{ fontSize: "9.5px", fontFamily: "monospace" }}>{s.file}</div> : null}
-                    <div className="text-xs text-gray-700">{s.what}</div>
-                    {s.gotcha && s.gotcha !== "—"
-                      ? <div className="text-xs mt-0.5" style={{ color: "#b45309" }}>⚠ {s.gotcha}</div>
-                      : null}
-                  </div>
-                </div>
-              );
-            })}
-            <div className="text-sm font-semibold text-gray-700 mt-3 mb-1">Shortcuts, and when each is safe</div>
-            {DOCS.shortcuts.map(function (s) {
-              return (
-                <div key={s.name} className="mb-2 pl-2 border-l-2 border-emerald-200">
-                  <div className="text-xs font-semibold text-gray-800">{s.name}</div>
-                  <div className="text-xs text-gray-700"><b>Use when:</b> {s.when}</div>
-                  <div className="text-xs text-gray-700"><b>How:</b> {s.how}</div>
-                  <div className="text-xs" style={{ color: "#b45309" }}><b>Risk:</b> {s.risk}</div>
-                </div>
-              );
-            })}
-            {F.unmapped
-              ? <div className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-gray-800">
-                  <b>{F.unmapped} cohort(s) are currently unmapped</b> — data exists but no subgroup pattern matches, so
-                  they are excluded from every rollup. That is step 4 above.
-                </div>
-              : <div className="mt-2 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-gray-700">
-                  No unmapped cohorts right now — every cohort in the data resolves to a subgroup.
-                </div>}
-          </div>
-        ) : null}
-
-        {/* ---- 5. GLOSSARY */}
-        {docSec === "glossary" ? (
-          <div className="rounded border border-gray-200 bg-white px-3 py-3">
-            <div className="text-sm font-semibold text-gray-700 mb-2">Glossary</div>
+        {/* ---------- 7. GLOSSARY */}
+        {docSec === "glossary" ? docCard(
+          "Glossary",
+          "Plain definitions for the words used throughout the dashboard.",
+          <div>
             {DOCS.glossary.map(function (g) {
               return (
                 <div key={g[0]} className="mb-1.5 text-xs">
@@ -925,10 +1156,9 @@ function WorkflowUI(props) {
                 </div>
               );
             })}
-            <div className="text-sm font-semibold text-gray-700 mt-3 mb-1">Subgroups in this build</div>
+            <div className="text-xs font-semibold text-gray-800 mt-3 mb-1">Subgroups and their designs in this build</div>
             <div className="text-xs text-gray-700">{F.designs.map(function (d) { return <div key={d}>• {d}</div>; })}</div>
-          </div>
-        ) : null}
+          </div>, "#546E7A") : null}
       </div>
     );
   }
