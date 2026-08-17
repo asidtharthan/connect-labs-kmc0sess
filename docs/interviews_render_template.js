@@ -60,7 +60,10 @@ function WorkflowUI(props) {
   var esg = React.useState("ALL"); var engSg = esg[0], setEngSg = esg[1];              // cohort-engagement: selected cohort (default ALL — meaningful first view)
   var ell = React.useState("all"); var engLlo = ell[0], setEngLlo = ell[1];            // cohort-engagement: LLO filter (all | COWACDI | EHA)
   var ewin = React.useState("active"); var engWin = ewin[0], setEngWin = ewin[1];      // cohort-engagement: active window | full timeline
-  var emk = React.useState(false); var engMark = emk[0], setEngMark = emk[1];          // full timeline: opt-in active-window boundary annotation (off = clean)
+  var emk = React.useState(false); var engMark = emk[0], setEngMark = emk[1];
+  var dsc = React.useState("flow"); var docSec = dsc[0], setDocSec = dsc[1];          // Documentation tab: which section
+  var dnd = React.useState(null); var docNode = dnd[0], setDocNode = dnd[1];          // Documentation tab: selected lineage node
+  var dcp = React.useState(false); var docCopied = dcp[0], setDocCopied = dcp[1];     // Documentation tab: clipboard feedback          // full timeline: opt-in active-window boundary annotation (off = clean)
   var ethr = React.useState(2); var engThr = ethr[0], setEngThr = ethr[1];             // active-window threshold: % of started FLWs newly active/week (1 tight | 2 std | 5 loose)
   var eng1Ref = React.useRef(null), eng1Inst = React.useRef(null);
   var eng2Ref = React.useRef(null), eng2Inst = React.useRef(null);
@@ -258,6 +261,677 @@ function WorkflowUI(props) {
     });
     return function () { if (barInst.current) { barInst.current.destroy(); barInst.current = null; } };
   }, [activeTab, tableSub, topicChart, tcMode, topicGroupMode, naMode]);
+
+  // ============================================================ DOCUMENTATION TAB
+  // ONE structured constant, TWO outputs: the interactive UI below and the Markdown/JSON export.
+  // Same rule as the written briefs — this holds STRUCTURE AND EXPLANATION ONLY. Every quantity is
+  // interpolated from the LIVE DATA object at render time (see liveFacts), so the documentation can
+  // never quote a stale snapshot and cannot drift from the dashboard it describes.
+  var DOCS = {
+    layers: [
+      { id: "src", label: "1 · Upstream systems", color: "#1565C0", note: "Where the raw facts are created. Labs only reads these; it never writes to them." },
+      { id: "pull", layer: "pull", label: "2 · Pull scripts", color: "#00897B", note: "Fetch to local files, so a build is reproducible and can re-run without re-hitting the APIs." },
+      { id: "build", label: "3 · Build", color: "#7B1FA2", note: "Join first, then aggregate. The join is the single source of truth." },
+      { id: "gate", label: "4 · Gates", color: "#D84315", note: "Independent re-checks. Any failure ABORTS the run, so a bad number cannot reach the dashboard." },
+      { id: "pub", label: "5 · Publish", color: "#2E7D32", note: "Embed the data into the React file and upload it to Labs." }
+    ],
+    nodes: [
+      { id: "connect", layer: "src", label: "CommCare Connect", owns: "Invitations · Learn · claims",
+        what: "The platform FLWs are recruited through. It knows who was invited to an opportunity, who accepted, who finished Learn, and who claimed the job.",
+        why: "Gives us the TOP of the funnel. Without it we could only see people who already started interviewing, never the ones we failed to convert." },
+      { id: "hqtrig", layer: "src", label: "CommCare HQ · Trigger Bot forms", owns: "What was offered, to whom, when",
+        what: "Every time the bot offers an FLW their next interview, a form is submitted in the CommCare app.",
+        why: "The ONLY record of what was OFFERED. Comparing offered against done is what separates “we never asked them” from “they did not do it”." },
+      { id: "hqwel", layer: "src", label: "CommCare HQ · Welcome / Learn forms", owns: "Registration + demographics",
+        what: "Registration fields: name, state, LGA, settlement, cadre, education, language.",
+        why: "Every geography and cadre breakdown comes from here. No demographic is invented downstream." },
+      { id: "hqsch", layer: "src", label: "CommCare HQ · interview_schedule lookup", owns: "The DESIGN: topic order + cadence",
+        what: "An app lookup table saying which topics a cohort should get, in what order, and how many days apart.",
+        why: "Defines what “finished” MEANS for each cohort. A 2-interview cohort that did 2 is complete; a 13-interview cohort that did 2 is not." },
+      { id: "ocs", layer: "src", label: "OpenChatStudio (OCS)", owns: "The interviews themselves",
+        what: "The AI interviewer. One session per FLW per interview, with status, timestamps and message counts.",
+        why: "The only place an interview is actually STARTED or COMPLETED. Everything about answer depth originates here." },
+
+      { id: "p_connect", layer: "pull", label: "fetch_connect_user_data.py", owns: "connect_user_data_snapshot.csv",
+        what: "Headless pull of per-opportunity user data, consolidated to one row per FLW per cohort.",
+        why: "Connect has no simple API key, so this uses a self-rotating refresh token. It also filters by cohort pattern — a new cohort missing from that map silently gets NO funnel data." },
+      { id: "p_hq", layer: "pull", label: "pull_hq_full_payloads.py", owns: "hq_pull_full/{domain}__*.jsonl",
+        what: "Downloads every Trigger-Bot and Welcome form submission, per CommCare domain.",
+        why: "Full payloads rather than summaries, so any field can be re-derived later without another pull." },
+      { id: "p_sch", layer: "pull", label: "pull_hq_interview_schedule.py", owns: "_interview_schedule.json",
+        what: "Reads the schedule lookup and walks each topic chain into an ordered design.",
+        why: "The design is read from the app rather than hardcoded, so a schedule change appears without a code edit." },
+      { id: "p_ocs", layer: "pull", label: "pull_ocs_state.py · pull_ocs_words.py", owns: "_ocs_state_cache.json · _ocs_words_cache.json",
+        what: "Session list with state, plus per-session FLW word and message counts.",
+        why: "Incremental on purpose: OCS has no usable updated-at filter, so it re-scans a recent window and merges by session id. Re-pulling everything daily would hit rate limits." },
+
+      { id: "master", layer: "build", label: "build_master_4src.py", owns: "ONE ROW PER FLW × INTERVIEW",
+        what: "The join. For every FLW and every interview slot in their cohort’s design, it interlocks Connect, both HQ form sets and the OCS session, then marks that slot triggered / started / completed.",
+        why: "THE source of truth. Every tab, chart and export is an aggregate of these rows — which is why two numbers on the dashboard cannot disagree by construction." },
+      { id: "agg", layer: "build", label: "build_payload_agg.py", owns: "payload_agg.json",
+        what: "Rolls the master rows into subgroup funnels, per-interview drop-off, weekly engagement series and the de-impact adjustment.",
+        why: "Aggregating once, outside the browser, keeps the payload small and stops two charts computing the same thing two different ways." },
+      { id: "dash", layer: "build", label: "build_dashboard_data.py", owns: "dashboard_data.json + render_data.json",
+        what: "Assembles the final payload, then writes a PRUNED copy for the render.",
+        why: "Labs caps the render file at 512 KB. The full payload stays complete for the gates; the pruned copy drops keys the interface never reads." },
+
+      { id: "g6a", layer: "gate", label: "audit_e2e.py", owns: "Gate 6a",
+        what: "End-to-end reconciliation of the master rows back against each source.",
+        why: "Catches a join that silently dropped or duplicated rows." },
+      { id: "g6b", layer: "gate", label: "build_dashboard_data_audit.py", owns: "Gate 6b",
+        what: "Checks the payload the dashboard will actually read: every headline count must tie to the rows behind it.",
+        why: "Catches an aggregation that no longer matches its own detail." },
+      { id: "g7b", layer: "gate", label: "brutal_verify.py", owns: "Gate 7b + regression guard",
+        what: "Re-derives the headline numbers from the RAW sources using its own separate code, cross-checks every place a number appears, and compares against run history.",
+        why: "The duplication is deliberate. If the builder and this disagree, one is wrong and the run stops. It also blocks a silent collapse: counts cannot fall below a floor derived from the best-ever run." },
+
+      { id: "inject", layer: "pub", label: "inject into the render template", owns: "docs/interviews_master_v3_render.js",
+        what: "Substitutes the pruned payload into the placeholder inside docs/interviews_render_template.js.",
+        why: "The data is EMBEDDED, not fetched live: a live multi-cohort pull exceeds the platform request timeout and would return nothing at all." },
+      { id: "push", layer: "pub", label: "publish via MCP", owns: "Labs workflow 3962 render_code",
+        what: "Uploads the finished file as a new render version, guarded by the expected current version.",
+        why: "Version-guarded so two runs cannot overwrite each other unnoticed. A timed-out upload is re-checked rather than assumed to have failed." }
+    ],
+    edges: [
+      ["connect", "p_connect", "invited · accepted · learn · claimed"],
+      ["hqtrig", "p_hq", "offer events"], ["hqwel", "p_hq", "registration fields"],
+      ["hqsch", "p_sch", "topic chain + cadence"], ["ocs", "p_ocs", "sessions + word counts"],
+      ["p_connect", "master", "funnel columns"], ["p_hq", "master", "triggered + demographics"],
+      ["p_sch", "master", "the design"], ["p_ocs", "master", "started + completed"],
+      ["master", "agg", "rows"], ["agg", "dash", "rollups + series"],
+      ["dash", "g6a", ""], ["dash", "g6b", ""], ["dash", "g7b", "raw re-derivation"],
+      ["g7b", "inject", "all gates pass"], ["inject", "push", "one .js file"]
+    ],
+
+    // ---- what each tab answers, and which payload keys it reads
+    tabs: [
+      { id: "overview", name: "Overview", question: "How big is this and is it healthy?",
+        reads: ["counts", "table1", "topicStatus"],
+        charts: [
+          ["Headline counts", "Unique FLWs, cohorts, interviews started and completed — counted as DISTINCT things, so the same FLW in three cohorts is one FLW."],
+          ["FLW status by topic", "For each topic, how many claimed slots ended completed / started-not-completed / offered-but-missed / never offered."]
+        ] },
+      { id: "table", name: "Table View", question: "What do the numbers look like per subgroup and per cohort?",
+        reads: ["table1", "table2", "table3", "cohortSG"],
+        charts: [["Subgroup and cohort tables", "The same counts as Overview, split by subgroup, arm and individual cohort, with average FLW words per interview."]] },
+      { id: "funnels", name: "Interview Completion Funnels", question: "Where do people fall out, and are they still engaged?",
+        reads: ["connectFunnel", "dropoff", "lineSeries", "deimpact", "cohortEngagement", "cohortEngagementLLO"],
+        charts: [
+          ["Connect funnel", "Invited → accepted → Learn completed → claimed → initiated. Everything before an interview exists."],
+          ["Interview drop-off table", "Per interview slot: eligible, triggered, started, completed, with three percentage bases (see Indicators)."],
+          ["Retention lines", "Completion by interview number, with a Denominator toggle and a de-impact toggle."],
+          ["Cohort Engagement (3 panels)", "Weekly recruitment, engagement quality (Finished / Steady / Inconsistent / Dropped) and status-now (New / Active / Slow / Quiet / Finished)."]
+        ] },
+      { id: "fullretention", name: "Full Retention Table", question: "Give me every cohort × interview number in one grid.",
+        reads: ["dropoff", "cohortSG"],
+        charts: [["Full grid + CSV export", "One row per cohort, one column per interview slot, exportable."]] },
+      { id: "breakdowns", name: "Breakdowns", question: "How does completion differ by who and where?",
+        reads: ["granular", "topicStatusCohort", "flwMatrixV2"],
+        charts: [
+          ["Granular filters", "Multi-select filters over the per-slot rows, with CSV export of the filtered set or everything."],
+          ["FLW × topic matrix", "One row per FLW, one cell per topic, coloured by the 7-state slot model."]
+        ] },
+      { id: "flw", name: "FLW Retention", question: "Treating each PERSON as the unit, who keeps going and who stops?",
+        reads: ["flwEngagement"],
+        charts: [
+          ["Headline cards", "Per-cohort finish on both bases, finished ≥ 1 schedule, answer depth."],
+          ["Nine drill-down panels", "State, partner, cadre, tier, persona, cohort count, finished, peer density, pace — all click-to-filter and cross-filtering."],
+          ["Survival ladder", "Share reaching each interview number, each row against its OWN eligible pool."],
+          ["Geography", "LGA-level spread, which is wider than the between-state spread."]
+        ] },
+      { id: "docs", name: "Documentation", question: "How does all of this work, and how do I add a cohort?",
+        reads: ["everything (read-only)"],
+        charts: [["This tab", "Lineage diagram, indicator definitions, the cohort-onboarding checklist, glossary, and the export bundle."]] }
+    ],
+
+    // ---- every indicator: where it appears, how it is computed, and what NOT to conclude
+    metrics: [
+      { g: "Funnel", name: "Invited / Accepted / Learn completed / Claimed", where: "Funnels → Connect funnel",
+        how: "Counted from the Connect snapshot, one row per FLW per cohort.",
+        base: "Everyone invited to that opportunity.",
+        gotcha: "This is the ONE leg that does not auto-refresh from a live API in every mode — if a new cohort is missing from the Connect pull’s cohort map, its funnel shows zeros while its interview numbers look fine." },
+      { g: "Funnel", name: "Eligible", where: "Funnels → drop-off table",
+        how: "FLWs whose cohort design CONTAINS that interview slot and who reached the point of being in the study.",
+        base: "—", gotcha: "Eligible is a TRIGGERED-side basis. It can exceed the number who ever started an interview, so a percentage of eligible is not a percentage of active people." },
+      { g: "Funnel", name: "Triggered", where: "Funnels → drop-off table",
+        how: "A Trigger-Bot form exists for that FLW and slot: the bot offered it.",
+        base: "Eligible", gotcha: "Offered is not the same as received. A low triggered share is a programme/rollout issue, not an FLW behaviour issue." },
+      { g: "Funnel", name: "Started / Completed", where: "Funnels, Overview, Tables",
+        how: "An OCS session for that FLW and topic exists (started) and reached completion (completed).",
+        base: "Eligible, triggered, or the interview-1 base — the table shows all three",
+        gotcha: "Always check WHICH base a percentage uses. “% of base” compares against interview 1, so it falls as the schedule progresses even when each individual step is healthy." },
+      { g: "Retention", name: "Retention line — # Initiated", where: "Funnels → Retention lines",
+        how: "Completed at interview N divided by everyone who initiated the study.",
+        base: "Fixed base = initiated", gotcha: "Falls steeply for long schedules simply because later interviews have not been offered yet." },
+      { g: "Retention", name: "Retention line — Reached previous interview", where: "Funnels → Retention lines (Denominator toggle)",
+        how: "Started at N divided by started at N−1, any status.",
+        base: "Moving base = the previous step", gotcha: "Answers “of those who got here, how many continued”. Same numerator as the other view — only the denominator changes." },
+      { g: "Retention", name: "De-impact", where: "Funnels → de-impact toggle",
+        how: "Removes FLWs affected by a known upstream scheduling artefact where a final interview could fire back-to-back with the one before it.",
+        base: "—", gotcha: "A correction for a bug in the interview app, not a data cleanup. Root cause is upstream; the toggle only shows what the number would be without it." },
+      { g: "Engagement", name: "Finished", where: "Funnels → Cohort Engagement; FLW Retention",
+        how: "Completed EVERY interview in their cohort’s design. The finish date is the date the last one was completed.",
+        base: "FLWs who started ≥ 1 interview in that subgroup",
+        gotcha: "Depends on the design length, so it is not comparable across subgroups without saying how many interviews each has. Finished OUTRANKS every other status — a finisher is never counted as dropped." },
+      { g: "Engagement", name: "Dropped off", where: "Funnels → Cohort Engagement",
+        how: "Has NOT finished the schedule AND has been silent for more than 14 days as of the date being measured.",
+        base: "FLWs who started ≥ 1 interview",
+        gotcha: "As-of-date sensitive: the same person flips into this bucket purely by the calendar moving. The 14-day rule is fixed and does NOT scale with a cohort’s cadence." },
+      { g: "Engagement", name: "Steady vs Inconsistent", where: "Funnels → Cohort Engagement",
+        how: "Steady = never a gap longer than the cohort’s gap threshold. Inconsistent = at least one longer gap. The threshold is twice that cohort’s interview cadence.",
+        base: "FLWs who started ≥ 1 interview",
+        gotcha: "Cadence-relative on purpose, so a 3-day and a 14-day cohort are judged fairly. It is therefore NOT a fixed number of days across subgroups." },
+      { g: "Engagement", name: "New / Active / Slow / Quiet", where: "Funnels → Cohort Engagement panel 3",
+        how: "Status right now, in priority order: first-ever interview this week (New), last interview within 7 days (Active), 8–14 days (Slow), more than 14 days (Quiet). Finished takes precedence over all four.",
+        base: "FLWs who started ≥ 1 interview", gotcha: "Quiet and Dropped count the same people; one is shown as a count, the other as a percentage." },
+      { g: "Engagement", name: "Active window vs Full timeline", where: "Funnels → Cohort Engagement",
+        how: "Active window trims trailing weeks once fewer than the cutoff share of a cohort is newly starting or finishing, so a completed cohort does not read as a long flat drop-off. Full timeline shows every week.",
+        base: "—",
+        gotcha: "For ALL COHORTS the window runs as long as ANY cohort is still active, because a percentage of the whole population is a bar a small late cohort could never reach. Where there is nothing to trim the toggle is hidden. The KPI tiles are always CURRENT; a trimmed chart can legitimately end earlier, and the page states both numbers when they differ." },
+      { g: "Slots", name: "The 7 slot states", where: "Overview, Breakdowns matrix",
+        how: "Each FLW × topic cell is exactly one of: completed, started-not-completed, available-not-started, available-missed-overdue, not-available-yet, not-triggered, not-applicable.",
+        base: "Claimed slots", gotcha: "“Not applicable” means the topic is not in that cohort’s design at all — it is not a failure and must not be added to a denominator." },
+      { g: "FLW", name: "Per-cohort finish — so far", where: "FLW Retention",
+        how: "For each FLW, schedules finished divided by every schedule they were enrolled in, then averaged across FLWs.",
+        base: "All their enrolments",
+        gotcha: "Counts schedules the programme has NOT finished rolling out as unfinished, so it understates finishing — and understates it slightly more for multi-cohort FLWs, who are likelier to be carrying one still in flight." },
+      { g: "FLW", name: "Per-cohort finish — of schedules actually offered", where: "FLW Retention",
+        how: "Same numerator, but divided only by schedules whose whole design was actually put to them.",
+        base: "Fully-offered enrolments only",
+        gotcha: "The fair like-for-like rate, but silent about work still in progress. FLWs with no fully-offered schedule are EXCLUDED rather than counted as zero." },
+      { g: "FLW", name: "Finished ≥ 1 schedule", where: "FLW Retention",
+        how: "Finished at least one of their cohorts.",
+        base: "All FLWs",
+        gotcha: "Mechanically rises with the number of cohorts someone is in — three cohorts is three chances. Do not read a multi-vs-single gap on this measure as evidence that re-use improves engagement." },
+      { g: "FLW", name: "Engagement tier", where: "FLW Retention",
+        how: "A score band blending recency, completion rate and answer depth.",
+        base: "All FLWs",
+        gotcha: "Describes where someone is TODAY, not their history. Because it rewards recency and depth, the top tier is NOT necessarily the best finishers. Recency is measured against the freshest session in the data, not the wall clock, so a lagging pull cannot push everyone into a worse tier." },
+      { g: "FLW", name: "Persona", where: "FLW Retention",
+        how: "A rule-based segment over the FLW’s whole history.",
+        base: "All FLWs",
+        gotcha: "Several personas are DEFINED by whether the person finished, so the finish rate shown beside them is a definition, not a result — One-and-done is 0% by construction." },
+      { g: "FLW", name: "Survival ladder", where: "FLW Retention",
+        how: "Share reaching each interview number, each row against the FLWs whose own design CONTAINS that interview.",
+        base: "Per-row eligible pool",
+        gotcha: "Each row has a DIFFERENT denominator, so a later interview can legitimately show a HIGHER share than an earlier one when short-schedule cohorts leave the pool. Compare a row to its own count, never to the row above." },
+      { g: "Quality", name: "Average FLW words", where: "Overview, Tables, FLW Retention",
+        how: "Whitespace-separated words in FLW messages only, from OCS.",
+        base: "FLW messages",
+        gotcha: "Bot messages and OCS system messages are excluded. A word count is a proxy for effort, not for correctness or relevance." },
+      { g: "Display", name: "Dotted vs solid funnel line", where: "Funnels → Retention lines",
+        how: "Dotted while a subgroup is still inside its expected rollout window; solid once every cohort has passed it.",
+        base: "—",
+        gotcha: "Dotted means “still arriving, do not read the fall as attrition”. Two subgroups whose real schedule cannot be derived have a pinned end date, taken from the Cohort Tracker." }
+    ],
+
+    // ---- adding a cohort: the checklist, verified against current code
+    onboarding: [
+      { n: 1, title: "Get the facts first", file: "—",
+        what: "You need four things: the CommCare domain name, the cohort id as it appears in the data, which subgroup it belongs to (existing or new), and its interview design — the topic order and the cadence in days.",
+        gotcha: "Do not guess the design. It comes from the app’s interview_schedule lookup and is pulled automatically; the fallback in code is only a safety net." },
+      { n: 2, title: "Add the domain to the three HQ pull scripts", file: "pull_hq_full_payloads.py · pull_hq_interview_schedule.py · pull_hq_user_cases.py",
+        what: "Each has a default domain list. Add the new domain to all three.",
+        gotcha: "Miss one and you get partial data with no error — forms but no schedule, or a schedule with no forms." },
+      { n: 3, title: "Add the domain to the list the BUILD actually reads", file: "build_master_4src.py → ALL_DOMAINS",
+        what: "This is the list that opens the downloaded files.",
+        gotcha: "THE #1 GOTCHA. Miss this and the data sits on disk and is silently ignored: no error, no new cohort, the counts simply do not move." },
+      { n: 4, title: "Map the cohort id to its subgroup", file: "build_master_4src.py → cohort_to_sg",
+        what: "A pattern turning a cohort id into a subgroup name.",
+        gotcha: "Unmapped cohorts are collected and surfaced on the dashboard as a warning rather than dropped — so if you see that notice, this step is what is missing." },
+      { n: 5, title: "Label the subgroup and give it a fallback design", file: "build_master_4src.py → COHORT_TYPE_MAP, _FALLBACK_DESIGN",
+        what: "A human-readable label, plus topics and cadence used if the live schedule is unavailable.",
+        gotcha: "—" },
+      { n: 6, title: "Add the same pattern to the Connect pull", file: "fetch_connect_user_data.py → _cohort_to_sg",
+        what: "The Connect pull filters opportunities by the same mapping.",
+        gotcha: "Miss this and the interview numbers appear but the whole Connect funnel reads zero for the new cohort." },
+      { n: 7, title: "Add the subgroup to every gate script", file: "build_payload_agg.py · audit_e2e.py · brutal_verify.py · build_dashboard_data_audit.py",
+        what: "Each holds its own subgroup ordering and arm-rollup map. brutal_verify.py deliberately keeps its OWN copy of the cohort mapping.",
+        gotcha: "Miss one and the build ABORTS with a key error. That is the gates working as intended — it is louder and safer than shipping a half-loaded cohort." },
+      { n: 8, title: "Add it to the render", file: "docs/interviews_render_template.js",
+        what: "Subgroup display order, a distinct colour, and the fallback design. Add topic names only if the cohort introduces a NEW topic.",
+        gotcha: "Pick a colour that is genuinely distinct from the existing ones — several near-identical colours have had to be fixed here before." },
+      { n: 9, title: "Build locally and read the gate output", file: "python refresh_interviews_dashboard.py",
+        what: "With no flags it skips all the network pulls and just builds, audits and injects, so you can check the new cohort appears with sensible numbers.",
+        gotcha: "A brand-new cohort legitimately looks odd at first — release status not-available, a nonsense average from a single interview. Those settle as data accrues." },
+      { n: 10, title: "Publish with a FULL refresh, not the render-only shortcut", file: "GitHub Actions → Refresh Interviews Dashboard",
+        what: "A new cohort is a DATA change, so the Connect pull has to run. Trigger the workflow rather than pushing a render.",
+        gotcha: "Never run two refreshes at once: the Connect credential rotates itself during a run, so a second overlapping run fails authentication." }
+    ],
+
+    shortcuts: [
+      { name: "Render-only publish", when: "You changed only presentation — wording, colours, layout, a chart option.",
+        how: "Read the CURRENTLY PUBLISHED render, lift its embedded data out, inject that same data into the edited template, and upload. Live numbers are preserved exactly and no rebuild runs.",
+        risk: "Valid ONLY when no number changes. If you touched anything that computes a value, this quietly ships old data under new code." },
+      { name: "Build with no credentials", when: "Local development.",
+        how: "Run the refresh script with no flags: it uses the local source files already on disk and does build → audit → inject.",
+        risk: "Whatever is on disk may be stale. Never quote a number from a local build — read it from the published dashboard." },
+      { name: "Test render changes without publishing", when: "You edited the React file.",
+        how: "Inject the live data into the edited template and run it through the offline browser harness, which drives real clicks and asserts on what is displayed.",
+        risk: "None. This is the cheapest way to catch a blank chart or a mislabelled figure before anyone sees it." },
+      { name: "Re-run after a failed publish", when: "The gates passed but the upload failed.",
+        how: "Just re-trigger. The upload is version-guarded and re-checks whether the write actually landed, so a retry cannot double-publish.",
+        risk: "Read the actual error first. A timeout is transient; an authentication error means the token needs re-minting." }
+    ],
+
+    glossary: [
+      ["FLW", "Front-line worker — the community health worker being interviewed. One person, even if they appear in several cohorts."],
+      ["Cohort", "One recruited group in one place, with its own id. The smallest unit the programme runs."],
+      ["Subgroup", "A family of cohorts sharing an interview design, e.g. the panel group or an A/B arm."],
+      ["Arm", "The A or B side of an experiment. Arms roll up to one experiment for reporting."],
+      ["Topic", "The subject of a single interview, e.g. bed net usage. Identified by a short code."],
+      ["Interview slot", "One position in a cohort’s schedule: interview 3 of 13. A slot exists whether or not it happened."],
+      ["Design", "The ordered list of topics a cohort should receive, plus the cadence between them."],
+      ["Cadence", "Intended days between interviews. Varies by subgroup, which is why time-based rules are cadence-relative."],
+      ["Triggered", "The bot OFFERED the interview. Recorded as a form in CommCare."],
+      ["Initiated", "The FLW started participating in the study at all."],
+      ["Claimed", "The FLW took up the opportunity in Connect — the last step before interviewing."],
+      ["Session", "One conversation in OCS: one FLW, one interview, start to finish."],
+      ["LLO", "Local learning organisation — the partner running delivery on the ground."],
+      ["Gate", "An automated check that stops the build. Nothing publishes with a failing gate."]
+    ]
+  };
+
+  // Numbers quoted anywhere in the documentation come from HERE — read out of the live DATA object at
+  // render time. Nothing about scale is written as a literal, so the docs cannot describe a dashboard
+  // that no longer exists.
+  function liveFacts() {
+    var c = DATA.counts || {}, SD = DATA.subgroupDesign || {}, sgs = Object.keys(SD);
+    var lens = sgs.map(function (s) { return (SD[s].topics || []).length; });
+    var cads = sgs.map(function (s) { return SD[s].cadence; }).filter(function (x) { return x; });
+    return {
+      today: DATA.today || "", built: DATA.built_at || "",
+      flws: c.flws, cohorts: c.cohorts, rows: c.master_rows, started: c.started, completed: c.completed,
+      subgroups: sgs.length, sgList: sgs,
+      topics: Object.keys(DATA.topicNames || {}).length,
+      minLen: lens.length ? Math.min.apply(null, lens) : 0,
+      maxLen: lens.length ? Math.max.apply(null, lens) : 0,
+      minCad: cads.length ? Math.min.apply(null, cads) : 0,
+      maxCad: cads.length ? Math.max.apply(null, cads) : 0,
+      unmapped: (DATA.unmappedCohorts || []).length,
+      designs: sgs.map(function (s) { return s + ": " + (SD[s].topics || []).length + " interviews every " + SD[s].cadence + "d"; })
+    };
+  }
+
+  // ---- Markdown export. Structured as llms.txt-style: a compact index plus an optional full body, so
+  // it can be pasted straight into an LLM as project context. Plain Markdown, no HTML, stable headings.
+  function docsMarkdown(section) {
+    var F = liveFacts(), L = [], all = section === "all";
+    function h(n, t) { L.push("\n" + Array(n + 1).join("#") + " " + t + "\n"); }
+    L.push("# Connect Interviews Dashboard — how it works");
+    L.push("\n> Generated from the live dashboard on " + F.today + " (build " + F.built + ").");
+    L.push("> Every figure below is read from the published payload at generation time, not copied by hand.");
+    L.push("\n**Scale right now:** " + F.flws + " unique FLWs · " + F.cohorts + " cohorts · " + F.subgroups +
+      " subgroups · " + F.topics + " topics · " + F.rows + " FLW×interview rows · " +
+      F.started + " interviews started · " + F.completed + " completed.");
+    L.push("\n**Interview designs vary**, which is why almost every rule here is relative rather than absolute: " +
+      "schedules run from " + F.minLen + " to " + F.maxLen + " interviews, with cadences from " +
+      F.minCad + " to " + F.maxCad + " days.\n");
+    L.push("- " + F.designs.join("\n- "));
+
+    if (all || section === "flow") {
+      h(2, "Where the data comes from");
+      L.push("Five upstream systems, pulled to local files, joined into one row per FLW per interview, " +
+        "aggregated, checked by three independent gates, then embedded in the dashboard file.\n");
+      DOCS.layers.forEach(function (ly) {
+        h(3, ly.label);
+        L.push("_" + ly.note + "_\n");
+        DOCS.nodes.filter(function (n) { return n.layer === ly.id; }).forEach(function (n) {
+          L.push("**" + n.label + "** — produces: " + n.owns);
+          L.push("- What: " + n.what);
+          L.push("- Why it matters: " + n.why + "\n");
+        });
+      });
+      h(3, "Flow");
+      DOCS.edges.forEach(function (e) {
+        var a = DOCS.nodes.filter(function (n) { return n.id === e[0]; })[0];
+        var b = DOCS.nodes.filter(function (n) { return n.id === e[1]; })[0];
+        if (a && b) L.push("- " + a.label + " → " + b.label + (e[2] ? " (" + e[2] + ")" : ""));
+      });
+    }
+    if (all || section === "tabs") {
+      h(2, "What each tab shows");
+      DOCS.tabs.forEach(function (t) {
+        h(3, t.name);
+        L.push("**Answers:** " + t.question + "  \n**Reads payload keys:** " + t.reads.join(", ") + "\n");
+        t.charts.forEach(function (c) { L.push("- **" + c[0] + "** — " + c[1]); });
+      });
+    }
+    if (all || section === "metrics") {
+      h(2, "Every indicator, and how it is calculated");
+      L.push("Grouped by area. `Base` is the denominator — the single most common cause of two numbers " +
+        "appearing to disagree is comparing percentages that use different bases.\n");
+      var groups = [];
+      DOCS.metrics.forEach(function (m) { if (groups.indexOf(m.g) < 0) groups.push(m.g); });
+      groups.forEach(function (g) {
+        h(3, g);
+        DOCS.metrics.filter(function (m) { return m.g === g; }).forEach(function (m) {
+          L.push("**" + m.name + "**  \n_Where:_ " + m.where + "  \n_How:_ " + m.how +
+            "  \n_Base:_ " + m.base + (m.gotcha && m.gotcha !== "—" ? "  \n_Read with care:_ " + m.gotcha : "") + "\n");
+        });
+      });
+    }
+    if (all || section === "onboarding") {
+      h(2, "Adding a new cohort — step by step");
+      L.push("Ten places, in order. They are separate on purpose: the pull scripts decide what is " +
+        "downloaded, the build decides what is read, and the gates refuse to run on a half-configured " +
+        "subgroup.\n");
+      DOCS.onboarding.forEach(function (s) {
+        L.push("**Step " + s.n + " — " + s.title + "**  \n_File:_ `" + s.file + "`  \n" + s.what +
+          (s.gotcha && s.gotcha !== "—" ? "  \n⚠ " + s.gotcha : "") + "\n");
+      });
+      h(3, "Shortcuts, and when they are safe");
+      DOCS.shortcuts.forEach(function (s) {
+        L.push("**" + s.name + "**  \n_Use when:_ " + s.when + "  \n_How:_ " + s.how + "  \n_Risk:_ " + s.risk + "\n");
+      });
+    }
+    if (all || section === "glossary") {
+      h(2, "Glossary");
+      DOCS.glossary.forEach(function (g) { L.push("- **" + g[0] + "** — " + g[1]); });
+    }
+    if (all) {
+      h(2, "Optional");
+      L.push("Detail a reader can skip on a first pass, kept here so an LLM can drop it to save context.\n");
+      L.push("- **Payload keys present in this build:** " + Object.keys(DATA).sort().join(", "));
+      L.push("- **Subgroups present:** " + F.sgList.join(", "));
+      L.push("- **Unmapped cohorts (should be 0):** " + F.unmapped);
+      L.push("- The dashboard embeds its data rather than querying live, because a live multi-cohort " +
+        "pull exceeds the platform request timeout.");
+      L.push("- The render file is capped at 512 KB by the platform, so the payload is pruned of keys " +
+        "the interface never reads.");
+    }
+    return L.join("\n") + "\n";
+  }
+
+  function dlText(text, name, mime) {
+    var blob = new Blob([text], { type: mime || "text/markdown;charset=utf-8" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  }
+
+  function renderDocs() {
+    var F = liveFacts();
+    var SEC = [["flow", "Data flow"], ["tabs", "Tabs & charts"], ["metrics", "Indicators"],
+               ["onboarding", "Add a cohort"], ["glossary", "Glossary"]];
+    // ---- flowchart geometry: one ROW per layer, nodes spread across it. Computed rather than
+    // hand-placed so adding a node cannot break the picture.
+    var W = 1180, ROW = 128, PAD = 58, NW = 196, NH = 66;
+    var pos = {};
+    DOCS.layers.forEach(function (ly, li) {
+      var ns = DOCS.nodes.filter(function (n) { return n.layer === ly.id; });
+      var gap = (W - 2 * PAD - ns.length * NW) / Math.max(ns.length - 1, 1);
+      ns.forEach(function (n, i) {
+        pos[n.id] = { x: PAD + i * (NW + gap), y: 44 + li * ROW, w: NW, h: NH, color: ly.color };
+      });
+    });
+    var H = 44 + DOCS.layers.length * ROW;
+    var sel = docNode ? DOCS.nodes.filter(function (n) { return n.id === docNode; })[0] : null;
+    var lit = {};   // ER-style: selecting a node highlights every edge touching it
+    if (sel) DOCS.edges.forEach(function (e) { if (e[0] === sel.id || e[1] === sel.id) { lit[e[0]] = 1; lit[e[1]] = 1; } });
+
+    return (
+      <div className="space-y-3">
+        <div className="rounded border border-indigo-200 bg-indigo-50 px-3 py-2">
+          <div className="text-sm font-semibold text-gray-800 mb-1">How this dashboard is built, and how to extend it</div>
+          <p className="text-xs text-gray-700">
+            Everything here is generated from the dashboard itself. The scale figures, the list of subgroups
+            and the payload keys are read from the live data when this page loads, so this page cannot
+            describe a version that no longer exists. Written for someone who has never seen the pipeline.
+          </p>
+          <p className="text-xs text-gray-700 mt-1">
+            <b>Right now:</b> {Number(F.flws).toLocaleString()} unique FLWs · {F.cohorts} cohorts ·{" "}
+            {F.subgroups} subgroups · {F.topics} topics · {Number(F.rows).toLocaleString()} FLW×interview
+            rows · {Number(F.started).toLocaleString()} interviews started ·{" "}
+            {Number(F.completed).toLocaleString()} completed. Data as of <b>{F.today}</b>.
+          </p>
+          <p className="text-xs text-gray-600 mt-1">
+            Schedules run from <b>{F.minLen}</b> to <b>{F.maxLen}</b> interviews at <b>{F.minCad}</b>–<b>{F.maxCad}</b> day
+            cadences — which is why nearly every rule below is <i>relative to the cohort</i> rather than a fixed number.
+          </p>
+        </div>
+
+        {/* ---- export bar */}
+        <div className="rounded border border-gray-200 bg-white px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-gray-700">Export for sharing or for an LLM:</span>
+            <button className="px-2.5 py-1 text-xs rounded-md border border-indigo-300 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-medium"
+              onClick={function () { dlText(docsMarkdown("all"), "interviews-dashboard-documentation.md"); }}>
+              ↓ Everything (Markdown)
+            </button>
+            <button className="px-2.5 py-1 text-xs rounded-md border border-gray-300 hover:bg-gray-100"
+              onClick={function () { dlText(docsMarkdown(docSec), "interviews-docs-" + docSec + ".md"); }}>
+              ↓ This section only
+            </button>
+            <button className="px-2.5 py-1 text-xs rounded-md border border-gray-300 hover:bg-gray-100"
+              onClick={function () { dlText(JSON.stringify({ generated: F.today, built_at: F.built, scale: F, docs: DOCS }, null, 1), "interviews-dashboard-documentation.json", "application/json"); }}>
+              ↓ Structured JSON
+            </button>
+            <button className="px-2.5 py-1 text-xs rounded-md border border-gray-300 hover:bg-gray-100"
+              onClick={function () {
+                var t = docsMarkdown("all");
+                if (navigator.clipboard) { navigator.clipboard.writeText(t); setDocCopied(true); setTimeout(function () { setDocCopied(false); }, 2200); }
+              }}>
+              {docCopied ? "✓ copied" : "⧉ Copy all to clipboard"}
+            </button>
+          </div>
+          <p className="text-gray-500 mt-1" style={{ fontSize: "10px" }}>
+            The Markdown is deliberately plain and headed consistently so it can be pasted straight into a
+            model as project context — it carries the lineage, every indicator definition with its
+            denominator, and the cohort-onboarding steps. The full file ends with an <i>Optional</i> section
+            an LLM can drop to save context. JSON is the same content for programmatic use.
+          </p>
+        </div>
+
+        {/* ---- section nav */}
+        <div className="flex flex-wrap items-center gap-2 px-1">
+          {SEC.map(function (s) { return <span key={s[0]}>{subBtn(docSec, s[0], setDocSec, s[1])}</span>; })}
+        </div>
+
+        {/* ---- 1. FLOW */}
+        {docSec === "flow" ? (
+          <div className="rounded border border-gray-200 bg-white px-3 py-3">
+            <div className="text-sm font-semibold text-gray-700 mb-1">The whole pipeline, end to end</div>
+            <p className="text-xs text-gray-600 mb-2">
+              Read top to bottom. <b>Click any box</b> to see what it produces and why it exists — the boxes it
+              connects to light up, so you can trace where a number came from or what a change would affect.
+            </p>
+            <div style={{ overflowX: "auto" }}>
+              <svg viewBox={"0 0 " + W + " " + H} style={{ width: "100%", minWidth: "820px", height: "auto" }}>
+                {/* layer bands + captions */}
+                {DOCS.layers.map(function (ly, li) {
+                  return (
+                    <g key={ly.id}>
+                      <rect x="0" y={30 + li * ROW} width={W} height={ROW - 6} fill={li % 2 ? "#fafafa" : "#ffffff"} />
+                      <text x="6" y={26 + li * ROW + 14} fill={ly.color} style={{ fontSize: "11px", fontWeight: 700 }}>{ly.label}</text>
+                    </g>
+                  );
+                })}
+                {/* edges under the nodes */}
+                {DOCS.edges.map(function (e, i) {
+                  var a = pos[e[0]], b = pos[e[1]];
+                  if (!a || !b) return null;
+                  var x1 = a.x + a.w / 2, y1 = a.y + a.h, x2 = b.x + b.w / 2, y2 = b.y;
+                  var on = sel && (e[0] === sel.id || e[1] === sel.id);
+                  var my = (y1 + y2) / 2;
+                  return (
+                    <g key={"e" + i}>
+                      <path d={"M" + x1 + "," + y1 + " C" + x1 + "," + my + " " + x2 + "," + my + " " + x2 + "," + y2}
+                        fill="none" stroke={on ? "#1f2937" : "#cbd5e1"} strokeWidth={on ? 2.2 : 1.2} />
+                      <circle cx={x2} cy={y2} r={on ? 3.4 : 2.2} fill={on ? "#1f2937" : "#cbd5e1"} />
+                      {on && e[2] ? (
+                        <text x={(x1 + x2) / 2} y={my - 3} textAnchor="middle" fill="#374151" style={{ fontSize: "9.5px" }}>{e[2]}</text>
+                      ) : null}
+                    </g>
+                  );
+                })}
+                {/* nodes */}
+                {DOCS.nodes.map(function (n) {
+                  var p = pos[n.id], on = sel && n.id === sel.id, near = lit[n.id] && !on;
+                  return (
+                    <g key={n.id} onClick={function () { setDocNode(docNode === n.id ? null : n.id); }} style={{ cursor: "pointer" }}>
+                      <rect x={p.x} y={p.y} width={p.w} height={p.h} rx="7"
+                        fill={on ? p.color : near ? "#f1f5f9" : "#ffffff"}
+                        stroke={on || near ? p.color : "#d1d5db"} strokeWidth={on ? 2.4 : near ? 1.8 : 1} />
+                      {n.label.length > 26
+                        ? n.label.split(" · ").length > 1
+                          ? n.label.split(" · ").map(function (part, k) {
+                              return <text key={k} x={p.x + p.w / 2} y={p.y + 24 + k * 13} textAnchor="middle"
+                                fill={on ? "#ffffff" : "#111827"} style={{ fontSize: "10.5px", fontWeight: 600 }}>{part}</text>;
+                            })
+                          : <text x={p.x + p.w / 2} y={p.y + 26} textAnchor="middle" fill={on ? "#ffffff" : "#111827"} style={{ fontSize: "10px", fontWeight: 600 }}>{n.label}</text>
+                        : <text x={p.x + p.w / 2} y={p.y + 26} textAnchor="middle" fill={on ? "#ffffff" : "#111827"} style={{ fontSize: "11px", fontWeight: 600 }}>{n.label}</text>}
+                      <text x={p.x + p.w / 2} y={p.y + p.h - 14} textAnchor="middle"
+                        fill={on ? "#eef2ff" : "#6b7280"} style={{ fontSize: "9px" }}>{n.owns.length > 34 ? n.owns.slice(0, 33) + "…" : n.owns}</text>
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+            {sel ? (
+              <div className="mt-2 rounded border-l-4 px-3 py-2 bg-gray-50" style={{ borderColor: pos[sel.id].color }}>
+                <div className="text-sm font-semibold text-gray-800">{sel.label}</div>
+                <div className="text-gray-500 mb-1" style={{ fontSize: "10px" }}>Produces: {sel.owns}</div>
+                <p className="text-xs text-gray-700"><b>What it does.</b> {sel.what}</p>
+                <p className="text-xs text-gray-700 mt-1"><b>Why it exists.</b> {sel.why}</p>
+                <button className="text-indigo-600 hover:underline mt-1" style={{ fontSize: "10px" }}
+                  onClick={function () { setDocNode(null); }}>clear selection</button>
+              </div>
+            ) : (
+              <p className="text-gray-500 mt-1" style={{ fontSize: "10px" }}>
+                Nothing selected — click a box above. The one-line caption under each name is what that step produces.
+              </p>
+            )}
+            <Legend title="Two design choices worth knowing">
+              <div><b>The join comes before everything.</b> One row per FLW per interview slot is built first, and every
+                tab is an aggregate of those rows. That is why no two numbers on the dashboard can disagree — they are
+                different summaries of the same table, not separate queries.</div>
+              <div><b>Nothing publishes past a failing gate.</b> Three checks run after the build, one of which
+                re-derives the headline numbers from the raw sources with entirely separate code. If the two disagree the
+                run stops rather than shipping.</div>
+            </Legend>
+          </div>
+        ) : null}
+
+        {/* ---- 2. TABS */}
+        {docSec === "tabs" ? (
+          <div className="rounded border border-gray-200 bg-white px-3 py-3">
+            <div className="text-sm font-semibold text-gray-700 mb-2">What each tab is for</div>
+            {DOCS.tabs.map(function (t) {
+              return (
+                <div key={t.id} className="mb-3 pb-2 border-b border-gray-100">
+                  <div className="text-xs font-semibold text-gray-800">{t.name}</div>
+                  <div className="text-xs text-gray-700 mb-1">Answers: <i>{t.question}</i></div>
+                  {t.charts.map(function (c, i) {
+                    return <div key={i} className="text-xs text-gray-700 ml-2">• <b>{c[0]}</b> — {c[1]}</div>;
+                  })}
+                  <div className="text-gray-400 mt-1" style={{ fontSize: "9.5px" }}>reads: {t.reads.join(", ")}</div>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+
+        {/* ---- 3. METRICS */}
+        {docSec === "metrics" ? (
+          <div className="rounded border border-gray-200 bg-white px-3 py-3">
+            <div className="text-sm font-semibold text-gray-700 mb-1">Every indicator, and the logic behind it</div>
+            <p className="text-xs text-gray-600 mb-2">
+              <b>Base</b> is the denominator. If two figures on this dashboard ever look contradictory, the
+              cause is almost always that they use different bases — so it is stated for every single one.
+            </p>
+            {(function () {
+              var gs = [];
+              DOCS.metrics.forEach(function (m) { if (gs.indexOf(m.g) < 0) gs.push(m.g); });
+              return gs.map(function (g) {
+                return (
+                  <div key={g} className="mb-3">
+                    <div className="text-xs font-bold text-indigo-800 mb-1">{g}</div>
+                    {DOCS.metrics.filter(function (m) { return m.g === g; }).map(function (m) {
+                      return (
+                        <div key={m.name} className="mb-2 pl-2 border-l-2 border-gray-200">
+                          <div className="text-xs font-semibold text-gray-800">{m.name}</div>
+                          <div className="text-gray-500" style={{ fontSize: "9.5px" }}>{m.where}</div>
+                          <div className="text-xs text-gray-700"><b>How:</b> {m.how}</div>
+                          <div className="text-xs text-gray-700"><b>Base:</b> {m.base}</div>
+                          {m.gotcha && m.gotcha !== "—"
+                            ? <div className="text-xs mt-0.5" style={{ color: "#b45309" }}><b>Read with care:</b> {m.gotcha}</div>
+                            : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        ) : null}
+
+        {/* ---- 4. ONBOARDING */}
+        {docSec === "onboarding" ? (
+          <div className="rounded border border-gray-200 bg-white px-3 py-3">
+            <div className="text-sm font-semibold text-gray-700 mb-1">Adding a new cohort, step by step</div>
+            <p className="text-xs text-gray-600 mb-2">
+              Ten places. They are separate on purpose: the pull scripts decide what gets downloaded, the
+              build decides what gets read, and the gates refuse to run on a half-configured subgroup. The
+              steps below are in the order you should do them.
+            </p>
+            {DOCS.onboarding.map(function (s) {
+              return (
+                <div key={s.n} className="mb-2 flex gap-2">
+                  <div className="flex-shrink-0 rounded-full bg-indigo-100 text-indigo-800 font-bold flex items-center justify-center"
+                    style={{ width: "20px", height: "20px", fontSize: "10px" }}>{s.n}</div>
+                  <div>
+                    <div className="text-xs font-semibold text-gray-800">{s.title}</div>
+                    {s.file !== "—" ? <div className="text-gray-500" style={{ fontSize: "9.5px", fontFamily: "monospace" }}>{s.file}</div> : null}
+                    <div className="text-xs text-gray-700">{s.what}</div>
+                    {s.gotcha && s.gotcha !== "—"
+                      ? <div className="text-xs mt-0.5" style={{ color: "#b45309" }}>⚠ {s.gotcha}</div>
+                      : null}
+                  </div>
+                </div>
+              );
+            })}
+            <div className="text-sm font-semibold text-gray-700 mt-3 mb-1">Shortcuts, and when each is safe</div>
+            {DOCS.shortcuts.map(function (s) {
+              return (
+                <div key={s.name} className="mb-2 pl-2 border-l-2 border-emerald-200">
+                  <div className="text-xs font-semibold text-gray-800">{s.name}</div>
+                  <div className="text-xs text-gray-700"><b>Use when:</b> {s.when}</div>
+                  <div className="text-xs text-gray-700"><b>How:</b> {s.how}</div>
+                  <div className="text-xs" style={{ color: "#b45309" }}><b>Risk:</b> {s.risk}</div>
+                </div>
+              );
+            })}
+            {F.unmapped
+              ? <div className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-gray-800">
+                  <b>{F.unmapped} cohort(s) are currently unmapped</b> — data exists but no subgroup pattern matches, so
+                  they are excluded from every rollup. That is step 4 above.
+                </div>
+              : <div className="mt-2 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-gray-700">
+                  No unmapped cohorts right now — every cohort in the data resolves to a subgroup.
+                </div>}
+          </div>
+        ) : null}
+
+        {/* ---- 5. GLOSSARY */}
+        {docSec === "glossary" ? (
+          <div className="rounded border border-gray-200 bg-white px-3 py-3">
+            <div className="text-sm font-semibold text-gray-700 mb-2">Glossary</div>
+            {DOCS.glossary.map(function (g) {
+              return (
+                <div key={g[0]} className="mb-1.5 text-xs">
+                  <span className="font-semibold text-gray-800">{g[0]}</span>
+                  <span className="text-gray-700"> — {g[1]}</span>
+                </div>
+              );
+            })}
+            <div className="text-sm font-semibold text-gray-700 mt-3 mb-1">Subgroups in this build</div>
+            <div className="text-xs text-gray-700">{F.designs.map(function (d) { return <div key={d}>• {d}</div>; })}</div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   // ---- Cohort Engagement (3-panel) helpers + charts ----
   var MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -931,7 +1605,7 @@ function WorkflowUI(props) {
       <div className="bg-white rounded-lg shadow-sm">
         <div className="border-b border-gray-200 px-5">
           <nav className="-mb-px flex space-x-6">
-            {[["overview", "Overview"], ["table", "Table View"], ["funnels", "Interview Completion Funnels"], ["fullretention", "Full Retention Table"], ["breakdowns", "Breakdowns"], ["flw", "FLW Retention"]].map(function (t) {
+            {[["overview", "Overview"], ["table", "Table View"], ["funnels", "Interview Completion Funnels"], ["fullretention", "Full Retention Table"], ["breakdowns", "Breakdowns"], ["flw", "FLW Retention"], ["docs", "Documentation"]].map(function (t) {
               var on = activeTab === t[0];
               return (
                 <button key={t[0]} onClick={function () { setTab(t[0]); }}
@@ -2048,6 +2722,8 @@ function WorkflowUI(props) {
             </div>
           );
         })()}
+
+        {activeTab === "docs" && renderDocs()}
       </div>
     </div>
   );
