@@ -281,13 +281,34 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                     ai_agent_id: effectiveAgent(oid),
                 });
                 if (!(res && res.success && res.task_id)) { failed += 1; await onOne(); continue; }
-                setProgress({ status: 'running', message: 'Auditing ' + oppLabel(oid) + '…', processed: done, total: total });
-                cleanups.push(actions.streamAuditProgress(
-                    res.task_id,
-                    (p) => setProgress({ status: 'running', message: (p && p.message) || ('Auditing ' + oppLabel(oid)), processed: done, total: total }),
-                    async () => { await onOne(); },
-                    async () => { failed += 1; await onOne(); }
-                ));
+                setProgress({ status: 'running', message: 'Auditing ' + oppLabel(oid) + ' (' + (k + 1) + ' of ' + total + ')…', processed: done, total: total });
+
+                // Wait for THIS opportunity before starting the next. Queuing them all at once
+                // multiplies into (audits × ~10 images in flight) concurrent classifier calls,
+                // and the scale models collapse above ~20: platform-side measurement put 5
+                // parallel audits at 77 usable classifications/hour against 644 for one at a
+                // time. Past the gateway's capacity every extra parallel audit is negative work
+                // — it holds a 60s slot and returns nothing. Our own runs agree: three audits
+                // fired within six minutes on 13 Aug failed 92–98%, while the same workflow run
+                // one opportunity at a time on 14 Aug failed 0–20%.
+                await new Promise((resolve) => {
+                    let settled = false;
+                    const finish = () => { if (!settled) { settled = true; resolve(); } };
+                    // Safety net: if the progress stream drops we would otherwise wait forever
+                    // and never start the remaining opportunities.
+                    const guard = setTimeout(finish, 45 * 60 * 1000);
+                    const cleanup = actions.streamAuditProgress(
+                        res.task_id,
+                        (p) => setProgress({
+                            status: 'running',
+                            message: (p && p.message) || ('Auditing ' + oppLabel(oid)),
+                            processed: done, total: total,
+                        }),
+                        async () => { clearTimeout(guard); await onOne(); finish(); },
+                        async () => { clearTimeout(guard); failed += 1; await onOne(); finish(); }
+                    );
+                    cleanups.push(cleanup);
+                });
             }
             cleanupsRef.current = cleanups;
         } catch (err) {
@@ -676,8 +697,20 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                         {isRunning ? 'Creating…' : ('Create ' + selected.length + ' audit' + (selected.length === 1 ? '' : 's') + ' with AI')}
                     </button>
                     <p className="text-xs text-gray-500 mt-2">
-                        One audit is created per opportunity, per FLW. The AI pass runs on the server — you can leave this page.
+                        Opportunities are audited <span className="font-medium">one after another</span>, not in parallel —
+                        the scale classifiers degrade above roughly 20 concurrent calls, and each audit holds about 10
+                        images in flight. Running five at once was measured at 77 usable classifications/hour against 644
+                        for one at a time. The AI pass runs on the server, so you can leave this page.
                     </p>
+                    {selected.length > 1 ? (
+                        <p className="text-xs text-gray-500 mt-1">
+                            <i className="fa-solid fa-clock mr-1 text-gray-400"></i>
+                            {selected.length} opportunities queued sequentially. At the best observed rate for scale
+                            classifiers (~650 photos/hour) expect roughly
+                            <span className="font-medium"> {Math.max(1, Math.round(selected.length * 300 / 650))}–{Math.max(1, Math.round(selected.length * 900 / 650))} hours</span>
+                            {' '}for a typical KMC window — reduce Sample % or the date range to shorten it.
+                        </p>
+                    ) : null}
                     {progress ? (
                         <div className={'mt-3 rounded-lg px-4 py-3 text-sm border '
                             + (progress.status === 'failed' ? 'bg-red-50 border-red-200 text-red-800'
