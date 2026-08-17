@@ -13,7 +13,7 @@ defined (never on neutral ones like probe rate, where a high number is not itsel
 
 Outputs: docs/Chatbot_Probing_Analysis.md and docs/Chatbot_Probing_Analysis.docx
 """
-# flake8: noqa: E501  (string-heavy document template — long prose lines are intentional)
+# flake8: noqa: E501  (string-heavy document template - long prose lines are intentional)
 import json
 import os
 import sys
@@ -75,7 +75,7 @@ def rag(value, kind, suffix="%"):
 
 LEGEND = (
     "Colour on the numbers is a reading aid: **green** = strong, **amber** = watch, **red** = weak. "
-    "It is applied only where better and worse are genuinely defined — never to counts, to the probe "
+    "It is applied only where better and worse are genuinely defined - never to counts, to the probe "
     "rate, or to probes per question, because a high or low value there is not good or bad in itself."
 )
 
@@ -84,13 +84,13 @@ BLOCKS.append(("title", "Does the chatbot's probing improve the data?", None))
 _gap = round(CF["actual_usable_pct"] - CF["form_equivalent_usable_pct"], 1)
 para(
     f"**Bottom line.** The chatbot notices a weak answer and asks again. That single behaviour turned "
-    f"**{n(CF['rescued_by_probing'])} unusable answers into usable ones** — "
+    f"**{n(CF['rescued_by_probing'])} unusable answers into usable ones** - "
     f"**{CF['rescued_share_of_usable_pct']}% of every usable answer we hold**. A static form cannot do "
     f"this, because in a form the first answer is the final answer."
 )
 para(
     f"Data as of {D['generated']}: {n(U['sessions_in_file'])} interview sessions, {n(U['messages'])} "
-    f"messages, {n(U['flws'])} FLWs, {U['codes']} topics — pulled from the live chat transcripts. Every "
+    f"messages, {n(U['flws'])} FLWs, {U['codes']} topics - pulled from the live chat transcripts. Every "
     f"number here is computed from those transcripts at the moment this document was generated.",
     italic=True,
 )
@@ -98,7 +98,7 @@ para(
 # ================================================================ 1. WHAT PROBING IS
 h("1. What 'probing' means", 1)
 para(
-    "When an FLW gives a thin answer, the AI interviewer does not accept it and move on — it asks again, "
+    "When an FLW gives a thin answer, the AI interviewer does not accept it and move on - it asks again, "
     "rephrasing or pressing for a specific example, and the FLW cannot progress until the answer is good "
     "enough. **That follow-up is a probe, and it is the one thing a paper or online form cannot do.**"
 )
@@ -114,7 +114,7 @@ para(
 h("2. How often the bot pushed back, and what set it off", 1)
 para(
     f"Across **{n(C['windows'])} questions** actually put to an FLW, the bot probed on "
-    f"**{n(C['windows_probed'])} of them ({C['probe_rate_pct']}%)** — {n(C['probing_turns'])} probing "
+    f"**{n(C['windows_probed'])} of them ({C['probe_rate_pct']}%)** - {n(C['probing_turns'])} probing "
     f"turns in all. Where it probed, it probed {C['probes_per_probed_window_mean']} times on average."
 )
 para("**What set it off.** Judged from the FLW's answer immediately before each probe:")
@@ -124,7 +124,7 @@ table(
         [
             k.replace("_", " ")
             .replace("dont know", 'said "don\'t know"')
-            .replace("needs depth", "answer was thin — on topic, too shallow to use")
+            .replace("needs depth", "answer was thin - on topic, too shallow to use")
             .replace("too short", "answer was too short to carry any content")
             .replace("no number given", "a number was asked for and not given")
             .replace("no answer", "nothing was said at all")
@@ -139,15 +139,15 @@ _t1 = list(C["triggers"].items())[0] if C["triggers"] else None
 _num = C["triggers"].get("no_number_given", {}).get("pct", 0)
 if _t1:
     para(
-        f"Most probes are chasing **depth**, not fixing a refusal — genuine non-answers "
+        f"Most probes are chasing **depth**, not fixing a refusal - genuine non-answers "
         f'("don\'t know", nothing said, confusion) are under '
         f"{round(sum(C['triggers'].get(k, {}).get('pct', 0) for k in ('dont_know', 'no_answer', 'confused')), 1)}% "
         f"combined. Separately, **{_num}% of probes** were the bot chasing a number it had asked for and "
-        f"not received — a gap a form cannot even detect, let alone fix."
+        f"not received - a gap a form cannot even detect, let alone fix."
     )
 para(
     "**What kind of probe.** Coded using the DICE scheme from the qualitative-interviewing literature "
-    "(Robinson, 2023 — see References), not labels invented for this analysis:"
+    "(Robinson, 2023 - see References), not labels invented for this analysis:"
 )
 table(
     ["Probe type", "Probes", "Share"],
@@ -171,15 +171,15 @@ table(
 h("3. What a Google Form would have captured instead", 1)
 h("How we worked this out", 2)
 para(
-    "In a form, the first answer is the final answer — there is no one to notice it is thin. So for every "
+    "In a form, the first answer is the final answer - there is no one to notice it is thin. So for every "
     "question we already hold both halves of the comparison:"
 )
-li('**The "form" answer** — everything the FLW typed before the bot first pushed back.')
-li("**The actual answer** — everything they had said by the time the bot moved on.")
+li('**The "form" answer** - everything the FLW typed before the bot first pushed back.')
+li("**The actual answer** - everything they had said by the time the bot moved on.")
 para(
     "Both are then judged by the same simple test: an answer counts as **usable** if it is not blank, is "
     'longer than three words, and is not an explicit "I don\'t know" or "I don\'t understand". Same '
-    "question, same FLW, same moment — the only difference is whether the probe happened. Nothing is "
+    "question, same FLW, same moment - the only difference is whether the probe happened. Nothing is "
     "compared across different people or different questions."
 )
 para(
@@ -208,7 +208,7 @@ para(
 if S:
     h("Does the result depend on where we set the bar?", 2)
     para(
-        f'"Usable" is a word-count test, so an answer can cross the line without really improving — '
+        f'"Usable" is a word-count test, so an answer can cross the line without really improving - '
         f'reading cases by hand found one FLW going from "9" to "9 0 not available", which the test '
         f"scores as a save and a reader would not. **{S['marginal_share_of_rescues_pct']}% of saves** are "
         f"that marginal. Here is the headline again with every one of them thrown away:"
@@ -238,7 +238,7 @@ if S:
 if CF.get("by_language"):
     para(
         "**By language.** Shown because the usable test counts words, and Hausa may carry the same meaning "
-        "in fewer of them — publishing the split is what makes any measurement bias visible:"
+        "in fewer of them - publishing the split is what makes any measurement bias visible:"
     )
     table(
         ["Language", "Questions", "A form would have got", "We actually got", "Rescued"],
@@ -270,9 +270,9 @@ table(
 )
 
 # ================================================================ 4. THE COST
-h("4. Where probing stops helping — and what it costs", 1)
+h("4. Where probing stops helping - and what it costs", 1)
 para(
-    "Probing is not free. The closest published study of this approach (1,800 participants — see "
+    "Probing is not free. The closest published study of this approach (1,800 participants - see "
     "References) found it produced richer answers **but cost respondents some patience**. So we measured "
     "that here rather than leaving it for someone else to ask."
 )
@@ -305,7 +305,7 @@ if _m:
     _wf, _wl = _first["words_after_mean"], _last["words_after_mean"]
     _wdrop = round(100 * (_wf - _wl) / _wf) if _wf else 0
     para(
-        f"FLWs almost always answer a probe — {_first['answered_after_pct']}% after the first, "
+        f"FLWs almost always answer a probe - {_first['answered_after_pct']}% after the first, "
         f"{_last['answered_after_pct']}% by probe {_last['probe_seq']}. But **what they say gets shorter**: "
         f"{_wf} words after the first probe against {_wl} by probe {_last['probe_seq']}"
         + (
@@ -333,12 +333,12 @@ if CO.get("abandonment"):
     _ab = CO["abandonment"]
     _lo, _hi = _ab[0]["completed_pct"], _ab[-1]["completed_pct"]
     para(
-        "This is a correlation, not proof of cause — heavy probing and early exit can both simply follow "
+        "This is a correlation, not proof of cause - heavy probing and early exit can both simply follow "
         "from an FLW who is struggling. "
         + (
             f"Completion falls from {_lo}% to {_hi}% as probing intensity rises, which is worth watching."
             if _lo - _hi > 5
-            else f"Completion runs {_lo}% at the lightest probing and {_hi}% at the heaviest — no sign that "
+            else f"Completion runs {_lo}% at the lightest probing and {_hi}% at the heaviest - no sign that "
             f"probing drives FLWs out."
         ),
         italic=True,
@@ -359,7 +359,7 @@ if HR.get("groups") and len(HR["groups"]) == 2:
     para(
         "This matters because the team's own review notes record a genuine disagreement: one reviewer "
         "treats bot prompting as the chatbot doing its job, while others mark the need for probing against "
-        "the FLW. That inconsistency distorts anything built on these tags — so here it is as numbers."
+        "the FLW. That inconsistency distorts anything built on these tags - so here it is as numbers."
     )
     table(
         ["Human verdict", "Sessions", "Probes per question", "Ended usable", "Turned around when unusable"],
@@ -379,7 +379,7 @@ if HR.get("groups") and len(HR["groups"]) == 2:
         "**Sessions the team judged poor were probed more and recovered less** "
         f"({u['probes_per_window']} vs {a['probes_per_window']} probes per question; "
         f"{u['recovery_pct']}% vs {a['recovery_pct']}% turned around). So heavy probing is a **symptom** "
-        "of a struggling session, not the cause of one — and the reviewer who reads a probe as the bot "
+        "of a struggling session, not the cause of one - and the reviewer who reads a probe as the bot "
         "working correctly has the evidence on their side: the probe is what rescues the recoverable cases."
         if _pd > 0
         else f"Probing intensity is {'similar' if abs(_pd) < 0.1 else 'lower'} in sessions the team judged "
@@ -448,7 +448,7 @@ li(
 )
 li(
     f"**What it bought us.** Usable answers went from {CF['form_equivalent_usable_pct']}% to "
-    f"{CF['actual_usable_pct']}% — {n(CF['rescued_by_probing'])} answers rescued against "
+    f"{CF['actual_usable_pct']}% - {n(CF['rescued_by_probing'])} answers rescued against "
     f"{n(CF['mcnemar']['broke'])} made worse. That is {CF['rescued_share_of_usable_pct']}% of all our usable "
     f"data" + (f", or {S['strict_rescued_share_of_usable_pct']}% on the strictest reading." if S else ".")
 )
@@ -457,7 +457,7 @@ if CO.get("dose_response"):
     if _d1:
         li(
             f"**Where it stops.** One probe turns around {_d1['recovery_pct']}% of failed answers. FLWs keep "
-            f"replying to later probes but say less each time — the case for capping probes per question."
+            f"replying to later probes but say less each time - the case for capping probes per question."
         )
 if HR.get("groups") and len(HR["groups"]) == 2:
     li(
@@ -477,7 +477,7 @@ li(
     "property of the instrument, not an experiment."
 )
 li(
-    '**"Usable" is a crude test** — not blank, over three words, not an explicit "don\'t know". It says '
+    '**"Usable" is a crude test** - not blank, over three words, not an explicit "don\'t know". It says '
     "nothing about whether an answer is true, relevant or deep. Scoring those five quality dimensions "
     "properly needs an AI judge marking each answer before and after probing; that is the next stage."
 )
@@ -509,13 +509,13 @@ _ex = U.get("sessions_excluded") or {}
 li(
     f"**Coverage.** Questions were reconstructed for {U['detection_coverage_pct']}% of the "
     f"{n(U['sessions_in_file'])} sessions analysed. A further {n(U.get('sessions_excluded_total', 0))} were "
-    f"set aside — almost all of them sessions where no interview was ever assigned, because the FLW opened "
+    f"set aside - almost all of them sessions where no interview was ever assigned, because the FLW opened "
     f"the chat and stopped at the welcome step. Those are not failed interviews; they never started one."
 )
 
 h("How we measured this", 2)
 para(
-    "Every session was pulled from OpenChatStudio with its full message list — 21,700 sessions and "
+    "Every session was pulled from OpenChatStudio with its full message list - 21,700 sessions and "
     "542,328 messages, checked against an independent export to confirm nothing was missing. The question "
     "list was rebuilt from the sessions themselves, since each one carries the exact questions it was "
     "given. Within each session, every bot turn was classified as either opening a new question or going "
@@ -533,7 +533,7 @@ para(
 li(
     '**Xiao, Zhou, Fu et al., "Tell Me About Yourself: Using an AI-Powered Chatbot to Conduct '
     'Conversational Surveys with Open-ended Questions."** ACM Transactions on Computer-Human Interaction '
-    "27(3), 2020. https://dl.acm.org/doi/10.1145/3381804 — ~600 participants and 5,200 free-text answers "
+    "27(3), 2020. https://dl.acm.org/doi/10.1145/3381804 - ~600 participants and 5,200 free-text answers "
     "comparing a chatbot against a standard online survey. The chatbot produced significantly better quality "
     "on informativeness, relevance, specificity and clarity. This is the benchmark our result points the "
     "same way as, and it is also independent evidence that the quality dimensions we use are an established "
@@ -541,13 +541,13 @@ li(
 )
 li(
     '**"AI-Assisted Conversational Interviewing: Effects on Data Quality and Respondent Experience."** '
-    "arXiv:2504.13908, 2025. https://arxiv.org/abs/2504.13908 — 1,800 participants with LLM chatbots probing "
+    "arXiv:2504.13908, 2025. https://arxiv.org/abs/2504.13908 - 1,800 participants with LLM chatbots probing "
     "for elaboration. Answers were more detailed and informative, but at a slight cost to respondent "
     "experience. This is why Section 4 measures the cost of probing rather than reporting only the benefit."
 )
 li(
     '**Robinson, "Probing in qualitative research interviews: Theory and practice."** Qualitative Research '
-    "in Psychology, 2023. https://www.tandfonline.com/doi/full/10.1080/14780887.2023.2238625 — the DICE "
+    "in Psychology, 2023. https://www.tandfonline.com/doi/full/10.1080/14780887.2023.2238625 - the DICE "
     "taxonomy (descriptive-detail, idiographic-memory, clarifying, explanatory probes) used to classify "
     "probe types in Section 2, so those labels come from the literature rather than from us."
 )
@@ -667,6 +667,6 @@ if __name__ == "__main__":
     print(
         "[docx] docs/Chatbot_Probing_Analysis.docx written"
         if docx_ok
-        else "[docx] .docx SKIPPED — the file is open in Word; close it and re-run"
+        else "[docx] .docx SKIPPED - the file is open in Word; close it and re-run"
     )
     sys.exit(0)

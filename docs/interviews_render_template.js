@@ -1,11 +1,11 @@
-// Connect Interviews — MASTER dataset dashboard (v3). DISPLAY-ONLY build.
-// Data is embedded (DATA below) from dashboard_data.json — the validated master (build_master_4src.py)
+// Connect Interviews - MASTER dataset dashboard (v3). DISPLAY-ONLY build.
+// Data is embedded (DATA below) from dashboard_data.json - the validated master (build_master_4src.py)
 // aggregated by build_dashboard_data.py and reconciled 18/18 by build_dashboard_data_audit.py
 // (which sits on top of audit_e2e 26/26). All 62 cohorts.
 // WHY embedded, not live: a live multi-opp pipeline pull of 64 opportunities exceeds the platform's
 // 600s SSE timeout (serial per-opp CCHQ/Connect fetches) and returns nothing. Embedding the audited
 // snapshot gives a 100%-accurate all-cohort dashboard now. To refresh data: re-run the offline build
-// (build_master_4src -> build_dashboard_data -> audit -> re-embed) — see docs.
+// (build_master_4src -> build_dashboard_data -> audit -> re-embed) - see docs.
 // Charts via window.Chart (Chart.js, preloaded in the Labs render env, same as the KMC dashboards).
 function WorkflowUI(props) {
   var DATA = /*__DATA__*/;
@@ -57,7 +57,7 @@ function WorkflowUI(props) {
   var lineRef = React.useRef(null), lineInst = React.useRef(null);
   var barRef = React.useRef(null), barInst = React.useRef(null);
   var fvw = React.useState("retention"); var funView = fvw[0], setFunView = fvw[1];   // funnels tab: retention lines | cohort engagement (3-panel)
-  var esg = React.useState("ALL"); var engSg = esg[0], setEngSg = esg[1];              // cohort-engagement: selected cohort (default ALL — meaningful first view)
+  var esg = React.useState("ALL"); var engSg = esg[0], setEngSg = esg[1];              // cohort-engagement: selected cohort (default ALL - meaningful first view)
   var ell = React.useState("all"); var engLlo = ell[0], setEngLlo = ell[1];            // cohort-engagement: LLO filter (all | COWACDI | EHA)
   var ewin = React.useState("active"); var engWin = ewin[0], setEngWin = ewin[1];      // cohort-engagement: active window | full timeline
   var emk = React.useState(false); var engMark = emk[0], setEngMark = emk[1];
@@ -70,7 +70,7 @@ function WorkflowUI(props) {
   var eng3Ref = React.useRef(null), eng3Inst = React.useRef(null);
 
   // Design + topic names come from the build (DATA.subgroupDesign / topicNames), derived from the
-  // CommCare HQ interview_schedule lookup — single source of truth. Fallbacks for older data only.
+  // CommCare HQ interview_schedule lookup - single source of truth. Fallbacks for older data only.
   var SUBGROUP_DESIGN = {};
   if (DATA.subgroupDesign) {
     Object.keys(DATA.subgroupDesign).forEach(function (sg) { SUBGROUP_DESIGN[sg] = DATA.subgroupDesign[sg].topics; });
@@ -94,10 +94,10 @@ function WorkflowUI(props) {
   var SG_ORDER = ["TRS", "TRE", "ABT1-A", "ABT1-B", "ABT2-A", "ABT2-B", "PANEL", "ABT3-A", "ABT3-B", "2WT", "EXT"];
   // Subgroups whose Connect funnel (Invited/Accepted/Claimed) hasn't been pulled yet (cohorts present
   // in the interview data but missing from the Connect snapshot). Their Invited=0 means "not pulled",
-  // not "nobody invited" — flagged in the UI so the 0s aren't misread.
+  // not "nobody invited" - flagged in the UI so the 0s aren't misread.
   var CONNECT_PENDING = DATA.connectPendingSubgroups || [];
   function connPending(sg) { return CONNECT_PENDING.indexOf(sg) >= 0; }
-  // Wire format for flwMatrix cells — INDEX ORDER IS APPEND-ONLY (completed must stay 5). See
+  // Wire format for flwMatrix cells - INDEX ORDER IS APPEND-ONLY (completed must stay 5). See
   // topic_status_lib.py. "not-triggered" (6) was added 2026-08-07: it separates "the bot never sent
   // this interview" from "we sent it and the FLW didn't respond", which the old model conflated.
   var STATES = ["not-applicable", "not-available-yet", "available-not-started", "available-missed-overdue", "started-not-completed", "completed", "not-triggered"];
@@ -118,8 +118,8 @@ function WorkflowUI(props) {
     "not-applicable": "topic isn't part of this cohort's design",
     "not-available-yet": "in the cohort, but not yet released per today's date, the topic's place in the schedule, and the cohort's training date",
     "available-not-started": "due per the schedule, not yet started (the next topic isn't due yet)",
-    "available-missed-overdue": "the bot DID send this interview, the scheduled window has since passed, and no session exists — a genuine non-response",
-    "not-triggered": "the schedule says this interview was due but NO trigger form was ever sent — a pipeline gap, not an FLW choice. Until 2026-08-07 these slots were counted as 'missed/overdue', which blamed the FLW",
+    "available-missed-overdue": "the bot DID send this interview, the scheduled window has since passed, and no session exists - a genuine non-response",
+    "not-triggered": "the schedule says this interview was due but NO trigger form was ever sent - a pipeline gap, not an FLW choice. Until 2026-08-07 these slots were counted as 'missed/overdue', which blamed the FLW",
     "started-not-completed": "FLW responded with ≥1 message but did not complete the session",
     "completed": "FLW completed the interview",
   };
@@ -134,7 +134,7 @@ function WorkflowUI(props) {
   // Maximally-distinct categorical palette (D3 category10) so every subgroup line is unambiguous.
   var SG_COLOR = { "TRS": "#1f77b4", "TRE": "#17becf", "ABT1-A": "#2ca02c", "ABT1-B": "#d62728", "ABT2-A": "#9467bd", "ABT2-B": "#8c564b", "PANEL": "#e377c2", "ABT3-A": "#f58231", "ABT3-B": "#bcbd22", "2WT": "#334155", "EXT": "#c51b8a" };
   // FLW × Topic matrix cell glyphs, indexed by STATES order (0 not-applicable … 5 completed)
-  var CELL_GLYPH = ["", "·", "○", "!", "◐", "✓", "–"];   // index 6 = not-triggered (never sent)
+  var CELL_GLYPH = ["", "·", "○", "!", "◐", "✓", "-"];   // index 6 = not-triggered (never sent)
   var MATRIX_TOPIC_ORDER = ["A", "B", "C", "D", "E", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "8S", "8L", "10S", "10L", "11S", "11L", "13L", "99"];
   // GiveWell thematic grouping: pool related topics into one bar. Static + forward-looking
   // (already includes topics that get data later, e.g. ABT3 8S/8L/10S/10L/11S/11L/13L, 2WT 14).
@@ -178,8 +178,8 @@ function WorkflowUI(props) {
 
   var th = "px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider";
   var td = "px-3 py-2 whitespace-nowrap text-sm text-gray-800";
-  function pctTxt(v) { return v == null ? "—" : v + "%"; }
-  function pctOf(a, b) { return b > 0 ? Math.round((a / b) * 100) + "%" : "—"; }
+  function pctTxt(v) { return v == null ? "-" : v + "%"; }
+  function pctOf(a, b) { return b > 0 ? Math.round((a / b) * 100) + "%" : "-"; }
 
   // ---- line chart (Interview Completion Funnels) ----
   React.useEffect(function () {
@@ -222,13 +222,13 @@ function WorkflowUI(props) {
           pointRadius: byDay ? 4 : 3, pointHoverRadius: 6,
           hidden: !!hidSg[s.sg], borderDash: inProgress ? [8, 5] : undefined }; }) },
       options: { responsive: true, maintainAspectRatio: false,
-        plugins: { title: { display: true, text: prevDenom ? "% who started each interview OF THOSE WHO REACHED THE PREVIOUS ONE (denominator = FLWs who started interview N-1, not the full initiated base) — later interviews no longer collapse just because many FLWs haven't reached that stage yet; interview 1 = vs # initiated" : (byDay ? "% FLWs still starting each interview, plotted against real days since their first interview — each dot is an interview at the day it landed; two dots on ~the same day = the last two triggered back-to-back (penultimate artifact)" : "% FLWs who started each interview round (denominator = # FLWs initiated, constant per subgroup) — solid = subgroup fully settled, dotted = subgroup still in progress, line ends where interviews aren't offered yet") }, legend: { display: false } },
+        plugins: { title: { display: true, text: prevDenom ? "% who started each interview OF THOSE WHO REACHED THE PREVIOUS ONE (denominator = FLWs who started interview N-1, not the full initiated base) - later interviews no longer collapse just because many FLWs haven't reached that stage yet; interview 1 = vs # initiated" : (byDay ? "% FLWs still starting each interview, plotted against real days since their first interview - each dot is an interview at the day it landed; two dots on ~the same day = the last two triggered back-to-back (penultimate artifact)" : "% FLWs who started each interview round (denominator = # FLWs initiated, constant per subgroup) - solid = subgroup fully settled, dotted = subgroup still in progress, line ends where interviews aren't offered yet") }, legend: { display: false } },
         scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: prevDenom ? "% Started (of prev-interview starters)" : "% Started" } },
           x: byDay ? { type: "linear", beginAtZero: true, title: { display: true, text: "Days since first interview" } } : { title: { display: true, text: "Interview #" } } } }
     });
     return function () { if (lineInst.current) { lineInst.current.destroy(); lineInst.current = null; } };
     // funView MUST be a dep: the canvas only exists while funView==="retention", so switching to
-    // "engagement" and back remounts a fresh canvas while lineInst still points at the destroyed one —
+    // "engagement" and back remounts a fresh canvas while lineInst still points at the destroyed one -
     // without this the flagship retention chart came back as a blank 380px hole until some other
     // toggle happened to re-run the effect.
   }, [activeTab, funView, deImpact, hidSg, lineMode, denomMode]);
@@ -255,16 +255,22 @@ function WorkflowUI(props) {
             data: tsRows.map(function (t) { if (isCount) return t[st] || 0; var denom = excl ? (t.applicable || 0) : (t.total || 0); return denom ? Math.round(1000 * t[st] / denom) / 10 : 0; }),
             backgroundColor: STATE_COLOR[st] }; }) },
       options: { responsive: true, maintainAspectRatio: false, indexAxis: "y",
-        plugins: { title: { display: true, text: (topicGroupMode === "theme" ? "FLW status distribution by THEME (related topics pooled)" : "FLW status distribution by topic") + (isCount ? " — # of applicable slots" : (excl ? " — % of applicable slots (stacks to 100%)" : " — % of all slots (incl. cohorts the topic isn't in)")) }, legend: { position: "bottom", title: { display: true, text: "⇄ Toggle: click any status in the legend below to show / hide it in the chart", color: "#4f46e5", font: { weight: "bold", size: 11 } } },
+        plugins: { title: { display: true, text: (topicGroupMode === "theme" ? "FLW status distribution by THEME (related topics pooled)" : "FLW status distribution by topic") + (isCount ? " - # of applicable slots" : (excl ? " - % of applicable slots (stacks to 100%)" : " - % of all slots (incl. cohorts the topic isn't in)")) }, legend: { position: "bottom", title: { display: true, text: "⇄ Toggle: click any status in the legend below to show / hide it in the chart", color: "#4f46e5", font: { weight: "bold", size: 11 } } },
           tooltip: { callbacks: { label: function (ctx) { return ctx.dataset.label + ": " + ctx.parsed.x + (isCount ? "" : "%"); } } } },
         scales: { x: { stacked: true, max: isCount ? maxApp : 100, title: { display: true, text: isCount ? "# of slots the topic applies to" : (excl ? "% of applicable slots" : "% of all slots") } }, y: { stacked: true, ticks: { autoSkip: false, font: { size: 10 } } } } }
     });
     return function () { if (barInst.current) { barInst.current.destroy(); barInst.current = null; } };
   }, [activeTab, tableSub, topicChart, tcMode, topicGroupMode, naMode]);
 
+  // The tab list lives here, not inline in the JSX, so the Documentation tab can compare what it
+  // documents against what actually exists (see docsCoverage) instead of silently going stale.
+  var TABS = [["overview", "Overview"], ["table", "Table View"], ["funnels", "Interview Completion Funnels"],
+              ["fullretention", "Full Retention Table"], ["breakdowns", "Breakdowns"],
+              ["flw", "FLW Retention"], ["docs", "Documentation"]];
+
   // ============================================================ DOCUMENTATION TAB
   // ONE structured constant, TWO outputs: the interactive UI below and the Markdown/JSON export.
-  // Same rule as the written briefs — this holds STRUCTURE AND EXPLANATION ONLY. Every quantity is
+  // Same rule as the written briefs - this holds STRUCTURE AND EXPLANATION ONLY. Every quantity is
   // interpolated from the LIVE DATA object at render time (see liveFacts), so the documentation can
   // never quote a stale snapshot and cannot drift from the dashboard it describes.
   var DOCS = {
@@ -294,7 +300,7 @@ function WorkflowUI(props) {
 
       { id: "p_connect", layer: "pull", label: "fetch_connect_user_data.py", owns: "connect_user_data_snapshot.csv",
         what: "Headless pull of per-opportunity user data, consolidated to one row per FLW per cohort.",
-        why: "Connect has no simple API key, so this uses a self-rotating refresh token. It also filters by cohort pattern — a new cohort missing from that map silently gets NO funnel data." },
+        why: "Connect has no simple API key, so this uses a self-rotating refresh token. It also filters by cohort pattern - a new cohort missing from that map silently gets NO funnel data." },
       { id: "p_hq", layer: "pull", label: "pull_hq_full_payloads.py", owns: "hq_pull_full/{domain}__*.jsonl",
         what: "Downloads every Trigger-Bot and Welcome form submission, per CommCare domain.",
         why: "Full payloads rather than summaries, so any field can be re-derived later without another pull." },
@@ -307,7 +313,7 @@ function WorkflowUI(props) {
 
       { id: "master", layer: "build", label: "build_master_4src.py", owns: "ONE ROW PER FLW × INTERVIEW",
         what: "The join. For every FLW and every interview slot in their cohort’s design, it interlocks Connect, both HQ form sets and the OCS session, then marks that slot triggered / started / completed.",
-        why: "THE source of truth. Every tab, chart and export is an aggregate of these rows — which is why two numbers on the dashboard cannot disagree by construction." },
+        why: "THE source of truth. Every tab, chart and export is an aggregate of these rows - which is why two numbers on the dashboard cannot disagree by construction." },
       { id: "agg", layer: "build", label: "build_payload_agg.py", owns: "payload_agg.json",
         what: "Rolls the master rows into subgroup funnels, per-interview drop-off, weekly engagement series and the de-impact adjustment.",
         why: "Aggregating once, outside the browser, keeps the payload small and stops two charts computing the same thing two different ways." },
@@ -348,7 +354,7 @@ function WorkflowUI(props) {
       { id: "overview", name: "Overview", question: "How big is this and is it healthy?",
         reads: ["counts", "table1", "topicStatus"],
         charts: [
-          ["Headline counts", "Unique FLWs, cohorts, interviews started and completed — counted as DISTINCT things, so the same FLW in three cohorts is one FLW."],
+          ["Headline counts", "Unique FLWs, cohorts, interviews started and completed - counted as DISTINCT things, so the same FLW in three cohorts is one FLW."],
           ["FLW status by topic", "For each topic, how many claimed slots ended completed / started-not-completed / offered-but-missed / never offered."]
         ] },
       { id: "table", name: "Table View", question: "What do the numbers look like per subgroup and per cohort?",
@@ -375,7 +381,7 @@ function WorkflowUI(props) {
         reads: ["flwEngagement"],
         charts: [
           ["Headline cards", "Per-cohort finish on both bases, finished ≥ 1 schedule, answer depth."],
-          ["Nine drill-down panels", "State, partner, cadre, tier, persona, cohort count, finished, peer density, pace — all click-to-filter and cross-filtering."],
+          ["Nine drill-down panels", "State, partner, cadre, tier, persona, cohort count, finished, peer density, pace - all click-to-filter and cross-filtering."],
           ["Survival ladder", "Share reaching each interview number, each row against its OWN eligible pool."],
           ["Geography", "LGA-level spread, which is wider than the between-state spread."]
         ] },
@@ -389,30 +395,30 @@ function WorkflowUI(props) {
       { g: "Funnel", name: "Invited / Accepted / Learn completed / Claimed", where: "Funnels → Connect funnel",
         how: "Counted from the Connect snapshot, one row per FLW per cohort.",
         base: "Everyone invited to that opportunity.",
-        gotcha: "This is the ONE leg that does not auto-refresh from a live API in every mode — if a new cohort is missing from the Connect pull’s cohort map, its funnel shows zeros while its interview numbers look fine." },
+        gotcha: "This is the ONE leg that does not auto-refresh from a live API in every mode - if a new cohort is missing from the Connect pull’s cohort map, its funnel shows zeros while its interview numbers look fine." },
       { g: "Funnel", name: "Eligible", where: "Funnels → drop-off table",
         how: "FLWs whose cohort design CONTAINS that interview slot and who reached the point of being in the study.",
-        base: "—", gotcha: "Eligible is a TRIGGERED-side basis. It can exceed the number who ever started an interview, so a percentage of eligible is not a percentage of active people." },
+        base: "-", gotcha: "Eligible is a TRIGGERED-side basis. It can exceed the number who ever started an interview, so a percentage of eligible is not a percentage of active people." },
       { g: "Funnel", name: "Triggered", where: "Funnels → drop-off table",
         how: "A Trigger-Bot form exists for that FLW and slot: the bot offered it.",
         base: "Eligible", gotcha: "Offered is not the same as received. A low triggered share is a programme/rollout issue, not an FLW behaviour issue." },
       { g: "Funnel", name: "Started / Completed", where: "Funnels, Overview, Tables",
         how: "An OCS session for that FLW and topic exists (started) and reached completion (completed).",
-        base: "Eligible, triggered, or the interview-1 base — the table shows all three",
+        base: "Eligible, triggered, or the interview-1 base - the table shows all three",
         gotcha: "Always check WHICH base a percentage uses. “% of base” compares against interview 1, so it falls as the schedule progresses even when each individual step is healthy." },
-      { g: "Retention", name: "Retention line — # Initiated", where: "Funnels → Retention lines",
+      { g: "Retention", name: "Retention line - # Initiated", where: "Funnels → Retention lines",
         how: "Completed at interview N divided by everyone who initiated the study.",
         base: "Fixed base = initiated", gotcha: "Falls steeply for long schedules simply because later interviews have not been offered yet." },
-      { g: "Retention", name: "Retention line — Reached previous interview", where: "Funnels → Retention lines (Denominator toggle)",
+      { g: "Retention", name: "Retention line - Reached previous interview", where: "Funnels → Retention lines (Denominator toggle)",
         how: "Started at N divided by started at N−1, any status.",
-        base: "Moving base = the previous step", gotcha: "Answers “of those who got here, how many continued”. Same numerator as the other view — only the denominator changes." },
+        base: "Moving base = the previous step", gotcha: "Answers “of those who got here, how many continued”. Same numerator as the other view - only the denominator changes." },
       { g: "Retention", name: "De-impact", where: "Funnels → de-impact toggle",
         how: "Removes FLWs affected by a known upstream scheduling artefact where a final interview could fire back-to-back with the one before it.",
-        base: "—", gotcha: "A correction for a bug in the interview app, not a data cleanup. Root cause is upstream; the toggle only shows what the number would be without it." },
+        base: "-", gotcha: "A correction for a bug in the interview app, not a data cleanup. Root cause is upstream; the toggle only shows what the number would be without it." },
       { g: "Engagement", name: "Finished", where: "Funnels → Cohort Engagement; FLW Retention",
         how: "Completed EVERY interview in their cohort’s design. The finish date is the date the last one was completed.",
         base: "FLWs who started ≥ 1 interview in that subgroup",
-        gotcha: "Depends on the design length, so it is not comparable across subgroups without saying how many interviews each has. Finished OUTRANKS every other status — a finisher is never counted as dropped." },
+        gotcha: "Depends on the design length, so it is not comparable across subgroups without saying how many interviews each has. Finished OUTRANKS every other status - a finisher is never counted as dropped." },
       { g: "Engagement", name: "Dropped off", where: "Funnels → Cohort Engagement",
         how: "Has NOT finished the schedule AND has been silent for more than 14 days as of the date being measured.",
         base: "FLWs who started ≥ 1 interview",
@@ -422,27 +428,27 @@ function WorkflowUI(props) {
         base: "FLWs who started ≥ 1 interview",
         gotcha: "Cadence-relative on purpose, so a 3-day and a 14-day cohort are judged fairly. It is therefore NOT a fixed number of days across subgroups." },
       { g: "Engagement", name: "New / Active / Slow / Quiet", where: "Funnels → Cohort Engagement panel 3",
-        how: "Status right now, in priority order: first-ever interview this week (New), last interview within 7 days (Active), 8–14 days (Slow), more than 14 days (Quiet). Finished takes precedence over all four.",
+        how: "Status right now, in priority order: first-ever interview this week (New), last interview within 7 days (Active), 8-14 days (Slow), more than 14 days (Quiet). Finished takes precedence over all four.",
         base: "FLWs who started ≥ 1 interview", gotcha: "Quiet and Dropped count the same people; one is shown as a count, the other as a percentage." },
       { g: "Engagement", name: "Active window vs Full timeline", where: "Funnels → Cohort Engagement",
         how: "Active window trims trailing weeks once fewer than the cutoff share of a cohort is newly starting or finishing, so a completed cohort does not read as a long flat drop-off. Full timeline shows every week.",
-        base: "—",
+        base: "-",
         gotcha: "For ALL COHORTS the window runs as long as ANY cohort is still active, because a percentage of the whole population is a bar a small late cohort could never reach. Where there is nothing to trim the toggle is hidden. The KPI tiles are always CURRENT; a trimmed chart can legitimately end earlier, and the page states both numbers when they differ." },
       { g: "Slots", name: "The 7 slot states", where: "Overview, Breakdowns matrix",
         how: "Each FLW × topic cell is exactly one of: completed, started-not-completed, available-not-started, available-missed-overdue, not-available-yet, not-triggered, not-applicable.",
-        base: "Claimed slots", gotcha: "“Not applicable” means the topic is not in that cohort’s design at all — it is not a failure and must not be added to a denominator." },
-      { g: "FLW", name: "Per-cohort finish — so far", where: "FLW Retention",
+        base: "Claimed slots", gotcha: "“Not applicable” means the topic is not in that cohort’s design at all - it is not a failure and must not be added to a denominator." },
+      { g: "FLW", name: "Per-cohort finish - so far", where: "FLW Retention",
         how: "For each FLW, schedules finished divided by every schedule they were enrolled in, then averaged across FLWs.",
         base: "All their enrolments",
-        gotcha: "Counts schedules the programme has NOT finished rolling out as unfinished, so it understates finishing — and understates it slightly more for multi-cohort FLWs, who are likelier to be carrying one still in flight." },
-      { g: "FLW", name: "Per-cohort finish — of schedules actually offered", where: "FLW Retention",
+        gotcha: "Counts schedules the programme has NOT finished rolling out as unfinished, so it understates finishing - and understates it slightly more for multi-cohort FLWs, who are likelier to be carrying one still in flight." },
+      { g: "FLW", name: "Per-cohort finish - of schedules actually offered", where: "FLW Retention",
         how: "Same numerator, but divided only by schedules whose whole design was actually put to them.",
         base: "Fully-offered enrolments only",
         gotcha: "The fair like-for-like rate, but silent about work still in progress. FLWs with no fully-offered schedule are EXCLUDED rather than counted as zero." },
       { g: "FLW", name: "Finished ≥ 1 schedule", where: "FLW Retention",
         how: "Finished at least one of their cohorts.",
         base: "All FLWs",
-        gotcha: "Mechanically rises with the number of cohorts someone is in — three cohorts is three chances. Do not read a multi-vs-single gap on this measure as evidence that re-use improves engagement." },
+        gotcha: "Mechanically rises with the number of cohorts someone is in - three cohorts is three chances. Do not read a multi-vs-single gap on this measure as evidence that re-use improves engagement." },
       { g: "FLW", name: "Engagement tier", where: "FLW Retention",
         how: "A score band blending recency, completion rate and answer depth.",
         base: "All FLWs",
@@ -450,7 +456,7 @@ function WorkflowUI(props) {
       { g: "FLW", name: "Persona", where: "FLW Retention",
         how: "A rule-based segment over the FLW’s whole history.",
         base: "All FLWs",
-        gotcha: "Several personas are DEFINED by whether the person finished, so the finish rate shown beside them is a definition, not a result — One-and-done is 0% by construction." },
+        gotcha: "Several personas are DEFINED by whether the person finished, so the finish rate shown beside them is a definition, not a result - One-and-done is 0% by construction." },
       { g: "FLW", name: "Survival ladder", where: "FLW Retention",
         how: "Share reaching each interview number, each row against the FLWs whose own design CONTAINS that interview.",
         base: "Per-row eligible pool",
@@ -461,51 +467,51 @@ function WorkflowUI(props) {
         gotcha: "Bot messages and OCS system messages are excluded. A word count is a proxy for effort, not for correctness or relevance." },
       { g: "Display", name: "Dotted vs solid funnel line", where: "Funnels → Retention lines",
         how: "Dotted while a subgroup is still inside its expected rollout window; solid once every cohort has passed it.",
-        base: "—",
+        base: "-",
         gotcha: "Dotted means “still arriving, do not read the fall as attrition”. Two subgroups whose real schedule cannot be derived have a pinned end date, taken from the Cohort Tracker." }
     ],
 
     // ---- adding a cohort: the checklist, verified against current code
     onboarding: [
-      { n: 1, title: "Get the facts first", file: "—",
-        what: "You need four things: the CommCare domain name, the cohort id as it appears in the data, which subgroup it belongs to (existing or new), and its interview design — the topic order and the cadence in days.",
+      { n: 1, title: "Get the facts first", file: "-",
+        what: "You need four things: the CommCare domain name, the cohort id as it appears in the data, which subgroup it belongs to (existing or new), and its interview design - the topic order and the cadence in days.",
         gotcha: "Do not guess the design. It comes from the app’s interview_schedule lookup and is pulled automatically; the fallback in code is only a safety net." },
       { n: 2, title: "Add the domain to the three HQ pull scripts", file: "pull_hq_full_payloads.py · pull_hq_interview_schedule.py · pull_hq_user_cases.py",
         what: "Each has a default domain list. Add the new domain to all three.",
-        gotcha: "Miss one and you get partial data with no error — forms but no schedule, or a schedule with no forms." },
+        gotcha: "Miss one and you get partial data with no error - forms but no schedule, or a schedule with no forms." },
       { n: 3, title: "Add the domain to the list the BUILD actually reads", file: "build_master_4src.py → ALL_DOMAINS",
         what: "This is the list that opens the downloaded files.",
         gotcha: "THE #1 GOTCHA. Miss this and the data sits on disk and is silently ignored: no error, no new cohort, the counts simply do not move." },
       { n: 4, title: "Map the cohort id to its subgroup", file: "build_master_4src.py → cohort_to_sg",
         what: "A pattern turning a cohort id into a subgroup name.",
-        gotcha: "Unmapped cohorts are collected and surfaced on the dashboard as a warning rather than dropped — so if you see that notice, this step is what is missing." },
+        gotcha: "Unmapped cohorts are collected and surfaced on the dashboard as a warning rather than dropped - so if you see that notice, this step is what is missing." },
       { n: 5, title: "Label the subgroup and give it a fallback design", file: "build_master_4src.py → COHORT_TYPE_MAP, _FALLBACK_DESIGN",
         what: "A human-readable label, plus topics and cadence used if the live schedule is unavailable.",
-        gotcha: "—" },
+        gotcha: "-" },
       { n: 6, title: "Add the same pattern to the Connect pull", file: "fetch_connect_user_data.py → _cohort_to_sg",
         what: "The Connect pull filters opportunities by the same mapping.",
         gotcha: "Miss this and the interview numbers appear but the whole Connect funnel reads zero for the new cohort." },
       { n: 7, title: "Add the subgroup to every gate script", file: "build_payload_agg.py · audit_e2e.py · brutal_verify.py · build_dashboard_data_audit.py",
         what: "Each holds its own subgroup ordering and arm-rollup map. brutal_verify.py deliberately keeps its OWN copy of the cohort mapping.",
-        gotcha: "Miss one and the build ABORTS with a key error. That is the gates working as intended — it is louder and safer than shipping a half-loaded cohort." },
+        gotcha: "Miss one and the build ABORTS with a key error. That is the gates working as intended - it is louder and safer than shipping a half-loaded cohort." },
       { n: 8, title: "Add it to the render", file: "docs/interviews_render_template.js",
         what: "Subgroup display order, a distinct colour, and the fallback design. Add topic names only if the cohort introduces a NEW topic.",
-        gotcha: "Pick a colour that is genuinely distinct from the existing ones — several near-identical colours have had to be fixed here before." },
+        gotcha: "Pick a colour that is genuinely distinct from the existing ones - several near-identical colours have had to be fixed here before." },
       { n: 9, title: "Build locally and read the gate output", file: "python refresh_interviews_dashboard.py",
         what: "With no flags it skips all the network pulls and just builds, audits and injects, so you can check the new cohort appears with sensible numbers.",
-        gotcha: "A brand-new cohort legitimately looks odd at first — release status not-available, a nonsense average from a single interview. Those settle as data accrues." },
+        gotcha: "A brand-new cohort legitimately looks odd at first - release status not-available, a nonsense average from a single interview. Those settle as data accrues." },
       { n: 10, title: "Publish with a FULL refresh, not the render-only shortcut", file: "GitHub Actions → Refresh Interviews Dashboard",
         what: "A new cohort is a DATA change, so the Connect pull has to run. Trigger the workflow rather than pushing a render.",
         gotcha: "Never run two refreshes at once: the Connect credential rotates itself during a run, so a second overlapping run fails authentication." }
     ],
 
     shortcuts: [
-      { name: "Render-only publish", when: "You changed only presentation — wording, colours, layout, a chart option.",
+      { name: "Render-only publish", when: "You changed only presentation - wording, colours, layout, a chart option.",
         how: "Read the CURRENTLY PUBLISHED render, lift its embedded data out, inject that same data into the edited template, and upload. Live numbers are preserved exactly and no rebuild runs.",
         risk: "Valid ONLY when no number changes. If you touched anything that computes a value, this quietly ships old data under new code." },
       { name: "Build with no credentials", when: "Local development.",
         how: "Run the refresh script with no flags: it uses the local source files already on disk and does build → audit → inject.",
-        risk: "Whatever is on disk may be stale. Never quote a number from a local build — read it from the published dashboard." },
+        risk: "Whatever is on disk may be stale. Never quote a number from a local build - read it from the published dashboard." },
       { name: "Test render changes without publishing", when: "You edited the React file.",
         how: "Inject the live data into the edited template and run it through the offline browser harness, which drives real clicks and asserts on what is displayed.",
         risk: "None. This is the cheapest way to catch a blank chart or a mislabelled figure before anyone sees it." },
@@ -519,7 +525,7 @@ function WorkflowUI(props) {
     // team's "Interviews: Opportunity Creation Checklist", which is the operational source of truth.
     // Two variants exist; they differ only at step 3.
     opportunity: {
-      note: "Do this first. Steps 1–2 happen in CommCare HQ, steps 3–6 in the Connect dashboard. Cohort-specific values (payment, total interviews, max users, cadence) all come from the Cohort Tracker — do not invent them.",
+      note: "Do this first. Steps 1-2 happen in CommCare HQ, steps 3-6 in the Connect dashboard. Cohort-specific values (payment, total interviews, max users, cadence) all come from the Cohort Tracker - do not invent them.",
       variants: [
         ["Standard experimental", "The opportunity is created directly from the opportunities list."],
         ["Program-based (generic)", "The opportunity is created inside a Program, so it inherits that program's settings. Only step 3 differs."]
@@ -527,7 +533,7 @@ function WorkflowUI(props) {
       steps: [
         { n: 1, title: "Prepare the apps", where: "CommCare HQ",
           items: [
-            "Copy the existing app from the master connect-interviews project space — once per cohort, for BOTH the Learn app and the Deliver app — into the delivering partner's project space (EHA or COWACDI).",
+            "Copy the existing app from the master connect-interviews project space - once per cohort, for BOTH the Learn app and the Deliver app - into the delivering partner's project space (EHA or COWACDI).",
             "Rename each copy by changing the bracketed value to the new Cohort ID (e.g. 09TRE).",
             "Publish a new version of both apps and mark it released."
           ],
@@ -538,47 +544,47 @@ function WorkflowUI(props) {
             "User field: in the MAIN project space add the new Cohort ID as a choice, then push it down to the downstream projects.",
             "Lookup table: add one row per interview topic for the new cohort, each with its frequency in days (from the Cohort Tracker).",
             "Set the FIRST topic's frequency to empty (a double dash) and the LAST topic's frequency to 9999.",
-            "Push the lookup table down to the two downstream projects — excluding the test project domain."
+            "Push the lookup table down to the two downstream projects - excluding the test project domain."
           ],
-          why: "THIS TABLE IS THE DESIGN. Labs reads it to learn which topics a cohort should receive, in what order and how far apart — which is what defines “finished” for that cohort and therefore every completion and drop-off percentage on the dashboard.",
-          gotcha: "The first-empty / last-9999 convention is how the chain start and end are detected. Get it wrong and the derived schedule is wrong: a missing 9999 can leave the chain open, and a real topic mistaken for an end-marker drops a whole interview from the design. That exact mistake has happened — a genuine third interview was read as a terminal marker and disappeared from the dashboard until it was corrected." },
+          why: "THIS TABLE IS THE DESIGN. Labs reads it to learn which topics a cohort should receive, in what order and how far apart - which is what defines “finished” for that cohort and therefore every completion and drop-off percentage on the dashboard.",
+          gotcha: "The first-empty / last-9999 convention is how the chain start and end are detected. Get it wrong and the derived schedule is wrong: a missing 9999 can leave the chain open, and a real topic mistaken for an end-marker drops a whole interview from the design. That exact mistake has happened - a genuine third interview was read as a terminal marker and disappeared from the dashboard until it was corrected." },
         { n: "2b", title: "If the workers are re-used from an existing cohort", where: "CommCare HQ",
           items: [
-            "FIRST — case update via Excel import on commcare-user, keeping ONLY case-id, name and cohort-id (remove every other property).",
-            "SECOND — update the mobile worker user field via bulk upload with the new cohort_id."
+            "FIRST - case update via Excel import on commcare-user, keeping ONLY case-id, name and cohort-id (remove every other property).",
+            "SECOND - update the mobile worker user field via bulk upload with the new cohort_id."
           ],
           why: "The same person can appear in several cohorts. Both the case and the user field must carry the new cohort_id or their interviews attach to the wrong cohort.",
           gotcha: "Order matters: case update first, then the user field. This is also why the dashboard counts a person once but their enrolments separately." },
         { n: 3, title: "Create the opportunity", where: "Connect dashboard",
           items: [
             "STANDARD: go to the opportunities section and click Add Opportunity.",
-            "PROGRAM-BASED: open the Dimagi program-manager profile, go to Programs, click View Status on the relevant program, then Create Opportunity — and confirm the info panel reads “This opportunity will be created under the … program”.",
+            "PROGRAM-BASED: open the Dimagi program-manager profile, go to Programs, click View Status on the relevant program, then Create Opportunity - and confirm the info panel reads “This opportunity will be created under the … program”.",
             "Name it with the Cohort ID (e.g. 09TRE). Currency NGN, country Nigeria.",
             "HQ server: CommCare HQ. Select the API query, and make sure that API is configured for ALL projects.",
             "Copy the long description from an existing opportunity and change the cohort reference to the new Cohort ID. Add a short description (e.g. “Connect Interviews : EHA Cohort 08TRS”).",
             "Select the newly created Learn and Deliver apps. Learn app passing score is 4."
           ],
           why: "The opportunity is what FLWs are invited to, and its name is the cohort id that flows through every downstream join.",
-          gotcha: "If the API query is not configured for all projects the opportunity cannot see its own app data. Check the program info panel before submitting — an opportunity created outside its program is awkward to move." },
+          gotcha: "If the API query is not configured for all projects the opportunity cannot see its own app data. Check the program info panel before submitting - an opportunity created outside its program is awkward to move." },
         { n: 4, title: "Configure payment and budget", where: "Connect dashboard",
           items: [
             "Add a payment unit, named for the cohort (e.g. “08TRS interview completed successfully”).",
             "Payment amount: from the Cohort Tracker.",
             "Maximum visits per user = the cohort's TOTAL INTERVIEWS.",
             "Maximum visits per day = 1.",
-            "Start date: today is fine — but it CANNOT be changed afterwards.",
+            "Start date: today is fine - but it CANNOT be changed afterwards.",
             "Worker budget: from the Cohort Tracker's max users, rounded up (e.g. 33 or 35 → 40).",
             "End date: optional. Leaving it blank avoids problems later if the end date moves."
           ],
           why: "Maximum visits per user caps how many interviews a worker can be paid for, so it must equal the design length or the last interviews cannot be completed.",
-          gotcha: "The start date is immutable — set it deliberately. One visit per day is what keeps interviews spaced rather than done back to back." },
+          gotcha: "The start date is immutable - set it deliberately. One visit per day is what keeps interviews spaced rather than done back to back." },
         { n: 5, title: "Create the conditional alert", where: "CommCare HQ",
           items: [
             "One alert per opportunity, on commcare-user.",
             "Conditions: cohort_id = the new Cohort ID, and session_completion = session completed."
           ],
           why: "This is what triggers payment on a completed interview session.",
-          gotcha: "The cohort_id in the alert must match the new cohort exactly — copying an alert and forgetting to change it pays the wrong cohort." },
+          gotcha: "The cohort_id in the alert must match the new cohort exactly - copying an alert and forgetting to change it pays the wrong cohort." },
         { n: 6, title: "Verify the configuration", where: "Connect dashboard → hamburger menu",
           items: [
             "Delivery Type: change to “Interviews”.",
@@ -587,7 +593,7 @@ function WorkflowUI(props) {
             "Active status: set active when it is ready to launch."
           ],
           why: "These four are easy to miss and each one breaks something quietly.",
-          gotcha: "GPS verification left on stops workers being auto-approved for payment. “Is Test” left on marks the cohort as test data, and Labs deliberately EXCLUDES test-flagged data — so the cohort would be invisible on the dashboard while looking fine in Connect." }
+          gotcha: "GPS verification left on stops workers being auto-approved for payment. “Is Test” left on marks the cohort as test data, and Labs deliberately EXCLUDES test-flagged data - so the cohort would be invisible on the dashboard while looking fine in Connect." }
       ]
     },
 
@@ -598,7 +604,7 @@ function WorkflowUI(props) {
         fix: "Add the domain to ALL_DOMAINS in the master build, not just to the pull scripts. This is the single most common onboarding mistake." },
       { symptom: "Interview counts look right but the Connect funnel reads zero for one cohort.",
         cause: "The Connect pull filters opportunities by a cohort pattern and the new cohort does not match it.",
-        fix: "Add the pattern to the Connect pull as well as the master build — they keep separate copies." },
+        fix: "Add the pattern to the Connect pull as well as the master build - they keep separate copies." },
       { symptom: "The build aborts with a key error naming a subgroup.",
         cause: "A gate script does not know that subgroup yet.",
         fix: "Add it to all four gate scripts. This is the gates working correctly: stopping is safer than publishing a half-loaded cohort." },
@@ -607,11 +613,11 @@ function WorkflowUI(props) {
         fix: "Check the first topic is an empty/double-dash frequency and the last is 9999, then confirm the derived design on this dashboard matches the Cohort Tracker." },
       { symptom: "Two figures on the same screen disagree about the same thing.",
         cause: "Almost always different denominators, or one figure is current while the other is windowed.",
-        fix: "Check the Indicators section for both — every one states its base. Chart tiles are current-state; a trimmed chart can legitimately end earlier, and the page says so where they differ." },
+        fix: "Check the Indicators section for both - every one states its base. Chart tiles are current-state; a trimmed chart can legitimately end earlier, and the page says so where they differ." },
       { symptom: "The dashboard did not refresh today.",
         cause: "The daily job failed. Data problems abort at a gate; publishing problems abort at the upload.",
-        fix: "Read the run log. If the gates passed and the upload failed, the data was fine and a re-run usually fixes it — the upload is version-guarded and re-checks whether the write actually landed." },
-      { symptom: "A brand-new cohort shows odd values — a negative average, or nothing on the line charts.",
+        fix: "Read the run log. If the gates passed and the upload failed, the data was fine and a re-run usually fixes it - the upload is version-guarded and re-checks whether the write actually landed." },
+      { symptom: "A brand-new cohort shows odd values - a negative average, or nothing on the line charts.",
         cause: "Too little data yet. Release status is not-available until the window opens, and an average over one interview is meaningless.",
         fix: "Nothing. These settle as interviews accrue over the following daily runs." },
       { symptom: "A number here disagrees with a number someone calculated locally.",
@@ -621,8 +627,8 @@ function WorkflowUI(props) {
 
     // ---- honest limitations. Stated in the product so nobody discovers them by being wrong in a meeting.
     limits: [
-      ["The Connect funnel is the least live part.", "Interview data refreshes from HQ and OCS every day. The Connect leg depends on a credential that has broken before, and when it does the funnel silently falls back to the last good snapshot — invitation and claim numbers can be older than the interview numbers beside them."],
-      ["“Per-cohort finish — so far” understates finishing.", "It counts schedules the programme has not finished rolling out as unfinished, and does so slightly more often for multi-cohort workers. The offered-only figure beside it is the fair like-for-like rate. Read both."],
+      ["The Connect funnel is the least live part.", "Interview data refreshes from HQ and OCS every day. The Connect leg depends on a credential that has broken before, and when it does the funnel silently falls back to the last good snapshot - invitation and claim numbers can be older than the interview numbers beside them."],
+      ["“Per-cohort finish - so far” understates finishing.", "It counts schedules the programme has not finished rolling out as unfinished, and does so slightly more often for multi-cohort workers. The offered-only figure beside it is the fair like-for-like rate. Read both."],
       ["The survival ladder is not a single funnel.", "Each row has its own eligible pool, so a later interview can show a higher share than an earlier one when short-schedule cohorts leave the pool. Compare each row to its own count."],
       ["The dotted-line rule is a heuristic.", "A subgroup's line is dotted while it is inside its expected rollout window, computed from the design. A late-firing interview can make a line look settled while it is still rolling out. Two subgroups whose real schedule cannot be derived have their end date pinned from the Cohort Tracker."],
       ["Word counts measure effort, not quality.", "Average FLW words counts words in the worker's own messages. It says nothing about whether an answer was accurate, relevant or deep."],
@@ -630,7 +636,7 @@ function WorkflowUI(props) {
       ["The render has a hard size limit.", "The platform caps the dashboard file at 512 KB, so the payload is pruned to the keys the interface reads. A new chart may require pruning something else first."]
     ],
     glossary: [
-      ["FLW", "Front-line worker — the community health worker being interviewed. One person, even if they appear in several cohorts."],
+      ["FLW", "Front-line worker - the community health worker being interviewed. One person, even if they appear in several cohorts."],
       ["Cohort", "One recruited group in one place, with its own id. The smallest unit the programme runs."],
       ["Subgroup", "A family of cohorts sharing an interview design, e.g. the panel group or an A/B arm."],
       ["Arm", "The A or B side of an experiment. Arms roll up to one experiment for reporting."],
@@ -640,14 +646,14 @@ function WorkflowUI(props) {
       ["Cadence", "Intended days between interviews. Varies by subgroup, which is why time-based rules are cadence-relative."],
       ["Triggered", "The bot OFFERED the interview. Recorded as a form in CommCare."],
       ["Initiated", "The FLW started participating in the study at all."],
-      ["Claimed", "The FLW took up the opportunity in Connect — the last step before interviewing."],
+      ["Claimed", "The FLW took up the opportunity in Connect - the last step before interviewing."],
       ["Session", "One conversation in OCS: one FLW, one interview, start to finish."],
-      ["LLO", "Local learning organisation — the partner running delivery on the ground."],
+      ["LLO", "Local learning organisation - the partner running delivery on the ground."],
       ["Gate", "An automated check that stops the build. Nothing publishes with a failing gate."]
     ]
   };
 
-  // Numbers quoted anywhere in the documentation come from HERE — read out of the live DATA object at
+  // Numbers quoted anywhere in the documentation come from HERE - read out of the live DATA object at
   // render time. Nothing about scale is written as a literal, so the docs cannot describe a dashboard
   // that no longer exists.
   function liveFacts() {
@@ -673,14 +679,14 @@ function WorkflowUI(props) {
   function docsMarkdown(section) {
     var F = liveFacts(), L = [], all = section === "all";
     function h(n, t) { L.push("\n" + Array(n + 1).join("#") + " " + t + "\n"); }
-    L.push("# Connect Interviews Dashboard — how it works");
+    L.push("# Connect Interviews Dashboard - how it works");
     L.push("\n> Generated from the live dashboard on " + F.today + " (build " + F.built + ").");
     L.push("> Every figure is read from the published payload at generation time, not copied by hand.");
     L.push("\n**Scale right now:** " + F.flws + " unique FLWs · " + F.cohorts + " cohorts · " + F.subgroups +
       " subgroups · " + F.topics + " topics · " + F.rows + " FLW×interview rows · " +
       F.started + " interviews started · " + F.completed + " completed.");
     L.push("\n**Interview designs vary**, which is why nearly every rule is relative rather than absolute: " +
-      "schedules run from " + F.minLen + " to " + F.maxLen + " interviews at " + F.minCad + "–" + F.maxCad + " day cadences.\n");
+      "schedules run from " + F.minLen + " to " + F.maxLen + " interviews at " + F.minCad + "-" + F.maxCad + " day cadences.\n");
     L.push("- " + F.designs.join("\n- "));
     L.push("\n**Reading order:** what a cohort is and how one is created → how the data flows → what each " +
       "tab shows → what each indicator means → what to do when something looks wrong.\n");
@@ -689,9 +695,9 @@ function WorkflowUI(props) {
       h(2, "Creating a cohort (the opportunity)");
       L.push(DOCS.opportunity.note + "\n");
       L.push("Variants:");
-      DOCS.opportunity.variants.forEach(function (v) { L.push("- **" + v[0] + "** — " + v[1]); });
+      DOCS.opportunity.variants.forEach(function (v) { L.push("- **" + v[0] + "** - " + v[1]); });
       DOCS.opportunity.steps.forEach(function (s) {
-        h(3, "Step " + s.n + " — " + s.title + "  (" + s.where + ")");
+        h(3, "Step " + s.n + " - " + s.title + "  (" + s.where + ")");
         s.items.forEach(function (i) { L.push("- " + i); });
         L.push("\n_Why:_ " + s.why);
         if (s.gotcha) L.push("_Watch out:_ " + s.gotcha);
@@ -702,8 +708,8 @@ function WorkflowUI(props) {
       L.push("Ten places, in order. They are separate on purpose: the pull scripts decide what is " +
         "downloaded, the build decides what is read, and the gates refuse to run on a half-configured subgroup.\n");
       DOCS.onboarding.forEach(function (s) {
-        L.push("**Step " + s.n + " — " + s.title + "**  \n_File:_ `" + s.file + "`  \n" + s.what +
-          (s.gotcha && s.gotcha !== "—" ? "  \n⚠ " + s.gotcha : "") + "\n");
+        L.push("**Step " + s.n + " - " + s.title + "**  \n_File:_ `" + s.file + "`  \n" + s.what +
+          (s.gotcha && s.gotcha !== "-" ? "  \n⚠ " + s.gotcha : "") + "\n");
       });
       h(3, "Shortcuts, and when they are safe");
       DOCS.shortcuts.forEach(function (s) {
@@ -718,7 +724,7 @@ function WorkflowUI(props) {
         h(3, ly.label);
         L.push("_" + ly.note + "_\n");
         DOCS.nodes.filter(function (n) { return n.layer === ly.id; }).forEach(function (n) {
-          L.push("**" + n.label + "** — produces: " + n.owns);
+          L.push("**" + n.label + "** - produces: " + n.owns);
           L.push("- What: " + n.what);
           L.push("- Why it matters: " + n.why + "\n");
         });
@@ -735,7 +741,7 @@ function WorkflowUI(props) {
       DOCS.tabs.forEach(function (t) {
         h(3, t.name);
         L.push("**Answers:** " + t.question + "  \n**Reads payload keys:** " + t.reads.join(", ") + "\n");
-        t.charts.forEach(function (c) { L.push("- **" + c[0] + "** — " + c[1]); });
+        t.charts.forEach(function (c) { L.push("- **" + c[0] + "** - " + c[1]); });
       });
     }
     if (all || section === "metrics") {
@@ -748,7 +754,7 @@ function WorkflowUI(props) {
         h(3, g);
         DOCS.metrics.filter(function (m) { return m.g === g; }).forEach(function (m) {
           L.push("**" + m.name + "**  \n_Where:_ " + m.where + "  \n_How:_ " + m.how +
-            "  \n_Base:_ " + m.base + (m.gotcha && m.gotcha !== "—" ? "  \n_Read with care:_ " + m.gotcha : "") + "\n");
+            "  \n_Base:_ " + m.base + (m.gotcha && m.gotcha !== "-" ? "  \n_Read with care:_ " + m.gotcha : "") + "\n");
         });
       });
     }
@@ -763,7 +769,7 @@ function WorkflowUI(props) {
     }
     if (all || section === "glossary") {
       h(2, "Glossary");
-      DOCS.glossary.forEach(function (g) { L.push("- **" + g[0] + "** — " + g[1]); });
+      DOCS.glossary.forEach(function (g) { L.push("- **" + g[0] + "** - " + g[1]); });
     }
     if (all) {
       h(2, "Optional");
@@ -805,7 +811,7 @@ function WorkflowUI(props) {
           <div className="text-xs font-semibold text-gray-800">
             {title}{where ? <span className="ml-1 text-gray-400 font-normal">· {where}</span> : null}
           </div>
-          {items.map(function (it, i) { return <div key={i} className="text-xs text-gray-700 mt-0.5">– {it}</div>; })}
+          {items.map(function (it, i) { return <div key={i} className="text-xs text-gray-700 mt-0.5">- {it}</div>; })}
           {why ? <div className="text-xs text-gray-600 mt-1"><b>Why:</b> {why}</div> : null}
           {gotcha ? <div className="text-xs mt-0.5" style={{ color: "#b45309" }}><b>Watch out:</b> {gotcha}</div> : null}
         </div>
@@ -813,14 +819,57 @@ function WorkflowUI(props) {
     );
   }
 
+
+  // ---- DRIFT GUARD. Be honest about what is and is not automatic here:
+  //   AUTOMATIC  - every number, the subgroup roster, the designs, the payload-key list. These are read
+  //                from DATA on load, so a data refresh updates them with no human action.
+  //   NOT AUTOMATIC - the prose. Adding a tab, renaming a chart or changing how a metric is computed does
+  //                not update the words describing it.
+  // So rather than claim the docs self-maintain, this compares what they DOCUMENT against what the
+  // dashboard actually HAS and shows any gap in the tab. Silent staleness becomes visible staleness.
+  function docsCoverage() {
+    var present = TABS.map(function (t) { return t[0]; });
+    var documented = DOCS.tabs.map(function (t) { return t.id; });
+    var undocumentedTabs = present.filter(function (id) { return documented.indexOf(id) < 0; });
+    var staleTabs = documented.filter(function (id) { return present.indexOf(id) < 0; });
+    // payload keys the docs say a tab reads, vs what the payload actually carries
+    var referenced = {};
+    DOCS.tabs.forEach(function (t) { (t.reads || []).forEach(function (k) { referenced[k] = 1; }); });
+    var META = { today: 1, built_at: 1, counts: 1, subgroupDesign: 1, topicNames: 1, topicQuestions: 1,
+                 unmappedCohorts: 1, connectPendingSubgroups: 1, flwMatrixCohorts: 1, flwMatrixOrder: 1,
+                 flwMatrixOrderW: 1, cohortSG: 1 };
+    var unreferenced = Object.keys(DATA).filter(function (k) { return !referenced[k] && !META[k]; });
+    var ghosts = Object.keys(referenced).filter(function (k) {
+      return k !== "everything (read-only)" && Object.keys(DATA).indexOf(k) < 0;
+    });
+    return { undocumentedTabs: undocumentedTabs, staleTabs: staleTabs,
+             unreferenced: unreferenced, ghosts: ghosts,
+             ok: !undocumentedTabs.length && !staleTabs.length && !unreferenced.length && !ghosts.length };
+  }
+
+  // ---- KPI cross-check. The headline figures with their UNITS spelled out, plus the arithmetic that
+  // reconciles the per-subgroup roster to the unique-person total. Two different units (people vs
+  // interviews) and one genuine double-count are the three things people trip over.
+  function kpiCrossCheck() {
+    var c = DATA.counts || {}, cf = DATA.connectFunnel || [], ce = (DATA.cohortEngagement || {}).ALL || {};
+    var rows = cf.map(function (r) { return { sg: r.sg, flws: r.started, done: r.completed }; });
+    var sumFlws = rows.reduce(function (a, r) { return a + (r.flws || 0); }, 0);
+    var unique = ce.total_started || 0;
+    return { rows: rows, n: rows.length, sumFlws: sumFlws, unique: unique,
+             dup: sumFlws - unique, triggered: c.flws, notStarted: (c.flws || 0) - unique,
+             ivStarted: c.started, ivCompleted: c.completed, rows_master: c.master_rows, cohorts: c.cohorts };
+  }
+
   function renderDocs() {
     var F = liveFacts();
-    var SEC = [["opportunity", "1 · Create a cohort"], ["onboarding", "2 · Add it to Labs"],
-               ["flow", "3 · Data flow"], ["tabs", "4 · Tabs & charts"], ["metrics", "5 · Indicators"],
+    var SEC = [["kpi", "0 · Numbers & cross-check"], ["opportunity", "1 · Create a cohort"],
+               ["onboarding", "2 · Add it to Labs"], ["flow", "3 · Data flow"],
+               ["tabs", "4 · Tabs & charts"], ["metrics", "5 · Indicators"],
                ["trouble", "6 · Troubleshooting"], ["glossary", "7 · Glossary"]];
+    var K = kpiCrossCheck(), COV = docsCoverage();
     // ---- diagram geometry. One ROW per layer; nodes are laid out from the node list, so adding a node
     // cannot break the picture. Connectors are ORTHOGONAL (down, across, down) with arrowheads rather
-    // than long bezier swoops — with 16 edges the curves crossed each other and were unreadable.
+    // than long bezier swoops - with 16 edges the curves crossed each other and were unreadable.
     var W = 1180, ROW = 132, PAD = 40, NH = 62, TOP = 34;
     var pos = {};
     DOCS.layers.forEach(function (ly, li) {
@@ -867,7 +916,7 @@ function WorkflowUI(props) {
             <span className="text-gray-500">data as of <b>{F.today}</b></span>
           </div>
           <p className="text-xs text-gray-600 mt-1">
-            Schedules run from <b>{F.minLen}</b> to <b>{F.maxLen}</b> interviews at <b>{F.minCad}</b>–<b>{F.maxCad}</b> day
+            Schedules run from <b>{F.minLen}</b> to <b>{F.maxLen}</b> interviews at <b>{F.minCad}</b>-<b>{F.maxCad}</b> day
             cadences, which is why nearly every rule here is <i>relative to the cohort</i> rather than a fixed number.
           </p>
         </div>
@@ -898,7 +947,7 @@ function WorkflowUI(props) {
           </div>
           <p className="text-gray-500 mt-1" style={{ fontSize: "10px" }}>
             Plain Markdown with stable headings, so it can be pasted straight into a model as project
-            context — it carries the lineage, every indicator with its denominator, both onboarding
+            context - it carries the lineage, every indicator with its denominator, both onboarding
             checklists and the troubleshooting guide. The full file ends with an <i>Optional</i> section an
             LLM can drop to save context. JSON is the same content for programmatic use.
           </p>
@@ -909,9 +958,120 @@ function WorkflowUI(props) {
           {SEC.map(function (s) { return <span key={s[0]}>{subBtn(docSec, s[0], setDocSec, s[1])}</span>; })}
         </div>
 
+        {/* ---------- 0. NUMBERS & CROSS-CHECK */}
+        {docSec === "kpi" ? (
+          <div className="space-y-3">
+            {docCard("The headline numbers, with their units",
+              "Two different units and one genuine double-count are what make these look contradictory. Everything below is read live, so the dashboard can be checked against it at any time.",
+              <div>
+                <table className="w-full" style={{ fontSize: "11px" }}>
+                  <tbody>
+                    <tr className="border-b border-gray-100"><td className="py-1 text-gray-700">Unique FLWs who started at least one interview</td>
+                      <td className="py-1 text-right font-bold text-gray-900">{Number(K.unique).toLocaleString()}</td><td className="py-1 pl-2 text-gray-400">people</td></tr>
+                    <tr className="border-b border-gray-100"><td className="py-1 text-gray-700">FLWs triggered (offered at least one interview)</td>
+                      <td className="py-1 text-right font-bold text-gray-900">{Number(K.triggered).toLocaleString()}</td><td className="py-1 pl-2 text-gray-400">people</td></tr>
+                    <tr className="border-b border-gray-100"><td className="py-1 text-gray-700">Interviews started</td>
+                      <td className="py-1 text-right font-bold text-gray-900">{Number(K.ivStarted).toLocaleString()}</td><td className="py-1 pl-2 text-gray-400">interviews</td></tr>
+                    <tr className="border-b border-gray-100"><td className="py-1 text-gray-700">Interviews completed</td>
+                      <td className="py-1 text-right font-bold text-gray-900">{Number(K.ivCompleted).toLocaleString()}</td><td className="py-1 pl-2 text-gray-400">interviews</td></tr>
+                    <tr className="border-b border-gray-100"><td className="py-1 text-gray-700">FLW x interview rows behind every figure</td>
+                      <td className="py-1 text-right font-bold text-gray-900">{Number(K.rows_master).toLocaleString()}</td><td className="py-1 pl-2 text-gray-400">rows</td></tr>
+                    <tr><td className="py-1 text-gray-700">Cohorts / subgroups</td>
+                      <td className="py-1 text-right font-bold text-gray-900">{K.cohorts} / {K.n}</td><td className="py-1 pl-2 text-gray-400">groups</td></tr>
+                  </tbody>
+                </table>
+                <div className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-gray-800">
+                  <b>People are not interviews.</b> {Number(K.unique).toLocaleString()} people did{" "}
+                  {Number(K.ivStarted).toLocaleString()} interviews, because each person does several, so those
+                  two figures must never be compared with each other. Separately, {K.notStarted} FLW{K.notStarted === 1 ? " was" : "s were"}{" "}
+                  offered an interview but never started one, which is why the triggered count is slightly
+                  higher than the started count.
+                </div>
+              </div>, "#1565C0")}
+
+            {docCard("All " + K.n + " subgroups, and why they add to more than the total",
+              "The full roster. Each row counts PEOPLE who started at least one interview in that subgroup.",
+              <div>
+                <table className="w-full" style={{ fontSize: "11px" }}>
+                  <thead><tr className="text-gray-500" style={{ fontSize: "9.5px" }}>
+                    <th className="text-left py-1">Subgroup</th><th className="text-right py-1">FLWs started</th>
+                    <th className="text-right py-1">FLWs completed</th><th className="text-left py-1 pl-3">Its design</th></tr></thead>
+                  <tbody>
+                    {K.rows.map(function (r) {
+                      var d = (DATA.subgroupDesign || {})[r.sg] || {};
+                      return (
+                        <tr key={r.sg} className="border-t border-gray-100">
+                          <td className="py-0.5 font-semibold text-gray-800">{r.sg}</td>
+                          <td className="py-0.5 text-right text-gray-800">{Number(r.flws).toLocaleString()}</td>
+                          <td className="py-0.5 text-right text-gray-600">{Number(r.done).toLocaleString()}</td>
+                          <td className="py-0.5 pl-3 text-gray-500">{(d.topics || []).length} interviews, every {d.cadence}d</td>
+                        </tr>
+                      );
+                    })}
+                    <tr className="border-t-2 border-gray-300 font-bold">
+                      <td className="py-1 text-gray-900">Sum of all {K.n} subgroups</td>
+                      <td className="py-1 text-right text-gray-900">{Number(K.sumFlws).toLocaleString()}</td>
+                      <td className="py-1"></td><td className="py-1"></td>
+                    </tr>
+                    <tr>
+                      <td className="py-0.5 text-gray-700">Unique people</td>
+                      <td className="py-0.5 text-right font-bold text-gray-900">{Number(K.unique).toLocaleString()}</td>
+                      <td className="py-0.5"></td><td className="py-0.5"></td>
+                    </tr>
+                    <tr>
+                      <td className="py-0.5" style={{ color: "#b45309" }}>Counted in more than one subgroup</td>
+                      <td className="py-0.5 text-right font-bold" style={{ color: "#b45309" }}>{Number(K.dup).toLocaleString()}</td>
+                      <td className="py-0.5"></td><td className="py-0.5"></td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-gray-800">
+                  <b>Do not sum the subgroups.</b> The {K.n} rows add to {Number(K.sumFlws).toLocaleString()} but there
+                  are only {Number(K.unique).toLocaleString()} people, a difference of {Number(K.dup).toLocaleString()},
+                  because the same worker is often recruited into more than one subgroup and is counted in
+                  each. Quote a subgroup figure, or the overall total, never a sum of arms.
+                </div>
+              </div>, "#7B1FA2")}
+
+            {docCard("Is this page up to date?",
+              "Being straight about what maintains itself and what does not.",
+              <div>
+                <div className="text-xs text-gray-700 mb-1">
+                  <b>Updates itself:</b> every number, the subgroup roster, the designs and the payload-key
+                  list are read from the live data each time this page loads, so a daily data refresh updates
+                  them with nobody touching anything.
+                </div>
+                <div className="text-xs text-gray-700 mb-2">
+                  <b>Does not update itself:</b> the written explanations. If a chart is renamed, or a metric
+                  changes how it is calculated, the words here do not know. So this check compares what the
+                  page documents against what the dashboard actually has:
+                </div>
+                {COV.ok ? (
+                  <div className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-xs text-gray-800">
+                    <b>In sync.</b> All {TABS.length} tabs are documented, and every payload key the data
+                    carries is claimed by a documented tab. No drift detected.
+                  </div>
+                ) : (
+                  <div className="rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-gray-800">
+                    <b>Drift detected, this page needs an edit:</b>
+                    {COV.undocumentedTabs.length ? <div>- Tabs that exist but are not documented: {COV.undocumentedTabs.join(", ")}</div> : null}
+                    {COV.staleTabs.length ? <div>- Documented tabs that no longer exist: {COV.staleTabs.join(", ")}</div> : null}
+                    {COV.unreferenced.length ? <div>- Payload keys no documented tab claims to read: {COV.unreferenced.join(", ")}</div> : null}
+                    {COV.ghosts.length ? <div>- Docs reference payload keys that are gone: {COV.ghosts.join(", ")}</div> : null}
+                  </div>
+                )}
+                <div className="text-gray-500 mt-1" style={{ fontSize: "10px" }}>
+                  What this cannot check: whether a written definition still matches the code that computes
+                  it. That still needs a person to update the words when a calculation changes.
+                </div>
+              </div>, "#2E7D32")}
+          </div>
+        ) : null}
+
+
         {/* ---------- 1. CREATE A COHORT */}
         {docSec === "opportunity" ? docCard(
-          "Creating a cohort — the opportunity",
+          "Creating a cohort - the opportunity",
           DOCS.opportunity.note,
           <div>
             <div className="flex flex-wrap gap-2 mb-2">
@@ -929,11 +1089,11 @@ function WorkflowUI(props) {
             })}
             <div className="rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-gray-800">
               <b>The one step that changes the dashboard most:</b> the lookup table in step 2. That table IS the
-              interview design — Labs reads it to learn a cohort’s topics, their order and their spacing, which
+              interview design - Labs reads it to learn a cohort’s topics, their order and their spacing, which
               is what defines “finished” and therefore every completion and drop-off percentage shown here.
               The dashboard currently reads these designs:
               <div className="mt-1">{F.designs.map(function (d) { return <div key={d}>• {d}</div>; })}</div>
-              If a cohort’s row above does not match the Cohort Tracker, fix the lookup table — not the dashboard.
+              If a cohort’s row above does not match the Cohort Tracker, fix the lookup table - not the dashboard.
             </div>
           </div>, "#00695C") : null}
 
@@ -943,7 +1103,7 @@ function WorkflowUI(props) {
           "Ten places, in the order you should do them. They are separate on purpose: the pull scripts decide what gets downloaded, the build decides what gets read, and the gates refuse to run on a half-configured subgroup.",
           <div>
             {DOCS.onboarding.map(function (s) {
-              return docStep(s.n, s.title, s.file !== "—" ? s.file : "", [s.what], "", s.gotcha !== "—" ? s.gotcha : "", "#7B1FA2");
+              return docStep(s.n, s.title, s.file !== "-" ? s.file : "", [s.what], "", s.gotcha !== "-" ? s.gotcha : "", "#7B1FA2");
             })}
             <div className="text-sm font-semibold text-gray-700 mt-3 mb-1">Shortcuts, and when each is safe</div>
             {DOCS.shortcuts.map(function (s) {
@@ -958,11 +1118,11 @@ function WorkflowUI(props) {
             })}
             {F.unmapped
               ? <div className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-gray-800">
-                  <b>{F.unmapped} cohort(s) are unmapped right now</b> — their data exists but no subgroup pattern
+                  <b>{F.unmapped} cohort(s) are unmapped right now</b> - their data exists but no subgroup pattern
                   matches, so they are excluded from every rollup. That is step 4.
                 </div>
               : <div className="mt-2 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-gray-700">
-                  ✓ No unmapped cohorts right now — every cohort in the data resolves to a subgroup.
+                  ✓ No unmapped cohorts right now - every cohort in the data resolves to a subgroup.
                 </div>}
           </div>, "#7B1FA2") : null}
 
@@ -971,7 +1131,7 @@ function WorkflowUI(props) {
           <div className="rounded border border-gray-200 bg-white px-3 py-3" style={{ borderLeft: "3px solid #1565C0" }}>
             <div className="text-sm font-semibold text-gray-800">The whole pipeline, end to end</div>
             <p className="text-xs text-gray-600 mt-0.5 mb-2">
-              Read top to bottom. <b>Click any box</b> for what it produces and why it exists — every connection
+              Read top to bottom. <b>Click any box</b> for what it produces and why it exists - every connection
               touching it is highlighted, so you can trace where a number came from or what a change would affect.
             </p>
             <div style={{ overflowX: "auto" }}>
@@ -1046,13 +1206,13 @@ function WorkflowUI(props) {
               </div>
             ) : (
               <p className="text-gray-500 mt-1" style={{ fontSize: "10px" }}>
-                Nothing selected — click a box. The small text inside each box is what that step produces.
+                Nothing selected - click a box. The small text inside each box is what that step produces.
               </p>
             )}
             <Legend title="Two design choices worth knowing">
               <div><b>The join comes first.</b> One row per FLW per interview slot is built before anything is
                 summarised, and every tab is an aggregate of those rows. That is why two numbers here cannot
-                disagree — they are different summaries of one table, not separate queries.</div>
+                disagree - they are different summaries of one table, not separate queries.</div>
               <div><b>Nothing publishes past a failing gate.</b> Three checks run after the build, one of which
                 re-derives the headline numbers from the raw sources using entirely separate code. If the two
                 disagree, the run stops rather than shipping.</div>
@@ -1071,7 +1231,7 @@ function WorkflowUI(props) {
                   <div className="text-xs font-semibold text-gray-800">{t.name}</div>
                   <div className="text-xs text-gray-600 mb-1">Answers: <i>{t.question}</i></div>
                   {t.charts.map(function (c, i) {
-                    return <div key={i} className="text-xs text-gray-700">• <b>{c[0]}</b> — {c[1]}</div>;
+                    return <div key={i} className="text-xs text-gray-700">• <b>{c[0]}</b> - {c[1]}</div>;
                   })}
                   <div className="text-gray-400 mt-1" style={{ fontSize: "9px" }}>payload keys: {t.reads.join(", ")}</div>
                 </div>
@@ -1082,7 +1242,7 @@ function WorkflowUI(props) {
         {/* ---------- 5. INDICATORS */}
         {docSec === "metrics" ? docCard(
           "Every indicator, and the logic behind it",
-          "Base is the denominator. If two figures ever look contradictory, the cause is almost always that they use different bases — so it is stated for every single one.",
+          "Base is the denominator. If two figures ever look contradictory, the cause is almost always that they use different bases - so it is stated for every single one.",
           <div>
             {(function () {
               var gs = [];
@@ -1100,7 +1260,7 @@ function WorkflowUI(props) {
                           </div>
                           <div className="text-xs text-gray-700 mt-0.5"><b>How:</b> {m.how}</div>
                           <div className="text-xs text-gray-700"><b>Base (denominator):</b> {m.base}</div>
-                          {m.gotcha && m.gotcha !== "—"
+                          {m.gotcha && m.gotcha !== "-"
                             ? <div className="text-xs mt-0.5" style={{ color: "#b45309" }}><b>Read with care:</b> {m.gotcha}</div>
                             : null}
                         </div>
@@ -1152,7 +1312,7 @@ function WorkflowUI(props) {
               return (
                 <div key={g[0]} className="mb-1.5 text-xs">
                   <span className="font-semibold text-gray-800">{g[0]}</span>
-                  <span className="text-gray-700"> — {g[1]}</span>
+                  <span className="text-gray-700"> - {g[1]}</span>
                 </div>
               );
             })}
@@ -1210,14 +1370,14 @@ function WorkflowUI(props) {
     var st = ce.started, fin = ce.finished, N = st.length, tot = st[N - 1] || 1;
     var thr = Math.max(2, (thrPct / 100) * tot), last = 0;
     for (var n = 1; n < N; n++) { if ((st[n] - st[n - 1]) + (fin[n] - fin[n - 1]) >= thr) last = n; }
-    // The final point is an "as of today" stub, not a full week — build_payload_agg appends the data's
+    // The final point is an "as of today" stub, not a full week - build_payload_agg appends the data's
     // last date, which is typically 1-6 days after the previous week-end. Measured against a FULL-WEEK
     // threshold it almost never qualifies, which silently froze the right-hand edge one period behind:
     // PANEL charted 83 FLWs finished while the true current figure was 85, so the chart and the KPI
     // tile above it disagreed on the same screen (Andrea, 2026-08-13).
     // Include that stub ONLY when it directly continues the active window (last === N-2). The slice is
     // contiguous, so pulling in the final point of a long-finished cohort would drag every dead week
-    // between along with it — measured: a single late TRS finish would have re-expanded its window from
+    // between along with it - measured: a single late TRS finish would have re-expanded its window from
     // 7 weeks back to the full 19, which is precisely the inactive tail the trimming exists to remove.
     if (N >= 2 && last === N - 2 && (st[N - 1] - st[N - 2]) + (fin[N - 1] - fin[N - 2]) > 0) last = N - 1;
     // keep >= 2 points, but never index past the last week: a 1-week series (every newly onboarded
@@ -1284,7 +1444,7 @@ function WorkflowUI(props) {
     ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, out.width, out.height);
     var lloTag = engLlo !== "all" ? " · " + engLlo : "";
     ctx.fillStyle = "#111827"; ctx.font = "bold 16px sans-serif";
-    ctx.fillText("Cohort Engagement — " + engSg + lloTag + "  (as of " + (DATA.today || "") + ")", pad, 24);
+    ctx.fillText("Cohort Engagement - " + engSg + lloTag + "  (as of " + (DATA.today || "") + ")", pad, 24);
     var y = title + pad;
     cs.forEach(function (c) { ctx.drawImage(c, pad, y); y += c.height + gap; });
     var a = document.createElement("a"); a.download = "cohort_engagement_" + engSg + (engLlo !== "all" ? "_" + engLlo : "") + ".png"; a.href = out.toDataURL("image/png"); a.click();
@@ -1301,7 +1461,7 @@ function WorkflowUI(props) {
     // Full timeline is CLEAN by default. The dashed boundary + greyed tail is now opt-in (engMark),
     // because "Full timeline" reading as "the whole timeline, unannotated" is what people expect and
     // the marker was being read as part of the data (Mansi, 2026-08-13). The annotation still exists
-    // for the case it was built for — explaining why a finished cohort has a long flat tail.
+    // for the case it was built for - explaining why a finished cohort has a long flat tail.
     var apm = activePeriodMarker(full, engWin === "full" && engMark ? aEnd : null);
     if (eng1Ref.current) {
       eng1Inst.current = new window.Chart(eng1Ref.current.getContext("2d"), {
@@ -1407,7 +1567,7 @@ function WorkflowUI(props) {
           ) : (
             <span className="text-gray-500" style={{ fontSize: "11px" }}
                   title="There is nothing to trim: this selection was still active in the most recent week, so the chart already covers the whole period. The Active window / Full timeline choice would produce an identical chart, so it is hidden.">
-              Showing the full period — {engSg === "ALL" ? "at least one cohort" : engSg} was still active in the latest week, so there are no inactive weeks to trim.
+              Showing the full period - {engSg === "ALL" ? "at least one cohort" : engSg} was still active in the latest week, so there are no inactive weeks to trim.
             </span>
           )}
         </div>
@@ -1440,7 +1600,7 @@ function WorkflowUI(props) {
                 {engSg === "ALL" ? (
                   <span><b>Program-wide roll-up.</b> <b>{started}</b> FLWs have started interviewing across all cohorts; <b>{finished}%</b> have <b>finished</b> their whole schedule and only <b>{drop}%</b> dropped off (silent 14+ without finishing). Cohorts run different-length schedules, so read this as the recruitment + completion picture; for one cohort's engagement detail, pick it above.</span>
                 ) : (
-                  <span><b>Read this as recruitment + engagement, not attrition.</b> Of <b>{started}</b> FLWs who started interviewing in {scope}, <b>{finished}%</b> <b>finished</b> all their interviews and <b>{activeNow}</b> are active right now; only <b>{drop}%</b> truly dropped off (silent 14+ days without finishing). A dip in the retention curve is mostly <i>finishers</i>, <i>later starts</i> and <i>slower cadence</i> — not people quitting.{engWin === "active" && hasTail ? <span> <b>The tiles above are as of {fmtWk(DATA.today)}; the charts below stop at ~{endTxt}</b> (the active window).{windowLags ? <span> So the charts end on <b>{finPctWin}% finished / {dropWin}% dropped</b> while the current figures are <b>{finished}% / {drop}%</b> — the gap is activity in the trimmed weeks, not two different measures.</span> : null} Switch to Full timeline for the complete series.</span> : null}</span>
+                  <span><b>Read this as recruitment + engagement, not attrition.</b> Of <b>{started}</b> FLWs who started interviewing in {scope}, <b>{finished}%</b> <b>finished</b> all their interviews and <b>{activeNow}</b> are active right now; only <b>{drop}%</b> truly dropped off (silent 14+ days without finishing). A dip in the retention curve is mostly <i>finishers</i>, <i>later starts</i> and <i>slower cadence</i> - not people quitting.{engWin === "active" && hasTail ? <span> <b>The tiles above are as of {fmtWk(DATA.today)}; the charts below stop at ~{endTxt}</b> (the active window).{windowLags ? <span> So the charts end on <b>{finPctWin}% finished / {dropWin}% dropped</b> while the current figures are <b>{finished}% / {drop}%</b> - the gap is activity in the trimmed weeks, not two different measures.</span> : null} Switch to Full timeline for the complete series.</span> : null}</span>
                 )}
               </div>
               <div className="flex flex-wrap gap-2 px-1">
@@ -1458,10 +1618,10 @@ function WorkflowUI(props) {
               <div style={{ height: "300px" }}><canvas ref={eng2Ref}></canvas></div>
               <div style={{ height: "300px" }}><canvas ref={eng3Ref}></canvas></div>
               <Legend title="How to read these three panels">
-                <div><b>Panel 1 — recruitment:</b> cumulative FLWs who have started interviewing (appeared in the interview data). Not invited counts.</div>
-                <div><b>Panel 2 — engagement quality:</b> each starter is <b>Finished</b> (completed all their interviews), Steady (never a gap &gt; {ce.gap_thresh} days), Inconsistent (≥1 gap of {ce.gap_thresh + 1}+ days), or Dropped off (silent 14+ days without finishing). Finished outranks the rest — a completer's silence is <i>done</i>, not dropout. <b>Steady is a one-way ratchet</b> — a single long gap moves an FLW to Inconsistent permanently.</div>
-                <div><b>Panel 3 — status now:</b> where every starter stands at each week's end — Finished, Active (≤7d), Started-this-week, Slow (8–14d), Quiet (14+d). Totals equal Panel 1 by construction.</div>
-                <div className="text-gray-400">x-axis is the week-ending date. <b>Active window</b> trims the trailing weeks once fewer than the cutoff ({engThr}%) of the cohort's FLWs are newly starting/finishing per week — so a completed cohort isn't shown as a long inactive tail; <b>Full timeline</b> shows the whole period, Apr through today, unannotated — tick “mark active-window end” if you want the boundary drawn. For <b>ALL cohorts</b> the active window runs as long as ANY cohort is still active, so it reaches close to today while individual finished cohorts trim earlier. {engSg === "ALL" ? ce.gap_thresh + "-day gap threshold (program-wide default — cohorts here have mixed cadences)" : ce.gap_thresh + " = 2× the " + engSg + " interview cadence"}; the 14-day dropout window is cadence-independent.</div>
+                <div><b>Panel 1 - recruitment:</b> cumulative FLWs who have started interviewing (appeared in the interview data). Not invited counts.</div>
+                <div><b>Panel 2 - engagement quality:</b> each starter is <b>Finished</b> (completed all their interviews), Steady (never a gap &gt; {ce.gap_thresh} days), Inconsistent (≥1 gap of {ce.gap_thresh + 1}+ days), or Dropped off (silent 14+ days without finishing). Finished outranks the rest - a completer's silence is <i>done</i>, not dropout. <b>Steady is a one-way ratchet</b> - a single long gap moves an FLW to Inconsistent permanently.</div>
+                <div><b>Panel 3 - status now:</b> where every starter stands at each week's end - Finished, Active (≤7d), Started-this-week, Slow (8-14d), Quiet (14+d). Totals equal Panel 1 by construction.</div>
+                <div className="text-gray-400">x-axis is the week-ending date. <b>Active window</b> trims the trailing weeks once fewer than the cutoff ({engThr}%) of the cohort's FLWs are newly starting/finishing per week - so a completed cohort isn't shown as a long inactive tail; <b>Full timeline</b> shows the whole period, Apr through today, unannotated - tick “mark active-window end” if you want the boundary drawn. For <b>ALL cohorts</b> the active window runs as long as ANY cohort is still active, so it reaches close to today while individual finished cohorts trim earlier. {engSg === "ALL" ? ce.gap_thresh + "-day gap threshold (program-wide default - cohorts here have mixed cadences)" : ce.gap_thresh + " = 2× the " + engSg + " interview cadence"}; the 14-day dropout window is cadence-independent.</div>
               </Legend>
             </React.Fragment>
           );
@@ -1486,11 +1646,11 @@ function WorkflowUI(props) {
     return "rgba(" + r + "," + g + "," + b + "," + a + ")";
   }
 
-  // Full OCS session link (same URL the "view ↗" links use) — for the table and CSV export.
+  // Full OCS session link (same URL the "view ↗" links use) - for the table and CSV export.
   function sessionUrl(sid) { return sid ? "https://www.openchatstudio.com/a/Vaccine_Coach/chatbots/e/cc01d032-5931-4bdd-a4b2-6f05f4f72f88/s/" + sid + "/view/" : ""; }
 
   // Reusable multi-select checkbox dropdown (mirrors the mbw_monitoring column picker). Called as a
-  // plain function returning JSX (like subBtn) so it holds no component state of its own — open state
+  // plain function returning JSX (like subBtn) so it holds no component state of its own - open state
   // and per-dropdown search live in the parent (openDD / ddQuery), which keeps input focus stable.
   // opts: array of strings OR {value,label}. selected: array of values ([] = All). One dropdown open at a time.
   function filterDropdown(id, label, opts, selected, setSelected) {
@@ -1554,13 +1714,13 @@ function WorkflowUI(props) {
         <td className={td + " text-right" + (changed ? " text-amber-700 font-medium" : "")} title={changed ? "de-impacted (raw " + iv.started + ")" : ""}>{stVal}</td>
         <td className={td + " text-right text-green-700 font-semibold"}>{pstVal}%</td>
         <td className={td + " text-right"}>{iv.completed}</td>
-        <td className={td + " text-right text-green-700 font-semibold"}>{iv.pct_completed == null ? "—" : iv.pct_completed + "%"}</td>
+        <td className={td + " text-right text-green-700 font-semibold"}>{iv.pct_completed == null ? "-" : iv.pct_completed + "%"}</td>
       </tr>
     );
   }
 
   var c = DATA.counts;
-  // Math.max.apply(null, []) is -Infinity, which is truthy — so a `|| 1` guard would NOT rescue it and
+  // Math.max.apply(null, []) is -Infinity, which is truthy - so a `|| 1` guard would NOT rescue it and
   // Array.apply(null, {length: -Infinity}) throws, blanking the whole dashboard. Check length first.
   var _ivLens = (DATA.dropoff.subgroups || []).map(function (s) { return s.interviews.length; });
   var maxIv = _ivLens.length ? Math.max.apply(null, _ivLens) : 1;
@@ -1608,7 +1768,7 @@ function WorkflowUI(props) {
   function sessCsvRows(list) {
     var rows = [["connect_id", "cohort_id", "interview", "status", "created", "session_link"]];
     list.forEach(function (r) {
-      rows.push([r.connect_id, sessionCohort(r) || "", r.interview || "", r.completed ? "Completed" : (r.started ? "Started" : "—"), r.created_at || "", sessionUrl(r.session_id)]);
+      rows.push([r.connect_id, sessionCohort(r) || "", r.interview || "", r.completed ? "Completed" : (r.started ? "Started" : "-"), r.created_at || "", sessionUrl(r.session_id)]);
     });
     return rows;
   }
@@ -1708,11 +1868,11 @@ function WorkflowUI(props) {
   // The FLW's cohort id(s). A live OCS session carries no cohort and an FLW can be claimed in several
   // cohorts, so this lists all (comma-joined); "" if the FLW isn't claimed.
   function cohortsFor(cid) { var fi = flwInfo[cid]; return fi ? Object.keys(fi.cohorts).sort().join(", ") : ""; }
-  // Exact cohort for ONE session. Best source is the OCS session's own state (r.cohort_id — the cohort the
+  // Exact cohort for ONE session. Best source is the OCS session's own state (r.cohort_id - the cohort the
   // bot recorded on that session); every session from ~early May onward has it. Sessions before that predate
-  // the field, so the exact cohort is simply not in the source data — for those we ONLY infer a cohort when
+  // the field, so the exact cohort is simply not in the source data - for those we ONLY infer a cohort when
   // it is UNAMBIGUOUS (a single-cohort FLW, or exactly one of the FLW's cohorts runs the session's topic, or
-  // a single trigger match). If it can't be pinned to exactly one, show "—" rather than a misleading list.
+  // a single trigger match). If it can't be pinned to exactly one, show "-" rather than a misleading list.
   var trigCohort = {};
   liveRows("triggers").forEach(function (r) {
     var cid = r.connect_id || r.username || "";
@@ -1721,7 +1881,7 @@ function WorkflowUI(props) {
     if (cid && iv && ch) { var k = cid + "|" + iv; (trigCohort[k] || (trigCohort[k] = {}))[ch] = 1; }
   });
   function sessionCohort(r) {
-    if (r.cohort_id) return r.cohort_id;   // exact — from the OCS session state
+    if (r.cohort_id) return r.cohort_id;   // exact - from the OCS session state
     var cid = r.connect_id, iv = r.interview;
     if (iv) { var t = trigCohort[cid + "|" + iv]; var tk = t ? Object.keys(t) : []; if (tk.length === 1) return tk[0]; }
     var fi = flwInfo[cid];
@@ -1732,7 +1892,7 @@ function WorkflowUI(props) {
       var bt = Object.keys(fi.cg).filter(function (c) { return (SUBGROUP_DESIGN[fi.cg[c]] || []).indexOf(iv) >= 0; });
       if (bt.length === 1) return bt[0];   // exactly one of the FLW's cohorts runs this topic
     }
-    return "";   // multi-cohort FLW on a pre-cohort-tag session → not recoverable → "—"
+    return "";   // multi-cohort FLW on a pre-cohort-tag session → not recoverable → "-"
   }
   var fSubgroups = SG_ORDER.filter(function (sg) { return FM.some(function (r) { return r.g === sg; }); });
   var fCohorts = Object.keys(FM.reduce(function (a, r) { a[r.c] = 1; return a; }, {})).sort();
@@ -1742,9 +1902,9 @@ function WorkflowUI(props) {
   var anyFilter = !!(fSg.length || fCo.length || fSt.length || fTr.length || fTopic.length || gq);
   function clearFilters() { setGSearch(""); setFSg([]); setFCo([]); setFSt([]); setFTr([]); setFTopic([]); setGPage(0); }
   // Sessions table: the cohort/subgroup filters match the SESSION'S OWN resolved cohort (sessionCohort),
-  // so the filter and the COHORT_ID column always agree — filtering "1PE1" shows only the sessions that
+  // so the filter and the COHORT_ID column always agree - filtering "1PE1" shows only the sessions that
   // are 1PE1, not every session of an FLW who happens to also be in 1PE1. Sessions whose exact cohort
-  // isn't recoverable ("—") therefore don't match a specific cohort/subgroup filter. Trained/untrained
+  // isn't recoverable ("-") therefore don't match a specific cohort/subgroup filter. Trained/untrained
   // stays an FLW attribute; status/topic come from the row itself.
   var sessFiltered = sessSource.filter(function (r) {
     var sc = sessionCohort(r);
@@ -1808,10 +1968,10 @@ function WorkflowUI(props) {
         <div className="flex justify-between items-start">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Connect Interviews Labs Dashboard</h1>
-            <p className="text-xs text-gray-400 mt-1">Data as of {DATA.built_at || DATA.today || "—"} · auto-refreshes daily ~04:40 UTC</p>
+            <p className="text-xs text-gray-400 mt-1">Data as of {DATA.built_at || DATA.today || "-"} · auto-refreshes daily ~04:40 UTC</p>
           </div>
           <button onClick={function () { window.location.reload(); }}
-            title="Data is rebuilt by the daily job; this just reloads the page — it does not pull new data on click."
+            title="Data is rebuilt by the daily job; this just reloads the page - it does not pull new data on click."
             className="shrink-0 inline-flex items-center gap-1 px-3 py-2 text-sm font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700">
             ↻ Reload page
           </button>
@@ -1826,7 +1986,7 @@ function WorkflowUI(props) {
         {(DATA.unmappedCohorts && DATA.unmappedCohorts.length) ? (
           <div className="mt-3 text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-md px-3 py-2">
             ⚠ {DATA.unmappedCohorts.length} cohort{DATA.unmappedCohorts.length === 1 ? "" : "s"} not yet mapped
-            to a known program design (new program type?) — data is collected but hidden until a design is added:{" "}
+            to a known program design (new program type?) - data is collected but hidden until a design is added:{" "}
             <span className="font-mono">{DATA.unmappedCohorts.join(", ")}</span>
           </div>
         ) : null}
@@ -1835,7 +1995,7 @@ function WorkflowUI(props) {
       <div className="bg-white rounded-lg shadow-sm">
         <div className="border-b border-gray-200 px-5">
           <nav className="-mb-px flex space-x-6">
-            {[["overview", "Overview"], ["table", "Table View"], ["funnels", "Interview Completion Funnels"], ["fullretention", "Full Retention Table"], ["breakdowns", "Breakdowns"], ["flw", "FLW Retention"], ["docs", "Documentation"]].map(function (t) {
+            {TABS.map(function (t) {
               var on = activeTab === t[0];
               return (
                 <button key={t[0]} onClick={function () { setTab(t[0]); }}
@@ -1899,7 +2059,7 @@ function WorkflowUI(props) {
             </div>
             <div>
               <h3 className="text-sm font-semibold text-gray-700 mb-2">Completed interviews by round (unique FLWs per subgroup)</h3>
-              <p className="text-xs text-gray-400 mb-2"># FLWs who completed each interview number — completion beyond the 1st interview, not just the first.</p>
+              <p className="text-xs text-gray-400 mb-2"># FLWs who completed each interview number - completion beyond the 1st interview, not just the first.</p>
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50"><tr>
@@ -1919,7 +2079,7 @@ function WorkflowUI(props) {
                             var iv = byN[i + 1];
                             return (
                               <td key={i} className={td + " text-right" + (iv && iv.completed ? " text-green-700 font-medium" : " text-gray-300")}>
-                                {iv ? iv.completed : "—"}
+                                {iv ? iv.completed : "-"}
                               </td>
                             );
                           })}
@@ -1965,7 +2125,7 @@ function WorkflowUI(props) {
                 {gView === "sessions" && (
                   <div>
                     <div className="px-1 pb-2 text-xs text-gray-500">
-                      {sessFiltered.length} sessions{ocsLive.length ? " (live OCS)" : " (embedded sample — live pipeline not loaded)"}{anyFilter ? " matching" : ""}
+                      {sessFiltered.length} sessions{ocsLive.length ? " (live OCS)" : " (embedded sample - live pipeline not loaded)"}{anyFilter ? " matching" : ""}
                     </div>
                     <div className="overflow-x-auto" style={{ maxHeight: "65vh" }}>
                       <table className="min-w-full divide-y divide-gray-200">
@@ -1979,15 +2139,15 @@ function WorkflowUI(props) {
                         </tr></thead>
                         <tbody className="bg-white divide-y divide-gray-100">
                           {sessPageRows.map(function (r, idx) {
-                            var label = r.completed ? "Completed" : (r.started ? "Started" : "—");
+                            var label = r.completed ? "Completed" : (r.started ? "Started" : "-");
                             var cls = r.completed ? "text-green-700 font-medium" : (r.started ? "text-lime-700" : "text-gray-400");
                             return (
                               <tr key={idx} className="hover:bg-gray-50">
                                 <td className={td + " font-mono text-xs"}>{r.connect_id}</td>
-                                <td className={td + " font-mono text-xs text-gray-600"} title={sessionCohort(r)}>{sessionCohort(r) || "—"}</td>
-                                <td className={td}>{r.interview || "—"}</td>
+                                <td className={td + " font-mono text-xs text-gray-600"} title={sessionCohort(r)}>{sessionCohort(r) || "-"}</td>
+                                <td className={td}>{r.interview || "-"}</td>
                                 <td className={td + " " + cls}>{label}</td>
-                                <td className={td + " text-gray-500"}>{r.created_at || "—"}</td>
+                                <td className={td + " text-gray-500"}>{r.created_at || "-"}</td>
                                 <td className={td + " font-mono text-xs"}>{r.session_id ? <a href={sessionUrl(r.session_id)} target="_blank" rel="noopener noreferrer" title={r.session_id} className="text-indigo-600 hover:underline">view ↗</a> : ""}</td>
                               </tr>
                             );
@@ -2001,7 +2161,7 @@ function WorkflowUI(props) {
                 {gView === "matrix" && (
                   <div>
                     <div className="px-1 pb-1 text-xs text-gray-500">
-                      {matFiltered.length} FLW×cohort rows{anyFilter ? " matching" : ""} · one row per FLW × cohort in the matrix universe, one column per topic — hover a cell for its status.
+                      {matFiltered.length} FLW×cohort rows{anyFilter ? " matching" : ""} · one row per FLW × cohort in the matrix universe, one column per topic - hover a cell for its status.
                     </div>
                     <div className="flex flex-wrap gap-x-3 gap-y-1 px-1 pb-2 text-xs text-gray-500">
                       {STATES5.map(function (s) {
@@ -2032,7 +2192,7 @@ function WorkflowUI(props) {
                                   var _cell = _sid
                                     ? <a href={sessionUrl(_sid)} target="_blank" rel="noopener noreferrer" style={{ color: "#fff", fontWeight: 700, textDecoration: "none" }}>{CELL_GLYPH[code]}<span style={{ fontSize: "10px", verticalAlign: "super", color: "#38bdf8", fontWeight: 700 }}>↗</span></a>
                                     : CELL_GLYPH[code];
-                                  return <td key={t} className={"px-2 py-1 text-center text-xs" + (_sid ? " cursor-pointer" : "")} title={(TOPIC_NAMES[t] || t) + " — " + STATE_LABEL[STATES[code]] + (_sid ? " · click ↗ to open the OCS session" : "")}
+                                  return <td key={t} className={"px-2 py-1 text-center text-xs" + (_sid ? " cursor-pointer" : "")} title={(TOPIC_NAMES[t] || t) + " - " + STATE_LABEL[STATES[code]] + (_sid ? " · click ↗ to open the OCS session" : "")}
                                     style={{ backgroundColor: rgbaOf(STATE_COLOR[STATES[code]], 0.85), color: "#fff" }}>{_cell}</td>;
                                 })}
                               </tr>
@@ -2057,10 +2217,10 @@ function WorkflowUI(props) {
             {tableSub === "topiccomplete" && (
               <div className="space-y-4">
                 <p className="text-xs text-gray-400 px-1">Per-FLW status by topic, across every FLW × cohort slot (each topic stacks to 100%). Click a topic to break it down by cohort.</p>
-                <p className="text-xs text-gray-400 px-1">Each bar counts <span className="font-medium text-gray-500">enrollment slots</span> for that topic (FLW × cohort — the completion-rate base), not unique FLWs. It includes people enrolled but not yet started, and counts anyone in two cohorts twice, so a bar can exceed the Overview unique-FLW total.</p>
+                <p className="text-xs text-gray-400 px-1">Each bar counts <span className="font-medium text-gray-500">enrollment slots</span> for that topic (FLW × cohort - the completion-rate base), not unique FLWs. It includes people enrolled but not yet started, and counts anyone in two cohorts twice, so a bar can exceed the Overview unique-FLW total.</p>
                 <p className="text-xs px-1 text-gray-500">
                   <b>% base:</b> {naMode === "exclude"
-                    ? <span>share of <b>applicable</b> slots — the topic row, its by-cohort rows and the chart all use the same base.</span>
+                    ? <span>share of <b>applicable</b> slots - the topic row, its by-cohort rows and the chart all use the same base.</span>
                     : <span>the topic row shows share of <b>all</b> slots (including cohorts where the topic isn't in the design), while its by-cohort rows show share of <b>applicable</b> slots. Switch <i>Not applicable</i> to <i>Exclude</i> to put everything on one base.</span>}
                 </p>
                 <div className="flex flex-wrap items-center gap-2 px-1">
@@ -2109,10 +2269,10 @@ function WorkflowUI(props) {
                       {DATA.topicStatus.map(function (t) {
                         var open = !!topicExp[t.code];
                         var has = (DATA.topicStatusCohort[t.code] || []).length > 0;
-                        function p(s, tot) { return tcMode === "count" ? s : (tot ? Math.round(1000 * s / tot) / 10 + "%" : "—"); }
+                        function p(s, tot) { return tcMode === "count" ? s : (tot ? Math.round(1000 * s / tot) / 10 + "%" : "-"); }
                         // The parent row used to divide by t.total (EVERY slot, including cohorts where the
                         // topic isn't in the design) while the cohort rows below it divide by the applicable
-                        // base — so one screen showed 41.0% and 94.5% for the same topic. The parent now
+                        // base - so one screen showed 41.0% and 94.5% for the same topic. The parent now
                         // follows the same Not-applicable mode as the chart, which makes all three agree in
                         // Exclude mode; in Include mode the base is stated in the header instead.
                         var pTot = naMode === "exclude" ? (t.applicable || 0) : t.total;
@@ -2123,7 +2283,7 @@ function WorkflowUI(props) {
                             <td className={td + " font-medium"}>{has ? (open ? "▾ " : "▸ ") : ""}{t.code} · {TOPIC_NAMES[t.code] || t.code}</td>
                             {BAR_ORDER.map(function (s) {
                               // in Exclude mode "not applicable" is outside the base, so a % of it is meaningless
-                              var cell = (naMode === "exclude" && s === "not-applicable" && tcMode !== "count") ? "—" : p(t[s], pTot);
+                              var cell = (naMode === "exclude" && s === "not-applicable" && tcMode !== "count") ? "-" : p(t[s], pTot);
                               return <td key={s} className={td + " text-right" + (s === "completed" ? " text-green-700 font-medium" : " text-gray-600")}>{cell}</td>;
                             })}
                           </tr>
@@ -2135,7 +2295,7 @@ function WorkflowUI(props) {
                               <td className={td} colSpan={STATES.length + 1} style={{ padding: 0 }}>
                                 <div className="my-2 ml-8 mr-3 border-l-2 border-gray-300 pl-3">
                                   <div className="text-xs font-medium text-gray-500 mb-1">
-                                    By cohort — {t.code} · {TOPIC_NAMES[t.code] || t.code} ({cohRows.length} cohort{cohRows.length === 1 ? "" : "s"})
+                                    By cohort - {t.code} · {TOPIC_NAMES[t.code] || t.code} ({cohRows.length} cohort{cohRows.length === 1 ? "" : "s"})
                                   </div>
                                   <table className="min-w-full border border-gray-200 rounded-md overflow-hidden">
                                     <thead className="bg-white"><tr>
@@ -2193,11 +2353,11 @@ function WorkflowUI(props) {
               <span className="text-xs font-medium text-gray-600">Denominator:</span>
               {subBtn(denomMode, "init", setDenomMode, "# Initiated")}
               {subBtn(denomMode, "prev", setDenomMode, "Reached prev interview")}
-              <span className="text-gray-400" style={{ fontSize: "10px" }} title={"# Initiated: % Started = started ÷ FLWs who initiated (constant base) — later interviews look low because many FLWs haven't reached them.\nReached prev interview: denominator = FLWs who STARTED the previous interview, so each point is 'of those who got here, how many started this one' — later interviews no longer collapse."}>ℹ</span>
+              <span className="text-gray-400" style={{ fontSize: "10px" }} title={"# Initiated: % Started = started ÷ FLWs who initiated (constant base) - later interviews look low because many FLWs haven't reached them.\nReached prev interview: denominator = FLWs who STARTED the previous interview, so each point is 'of those who got here, how many started this one' - later interviews no longer collapse."}>ℹ</span>
               <span className="mx-1 text-gray-300">|</span>
               <span className="text-xs font-medium text-gray-600">X-axis:</span>
               {/* in prev-denominator mode the chart is forced onto the interview-# axis, so show that
-                  option as active even though lineMode is preserved for when the user switches back —
+                  option as active even though lineMode is preserved for when the user switches back -
                   otherwise neither option looks selected. */}
               {subBtn(denomMode === "prev" ? "pct" : lineMode, "pct", setLineMode, "By interview #")}
               {denomMode === "prev"
@@ -2211,7 +2371,7 @@ function WorkflowUI(props) {
                 <span className="inline-flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
                   <span title={"FLWs removed from the last interview's Started (started last but not penultimate, triggered back-to-back):\n" + Object.keys(DATA.deimpact || {}).sort().map(function (sg) { return "  " + sg + ": " + DATA.deimpact[sg].count; }).join("\n") + "\n  Total: " + Object.keys(DATA.deimpact || {}).reduce(function (a, sg) { return a + DATA.deimpact[sg].count; }, 0)}
                     className="cursor-help font-bold border border-amber-400 rounded-full w-4 h-4 inline-flex items-center justify-center shrink-0">ℹ</span>
-                  Removes FLWs who started only the LAST interview (skipped the penultimate — triggered back-to-back) from the last interview's Started, revealing the true decline. Hover ℹ for per-subgroup counts. Affects {denomMode === "prev" ? "the drop-off %Started table below only — the reached-prev line chart has its own denominator and is not de-impacted" : "the line chart & drop-off %Started below"}.
+                  Removes FLWs who started only the LAST interview (skipped the penultimate - triggered back-to-back) from the last interview's Started, revealing the true decline. Hover ℹ for per-subgroup counts. Affects {denomMode === "prev" ? "the drop-off %Started table below only - the reached-prev line chart has its own denominator and is not de-impacted" : "the line chart & drop-off %Started below"}.
                 </span>
               ) : null}
             </div>
@@ -2225,7 +2385,7 @@ function WorkflowUI(props) {
                 return (
                   <button key={s.sg} type="button"
                     onClick={function () { var n = Object.assign({}, hidSg); n[s.sg] = !n[s.sg]; setHidSg(n); }}
-                    title={off ? "Hidden — click to show" : "Click to hide" + (dashed ? " · dashed = still in progress" : "")}
+                    title={off ? "Hidden - click to show" : "Click to hide" + (dashed ? " · dashed = still in progress" : "")}
                     className={"inline-flex items-center gap-1.5 text-xs " + (off ? "opacity-40 line-through" : "text-gray-700 hover:text-gray-900")}>
                     <svg width="32" height="12" style={{ flexShrink: 0 }}>
                       <line x1="1" y1="6" x2="31" y2="6" stroke={col} strokeWidth="3.5" strokeLinecap="round" strokeDasharray={dashed ? "6,4" : "none"} />
@@ -2238,13 +2398,13 @@ function WorkflowUI(props) {
 
             <Legend title="What these columns mean">
               <div><b>Connect funnel:</b> Invited → Accepted → Started/Completed Learn → Claimed (downloaded the app) → FLW Reg (HQ) (registered in CommCare HQ) → # Initiated (clicked any Welcome/start form).</div>
-              <div><b>Eligible</b> = # FLWs initiated (constant per group — the retention base). <b>Triggered</b> = the bot prompted that interview. <b>Started</b> = an OCS session exists. <b>Completed</b> = session reached interview_complete.</div>
+              <div><b>Eligible</b> = # FLWs initiated (constant per group - the retention base). <b>Triggered</b> = the bot prompted that interview. <b>Started</b> = an OCS session exists. <b>Completed</b> = session reached interview_complete.</div>
               <div><b>% Started</b> = Started ÷ Eligible · <b>% Triggered</b> = Triggered ÷ Eligible · <b>% Completed</b> = Completed ÷ Started.</div>
             </Legend>
 
             {CONNECT_PENDING.length ? (
               <div className="text-xs bg-amber-50 border border-amber-200 rounded px-3 py-2 text-amber-800">
-                ⏳ <b>Connect funnel pending for: {CONNECT_PENDING.join(", ")}.</b> These cohorts are live in the interview data (Triggered/Started/Completed are correct), but their Connect leg (Invited/Accepted/Started&amp;Completed Learn/Claimed) hasn&#39;t been pulled yet — it shows 0 until the next successful Connect pull. Cohort counts and interview funnels are complete.
+                ⏳ <b>Connect funnel pending for: {CONNECT_PENDING.join(", ")}.</b> These cohorts are live in the interview data (Triggered/Started/Completed are correct), but their Connect leg (Invited/Accepted/Started&amp;Completed Learn/Claimed) hasn&#39;t been pulled yet - it shows 0 until the next successful Connect pull. Cohort counts and interview funnels are complete.
               </div>
             ) : null}
             <div className="overflow-x-auto">
@@ -2261,12 +2421,12 @@ function WorkflowUI(props) {
                     var c = s.connect;
                     return (
                       <tr key={s.sg} className="hover:bg-gray-50">
-                        <td className={td + " font-medium"}>{s.sg} <span className="text-gray-400">({s.cohorts_n})</span>{connPending(s.sg) ? <span title="Connect funnel not pulled yet — Invited/Accepted/Claimed pending" className="ml-1 text-amber-600">⏳</span> : null}</td>
+                        <td className={td + " font-medium"}>{s.sg} <span className="text-gray-400">({s.cohorts_n})</span>{connPending(s.sg) ? <span title="Connect funnel not pulled yet - Invited/Accepted/Claimed pending" className="ml-1 text-amber-600">⏳</span> : null}</td>
                         <td className={td + " text-right"}>{connPending(s.sg) ? <span className="text-amber-600" title="pending Connect pull">⏳</span> : c.invited}</td>
-                        <td className={td + " text-right"}>{connPending(s.sg) ? "—" : c.accepted}</td>
-                        <td className={td + " text-right"}>{connPending(s.sg) ? "—" : c.learn_started}</td>
-                        <td className={td + " text-right"}>{connPending(s.sg) ? "—" : c.learn_completed}</td>
-                        <td className={td + " text-right"}>{connPending(s.sg) ? "—" : c.claimed}</td>
+                        <td className={td + " text-right"}>{connPending(s.sg) ? "-" : c.accepted}</td>
+                        <td className={td + " text-right"}>{connPending(s.sg) ? "-" : c.learn_started}</td>
+                        <td className={td + " text-right"}>{connPending(s.sg) ? "-" : c.learn_completed}</td>
+                        <td className={td + " text-right"}>{connPending(s.sg) ? "-" : c.claimed}</td>
                         <td className={td + " text-right"}>{c.flw_reg}</td>
                         <td className={td + " text-right font-medium"}>{c.initiated}</td>
                       </tr>
@@ -2277,7 +2437,7 @@ function WorkflowUI(props) {
             </div>
 
             <div className="overflow-x-auto">
-              <h3 className="text-sm font-semibold text-gray-700 px-1 py-1">Interview drop-off — by interview, all topics</h3>
+              <h3 className="text-sm font-semibold text-gray-700 px-1 py-1">Interview drop-off - by interview, all topics</h3>
               <p className="text-xs text-gray-400 px-1">Retention rates: Eligible = # FLWs initiated (constant per group); % Started = Started ÷ Eligible; % Completed = Completed ÷ Started. Click a subgroup to expand its cohorts.</p>
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50"><tr>
@@ -2294,7 +2454,7 @@ function WorkflowUI(props) {
                     rows.push(
                       <tr key={s.sg + "-h"} className="bg-indigo-50 cursor-pointer"
                         onClick={function () { var n = Object.assign({}, funExp); n[s.sg] = !open; setFunExp(n); }}>
-                        <td className={td + " font-bold text-indigo-800"} colSpan={9}>{open ? "▾" : "▸"} {s.sg} — {(DATA.dropoff.cohorts[s.sg] || []).length} cohorts</td>
+                        <td className={td + " font-bold text-indigo-800"} colSpan={9}>{open ? "▾" : "▸"} {s.sg} - {(DATA.dropoff.cohorts[s.sg] || []).length} cohorts</td>
                       </tr>
                     );
                     s.interviews.forEach(function (iv) { rows.push(ivRow(s.sg + "-" + iv.n, "Int " + iv.n, iv, "")); });
@@ -2308,7 +2468,7 @@ function WorkflowUI(props) {
                                 return (
                                   <div key={co.cohort}>
                                     <div className="text-xs font-medium text-gray-500 mb-1">
-                                      {co.cohort} — {co.interviews.length} interview{co.interviews.length === 1 ? "" : "s"}
+                                      {co.cohort} - {co.interviews.length} interview{co.interviews.length === 1 ? "" : "s"}
                                       {/* de-impact is only computed at subgroup level, so these rows stay RAW.
                                           Say so, otherwise the parent row's Started looks like it disagrees with
                                           the sum of its own children (e.g. ABT1-B Int 4: 131 vs 171). */}
@@ -2334,7 +2494,7 @@ function WorkflowUI(props) {
                                               <td className={td + " text-right"}>{iv.started}</td>
                                               <td className={td + " text-right text-green-700 font-semibold"}>{iv.pct_started}%</td>
                                               <td className={td + " text-right"}>{iv.completed}</td>
-                                              <td className={td + " text-right text-green-700 font-semibold"}>{iv.pct_completed == null ? "—" : iv.pct_completed + "%"}</td>
+                                              <td className={td + " text-right text-green-700 font-semibold"}>{iv.pct_completed == null ? "-" : iv.pct_completed + "%"}</td>
                                             </tr>
                                           );
                                         })}
@@ -2362,13 +2522,13 @@ function WorkflowUI(props) {
         {activeTab === "fullretention" && (
           <div className="p-3 space-y-4">
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-gray-700 mr-2">Full retention table — Connect funnel → every interview (one row per subgroup)</h3>
+              <h3 className="text-sm font-semibold text-gray-700 mr-2">Full retention table - Connect funnel → every interview (one row per subgroup)</h3>
               <button onClick={copyRetention} className="px-3 py-1.5 text-sm rounded-md bg-indigo-600 text-white hover:bg-indigo-700">⧉ Copy</button>
               <button onClick={downloadRetention} className="px-3 py-1.5 text-sm rounded-md border border-gray-300 hover:bg-gray-100">↓ CSV</button>
               <span className="text-xs text-gray-400">Copy pastes tab-separated into Sheets/Excel.</span>
             </div>
             <Legend title="Column definitions">
-              <div><b>Connect funnel</b> (unique FLWs per subgroup): <b>Invited</b> → <b>Accepted</b> → <b>Started Learn</b> → <b>Completed Learn</b> → <b>Claimed</b> (downloaded the opportunity) → <b>FLW Reg</b> (also registered in CommCare HQ) → <b># Initiated</b> (submitted any Welcome/start form — the retention base).</div>
+              <div><b>Connect funnel</b> (unique FLWs per subgroup): <b>Invited</b> → <b>Accepted</b> → <b>Started Learn</b> → <b>Completed Learn</b> → <b>Claimed</b> (downloaded the opportunity) → <b>FLW Reg</b> (also registered in CommCare HQ) → <b># Initiated</b> (submitted any Welcome/start form - the retention base).</div>
               <div><b>Per interview:</b> <b>Eligible</b> = # Initiated (constant base). <b>Triggered</b> = bot prompted that interview. <b>Started</b> = an OCS session exists. <b>Completed</b> = session reached interview_complete.</div>
               <div><b>% Trig</b> = Triggered ÷ Eligible · <b>% Started</b> = Started ÷ Eligible · <b>% Compl</b> = Completed ÷ Started (conversion of those who started) · <b>Overall completed</b> = Completed ÷ # Initiated (completion as a share of everyone who initiated).</div>
             </Legend>
@@ -2391,7 +2551,7 @@ function WorkflowUI(props) {
                     <th className={th + " text-right border-b border-gray-300"} rowSpan={2} title="Unique FLWs with a completed_learn_date">Compl. Learn</th>
                     <th className={th + " text-right border-b border-gray-300"} rowSpan={2} title="Unique FLWs with a date_claimed (downloaded the opportunity)">Claimed</th>
                     <th className={th + " text-right border-b border-gray-300"} rowSpan={2} title="Claimed FLWs also registered in CommCare HQ (claimed ∩ HQ flw_registration)">FLW Reg</th>
-                    <th className={th + " text-right border-r-2 border-gray-300 border-b"} rowSpan={2} title="Unique FLWs with any Welcome/start form — the retention base (denominator for the % columns)"># Initiated</th>
+                    <th className={th + " text-right border-r-2 border-gray-300 border-b"} rowSpan={2} title="Unique FLWs with any Welcome/start form - the retention base (denominator for the % columns)"># Initiated</th>
                     {Array.apply(null, { length: maxIv }).map(function (_, i) {
                       return <th key={i} className={th + " text-center border-l-2 border-gray-300 " + (i % 2 ? "bg-gray-100" : "bg-indigo-50")} colSpan={6}>Interview {i + 1}</th>;
                     })}
@@ -2429,7 +2589,7 @@ function WorkflowUI(props) {
                         {Array.apply(null, { length: maxIv }).map(function (_, i) {
                           var iv = byN[i + 1];
                           if (!iv) return [
-                            <td key={i + "t"} className={td + " text-gray-200 border-l-2 border-gray-300"}>—</td>,
+                            <td key={i + "t"} className={td + " text-gray-200 border-l-2 border-gray-300"}>-</td>,
                             <td key={i + "e"} className={td}></td>, <td key={i + "tr"} className={td}></td>,
                             <td key={i + "s"} className={td}></td>, <td key={i + "c"} className={td}></td>,
                             <td key={i + "ci"} className={td}></td>,
@@ -2439,8 +2599,8 @@ function WorkflowUI(props) {
                             <td key={i + "e"} className={td + " text-right text-gray-400"}>{iv.eligible}</td>,
                             <td key={i + "tr"} className={td + " text-right"}>{iv.triggered} <span className="text-gray-400">{iv.pct_trig}%</span></td>,
                             <td key={i + "s"} className={td + " text-right"}>{iv.started} <span className="text-gray-400">{iv.pct_started}%</span></td>,
-                            <td key={i + "c"} className={td + " text-right text-green-700"}>{iv.completed} <span className="text-gray-400">{iv.pct_completed == null ? "—" : iv.pct_completed + "%"}</span></td>,
-                            <td key={i + "ci"} className={td + " text-right font-semibold " + (iv.pct_completed_base == null ? "text-gray-400" : "text-green-800")}>{iv.pct_completed_base == null ? "—" : iv.pct_completed_base + "%"}</td>,
+                            <td key={i + "c"} className={td + " text-right text-green-700"}>{iv.completed} <span className="text-gray-400">{iv.pct_completed == null ? "-" : iv.pct_completed + "%"}</span></td>,
+                            <td key={i + "ci"} className={td + " text-right font-semibold " + (iv.pct_completed_base == null ? "text-gray-400" : "text-green-800")}>{iv.pct_completed_base == null ? "-" : iv.pct_completed_base + "%"}</td>,
                           ];
                         })}
                       </tr>
@@ -2484,7 +2644,7 @@ function WorkflowUI(props) {
                           <td className={td + " text-right"}>{r.flws}</td><td className={td + " text-right"}>{r.ist}</td>
                           <td className={td + " text-right text-green-700 font-medium"}>{r.icmp}</td>
                           <td className={td + " text-right text-gray-500"}>{pctTxt(r.pct)}</td>
-                          <td className={td + " text-right text-gray-500"}>{r.avg_words == null ? "—" : r.avg_words}</td>
+                          <td className={td + " text-right text-gray-500"}>{r.avg_words == null ? "-" : r.avg_words}</td>
                         </tr>
                       );
                     })}
@@ -2511,11 +2671,11 @@ function WorkflowUI(props) {
                       return (
                         <tr key={r.code} className={none ? "text-gray-400" : "hover:bg-gray-50"}>
                           <td className={td + " font-medium"}>{r.code}</td><td className={td}>{r.name}</td>
-                          <td className={td + " text-right text-gray-600"}>{_q == null ? "—" : _q}</td>
-                          <td className={td + " text-right"}>{none ? "—" : r.flws}</td><td className={td + " text-right"}>{none ? "—" : r.ist}</td>
-                          <td className={td + " text-right text-green-700 font-medium"}>{none ? "—" : r.icmp}</td>
+                          <td className={td + " text-right text-gray-600"}>{_q == null ? "-" : _q}</td>
+                          <td className={td + " text-right"}>{none ? "-" : r.flws}</td><td className={td + " text-right"}>{none ? "-" : r.ist}</td>
+                          <td className={td + " text-right text-green-700 font-medium"}>{none ? "-" : r.icmp}</td>
                           <td className={td + " text-right text-gray-500"}>{pctTxt(r.pct)}</td>
-                          <td className={td + " text-right text-gray-500"}>{r.avg_words == null ? "—" : r.avg_words}</td>
+                          <td className={td + " text-right text-gray-500"}>{r.avg_words == null ? "-" : r.avg_words}</td>
                         </tr>
                       );
                     })}
@@ -2542,7 +2702,7 @@ function WorkflowUI(props) {
                           <td className={td + " text-right"}>{r.flws}</td><td className={td + " text-right"}>{r.ist}</td>
                           <td className={td + " text-right text-green-700 font-medium"}>{r.icmp}</td>
                           <td className={td + " text-right text-gray-500"}>{pctTxt(r.pct)}</td>
-                          <td className={td + " text-right text-gray-500"}>{r.avg_words == null ? "—" : r.avg_words}</td>
+                          <td className={td + " text-right text-gray-500"}>{r.avg_words == null ? "-" : r.avg_words}</td>
                         </tr>
                       );
                     })}
@@ -2563,7 +2723,7 @@ function WorkflowUI(props) {
           var TIER_COLOR = { "Highly engaged": "#065f46", Engaged: "#2E7D32", Slipping: "#F9A825", "Gone quiet": "#EF6C00", Lost: "#C62828",
                              Champion: "#065f46", Solid: "#2E7D32", "At-risk": "#EF6C00" };
           var PERSONA_COLOR = { Champion: "#065f46", "Steady finisher": "#2E7D32", "Partial progress": "#F9A825", "Re-engager": "#1565C0", "Early dropper": "#EF6C00", "One-and-done": "#C62828", Lapsed: "#9ca3af" };
-          // top two score bands, by published order — no hardcoded tier names to go stale
+          // top two score bands, by published order - no hardcoded tier names to go stale
           var healthy = (FE.tiers || []).slice(0, 2).reduce(function (a, t) { return a + t.pct; }, 0);
           var cc = FE.crossCohort || { multi: {}, single: {}, dist: [] };
           // horizontal bar row
@@ -2592,13 +2752,13 @@ function WorkflowUI(props) {
           // re-slice client-side: click any bar and every other panel re-computes for that segment.
           var M = FE.micro;
           var DIMS = [["state", "State"], ["llo", "Partner (LLO)"], ["type", "Cadre"],
-                      ["tier", "Engagement tier — right now"], ["persona", "Persona — whole history"],
+                      ["tier", "Engagement tier - right now"], ["persona", "Persona - whole history"],
                       ["nco", "Cohorts they were in"], ["fin", "Finished a schedule?"],
                       ["peers", "Co-workers in their settlement"], ["pace", "Pace vs their schedule"]];
           // Nine dimensions, nine clearly separated hues (~40 degrees apart). The previous palette had
           // four near-identical teal/greens (#00695C type, #0f766e tier, #0e7490 peers, #065f46 fin),
           // two near-identical violets (#6d28d9 llo, #7c3aed nco) and two near-identical ambers
-          // (#b45309 persona, #a16207 pace) — so at a glance half the panels looked like the same
+          // (#b45309 persona, #a16207 pace) - so at a glance half the panels looked like the same
           // colour and the panels were hard to tell apart. Status red (#C62828, used for dropped/missed
           // across the dashboard) is deliberately NOT reused here: these bars are a share of the
           // selection, not a good/bad signal.
@@ -2608,8 +2768,8 @@ function WorkflowUI(props) {
           var DIM_HELP = {
             tier: "Where the worker is TODAY: a score band blending how recently they interviewed, their completion rate and their answer depth. A worker moves between tiers over time. Because it also rewards recency and answer depth, the top tier is NOT necessarily the highest finish rate.",
             peers: "How many other FLWs work in the same settlement. A proxy for informal peer support, which the community-health-worker literature repeatedly identifies as a retention factor.",
-            pace: "Their typical gap between interviews measured against what their own schedule asks for — so it is comparable across subgroups whose cadences differ (3 to 14 days).",
-            persona: "What the worker has DONE overall, across their whole history — a fixed behavioural segment, not a current-state reading. Deliberately worded differently from the tiers so the two are never confused. NOTE: several personas are DEFINED by whether the worker finished, so the right-hand % in this panel is a definition, not a result (One-and-done is 0% by construction).",
+            pace: "Their typical gap between interviews measured against what their own schedule asks for - so it is comparable across subgroups whose cadences differ (3 to 14 days).",
+            persona: "What the worker has DONE overall, across their whole history - a fixed behavioural segment, not a current-state reading. Deliberately worded differently from the tiers so the two are never confused. NOTE: several personas are DEFINED by whether the worker finished, so the right-hand % in this panel is a definition, not a result (One-and-done is 0% by construction).",
           };
           function unpackNum(spec) {
             var out = [], i, w = spec.w, s = spec.s;
@@ -2625,7 +2785,7 @@ function WorkflowUI(props) {
           var selKeys = Object.keys(flwSel).filter(function (k) { return (flwSel[k] || []).length; });
           var filtered = selKeys.length > 0;
           // mask, optionally ignoring one dimension's own filter (so you can still see/deselect its
-          // other values — standard cross-filter behaviour)
+          // other values - standard cross-filter behaviour)
           function maskFor(skipDim) {
             var m = [], i, j, ok, k;
             for (i = 0; i < (dimOK ? M.n : 0); i++) {
@@ -2650,7 +2810,7 @@ function WorkflowUI(props) {
               if (FIN_IDX >= 0 && +M.col.fin.charAt(i) === FIN_IDX) fin++;
               pcf += (NUM.pcf || [])[i] || 0;
               // pcfo == 101 means "no cohort of theirs has been fully offered yet", i.e. not measurable.
-              // Those workers are EXCLUDED from this average — counting them as 0 would read as
+              // Those workers are EXCLUDED from this average - counting them as 0 would read as
               // "finished nothing" when the schedule was never put to them.
               var _o = (NUM.pcfo || [])[i];
               if (_o != null && _o <= 100) { pcfo += _o; nOff++; }
@@ -2730,7 +2890,7 @@ function WorkflowUI(props) {
                   var out = flwMetric === "pc" ? r.pc : r.any;
                   return (
                     <div key={r.idx} onClick={function () { toggle(dim, r.idx); }}
-                      title={r.label + " — " + r.n + " FLWs (" + Math.round(r.share) + "% of selection, " + Math.round(r.baseShare) + "% of all). Click to " + (on ? "remove" : "apply") + " this filter."}
+                      title={r.label + " - " + r.n + " FLWs (" + Math.round(r.share) + "% of selection, " + Math.round(r.baseShare) + "% of all). Click to " + (on ? "remove" : "apply") + " this filter."}
                       className={"flex items-center gap-2 py-0.5 cursor-pointer rounded " + (on ? "bg-indigo-50" : "hover:bg-gray-50")}
                       style={{ fontSize: "11px" }}>
                       <div className={"text-right truncate " + (on ? "text-indigo-700 font-semibold" : isResidual(r.label) ? "text-gray-400 italic" : "text-gray-700")} style={{ width: "118px", flexShrink: 0 }}
@@ -2744,15 +2904,15 @@ function WorkflowUI(props) {
                           colour-blindness. Shown only outside 0.77-1.3x (reciprocals). */}
                       {showLift
                         ? <span className={"font-semibold " + (lift >= 1.3 ? "text-rose-600" : "text-gray-500")} style={{ width: "34px", fontSize: "10px" }}
-                            title={"This group is " + (Math.round(lift * 10) / 10) + "x its programme-wide share — " + (lift >= 1.3 ? "over" : "under") + "-represented in your current selection."}>
+                            title={"This group is " + (Math.round(lift * 10) / 10) + "x its programme-wide share - " + (lift >= 1.3 ? "over" : "under") + "-represented in your current selection."}>
                             {(lift >= 1.3 ? "▲×" : "▼×") + (Math.round(lift * 10) / 10)}
                           </span>
                         : <span style={{ width: "34px" }}></span>}
                       <div className="text-gray-600 text-right" style={{ width: "62px", flexShrink: 0 }}>{r.n} · {Math.round(r.share)}%</div>
                       {/* P11: a rate off 1-2 workers reads as a finding (an n=1 partner showed "100%").
-                          P5: with an empty selection every row was a red 0%. Both now render "—". */}
+                          P5: with an empty selection every row was a red 0%. Both now render "-". */}
                       <div className="text-right font-medium" style={{ width: "34px", flexShrink: 0, color: r.n < 20 ? "#9ca3af" : out >= 70 ? "#065f46" : out >= 50 ? "#F9A825" : "#C62828" }}
-                        title={r.n < 20 ? "too few workers (" + r.n + ") to quote a rate" : ""}>{r.n < 20 ? "—" : out + "%"}</div>
+                        title={r.n < 20 ? "too few workers (" + r.n + ") to quote a rate" : ""}>{r.n < 20 ? "-" : out + "%"}</div>
                     </div>
                   );
                 })}
@@ -2766,7 +2926,7 @@ function WorkflowUI(props) {
                 <button key={k + idx} onClick={function () { toggle(k, idx); }}
                   className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 hover:bg-indigo-200" style={{ fontSize: "10px" }}
                   title="remove this filter">
-                  {(DIMS.filter(function (d) { return d[0] === k; })[0] || ["", k])[1].split(" —")[0]}: {residualLabel((M.dict[k] || [])[idx])} ✕
+                  {(DIMS.filter(function (d) { return d[0] === k; })[0] || ["", k])[1].split(" -")[0]}: {residualLabel((M.dict[k] || [])[idx])} ✕
                 </button>
               );
             });
@@ -2777,14 +2937,14 @@ function WorkflowUI(props) {
           var globalTag = filtered
             ? <span className="ml-2 px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-normal" style={{ fontSize: "9px" }}
                 title="This section is computed for the whole programme and does not change with your filter.">
-                whole programme ({N.toLocaleString()}) — not filtered
+                whole programme ({N.toLocaleString()}) - not filtered
               </span>
             : null;
           return (
             <div className="p-4 space-y-4">
               <div className="text-xs bg-indigo-50 border border-indigo-100 rounded px-3 py-2 text-gray-700">
                 <b>Per-FLW, cross-cohort.</b> One row per unique FLW who started interviewing, with their timeline unioned across every cohort/arm they were part of ({FE.coverage_lga}% have demographics).
-                {dimOK ? <span> <b>Click any bar to drill in</b> — every other panel re-computes for that segment, and <span className="text-rose-600 font-semibold">×N</span> marks a group that is over-represented in your selection versus the programme as a whole.</span> : null}
+                {dimOK ? <span> <b>Click any bar to drill in</b> - every other panel re-computes for that segment, and <span className="text-rose-600 font-semibold">×N</span> marks a group that is over-represented in your selection versus the programme as a whole.</span> : null}
               </div>
 
               {dimOK ? (
@@ -2803,29 +2963,29 @@ function WorkflowUI(props) {
 
               {dimOK && filtered && SEL.n === 0 ? (
                 <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                  <b>No FLWs match this combination of filters.</b> The figures below are not zero results — there is
+                  <b>No FLWs match this combination of filters.</b> The figures below are not zero results - there is
                   nothing to compute. Remove a filter (click a ✓ row again, or use “reset”) to continue.
                 </div>
               ) : null}
               <div className="flex flex-wrap gap-2 px-1">
                 {card(SEL.n.toLocaleString(), filtered ? "FLWs in selection" : "FLWs analysed",
                       filtered ? Math.round(100 * SEL.n / (M.n || 1)) + "% of all " + N.toLocaleString() : "started ≥1 interview", "#1565C0", "k1")}
-                {card(SEL.n ? SEL.pc + "%" : "—", "Per-cohort finish — so far", filtered ? "all FLWs: " + ALL.pc + "%" : "counts schedules still being rolled out as unfinished", "#065f46", "k2")}
-                {SEL.pco == null ? null : card(SEL.pco + "%", "Per-cohort finish — of schedules actually offered", filtered ? "all FLWs: " + (ALL.pco == null ? "—" : ALL.pco + "%") : "the like-for-like rate: only cohorts whose whole schedule was put to them", "#0277BD", "k2b")}
-                {card(SEL.n ? SEL.any + "%" : "—", "Finished ≥1 schedule", filtered ? "all FLWs: " + ALL.any + "%" : "generous — rises with # cohorts", "#2E7D32", "k3")}
-                {card(SEL.n ? SEL.fdepth : "—", "Median words, first interview they did", filtered ? "all FLWs: " + ALL.fdepth : "their first session — not necessarily interview 1 of a schedule", "#6d28d9", "k4")}
-                {card(SEL.n ? "Int " + SEL.deep : "—", "Median furthest interview", filtered ? "all FLWs: Int " + ALL.deep : "how far through a schedule they got", "#b45309", "k5")}
+                {card(SEL.n ? SEL.pc + "%" : "-", "Per-cohort finish - so far", filtered ? "all FLWs: " + ALL.pc + "%" : "counts schedules still being rolled out as unfinished", "#065f46", "k2")}
+                {SEL.pco == null ? null : card(SEL.pco + "%", "Per-cohort finish - of schedules actually offered", filtered ? "all FLWs: " + (ALL.pco == null ? "-" : ALL.pco + "%") : "the like-for-like rate: only cohorts whose whole schedule was put to them", "#0277BD", "k2b")}
+                {card(SEL.n ? SEL.any + "%" : "-", "Finished ≥1 schedule", filtered ? "all FLWs: " + ALL.any + "%" : "generous - rises with # cohorts", "#2E7D32", "k3")}
+                {card(SEL.n ? SEL.fdepth : "-", "Median words, first interview they did", filtered ? "all FLWs: " + ALL.fdepth : "their first session - not necessarily interview 1 of a schedule", "#6d28d9", "k4")}
+                {card(SEL.n ? "Int " + SEL.deep : "-", "Median furthest interview", filtered ? "all FLWs: Int " + ALL.deep : "how far through a schedule they got", "#b45309", "k5")}
               </div>
 
               {/* Cross-cohort: the honest version */}
               <div className="rounded border border-purple-200 bg-purple-50 px-3 py-2 text-xs text-gray-700">
-                <b>⭐ Most FLWs work across several cohorts — but re-use does not by itself raise finishing.</b>{globalTag}{" "}
-                {cc.multi.n} FLWs ({100 - (cc.single.n ? Math.round(100 * cc.single.n / N) : 0)}%) span ≥2 cohorts. They finish ≥1 schedule far more often ({cc.multi.finished}% vs {cc.single.finished}%) — but that comparison is <b>mechanical</b>: "finished ≥1" is a max over cohorts, so being in three cohorts gives three chances. On the like-for-like measure — the share of <i>their own</i> schedules they complete — multi-cohort FLWs are <b>{cc.multi.finished_pc}%</b> vs <b>{cc.single.finished_pc}%</b> for single-cohort: {(function () {
+                <b>⭐ Most FLWs work across several cohorts - but re-use does not by itself raise finishing.</b>{globalTag}{" "}
+                {cc.multi.n} FLWs ({100 - (cc.single.n ? Math.round(100 * cc.single.n / N) : 0)}%) span ≥2 cohorts. They finish ≥1 schedule far more often ({cc.multi.finished}% vs {cc.single.finished}%) - but that comparison is <b>mechanical</b>: "finished ≥1" is a max over cohorts, so being in three cohorts gives three chances. On the like-for-like measure - the share of <i>their own</i> schedules they complete - multi-cohort FLWs are <b>{cc.multi.finished_pc}%</b> vs <b>{cc.single.finished_pc}%</b> for single-cohort: {(function () {
                   var g = (cc.multi.finished_pc || 0) - (cc.single.finished_pc || 0), a = Math.abs(g);
                   var raw = (cc.multi.finished || 0) - (cc.single.finished || 0);
                   if (a <= 3) return <span>essentially flat, so the headline gap is almost entirely arithmetic</span>;
                   return <span>a real <b>{g > 0 ? "+" : "−"}{a} point</b> difference, but roughly {Math.max(0, Math.round(100 * (raw - g) / (raw || 1)))}% of the {raw}-point headline gap is arithmetic rather than behaviour</span>;
-                })()}. They also answer at greater length ({cc.multi.depth} vs {cc.single.depth} words/session). Neither measure establishes that re-using a worker <i>causes</i> them to finish more — being re-invited is itself an outcome of how they performed the first time.
+                })()}. They also answer at greater length ({cc.multi.depth} vs {cc.single.depth} words/session). Neither measure establishes that re-using a worker <i>causes</i> them to finish more - being re-invited is itself an outcome of how they performed the first time.
               </div>
 
               {dimOK ? (
@@ -2865,7 +3025,7 @@ function WorkflowUI(props) {
               {/* How deep FLWs get */}
               <div>
                 <div className="text-sm font-semibold text-gray-700 mb-1">How far through the schedule FLWs get{globalTag}</div>
-                <p className="text-gray-400 mb-1" style={{ fontSize: "10px" }}>Share reaching each interview, as a % of the FLWs whose schedule even <i>contains</i> that interview (a 2-interview TRS worker is not a drop-out at interview 3). Each row has its own denominator, so a later interview can show a HIGHER share than an earlier one — the pool shrinks as short-schedule cohorts drop out of it (e.g. the 119 TRE workers leave after interview 5). Compare each row to its own count, not to the row above.</p>
+                <p className="text-gray-400 mb-1" style={{ fontSize: "10px" }}>Share reaching each interview, as a % of the FLWs whose schedule even <i>contains</i> that interview (a 2-interview TRS worker is not a drop-out at interview 3). Each row has its own denominator, so a later interview can show a HIGHER share than an earlier one - the pool shrinks as short-schedule cohorts drop out of it (e.g. the 119 TRE workers leave after interview 5). Compare each row to its own count, not to the row above.</p>
                 {(FE.survival || []).map(function (s) {
                   var p = (s.pct_elig == null ? s.pct : s.pct_elig);
                   return bar("reached Int≥" + s.d, p, "#1565C0",
@@ -2902,8 +3062,8 @@ function WorkflowUI(props) {
                     <p className="text-xs text-gray-700 mb-2">
                       Best-to-worst <b>between the {GV.states.length} states: {GV.state_spread} points</b>. Best-to-worst
                       <b> across the {GV.n_lgas} LGAs: {GV.lga_spread} points</b>. Each state's own internal spread runs{" "}
-                      {Math.min.apply(null, GV.states.map(function (x) { return x.lga_spread; }))}–{Math.max.apply(null, GV.states.map(function (x) { return x.lga_spread; }))} points,
-                      so comparing states (or partners, which are nested inside them) is the wrong altitude — the same
+                      {Math.min.apply(null, GV.states.map(function (x) { return x.lga_spread; }))}-{Math.max.apply(null, GV.states.map(function (x) { return x.lga_spread; }))} points,
+                      so comparing states (or partners, which are nested inside them) is the wrong altitude - the same
                       state and the same partner contain both the best and the worst performers.
                     </p>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -2924,11 +3084,11 @@ function WorkflowUI(props) {
                 );
               })()}
 
-              {/* The one directly actionable number in the analysis — the tab had no view of it. */}
+              {/* The one directly actionable number in the analysis - the tab had no view of it. */}
               {FE.atRisk && FE.atRisk.n ? (
                 <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-gray-700">
                   <b>Reachable now: {FE.atRisk.n} FLWs.</b> Started, finished no schedule, were offered a complete one,
-                  and have been silent 14–60 days — recent enough that a nudge is plausible.
+                  and have been silent 14-60 days - recent enough that a nudge is plausible.
                   {(FE.atRisk.byState || []).length
                     ? <span> Concentrated in {(FE.atRisk.byState || []).map(function (x) { return x.k + " (" + x.n + ")"; }).join(", ")}.</span>
                     : null}
@@ -2941,11 +3101,11 @@ function WorkflowUI(props) {
 
               <Legend title="How this is built">
                 <div><b>Grain:</b> one row per unique FLW (deduped across cohorts); metrics union their sessions across every arm.</div>
-                <div><b>Per-cohort finish rate:</b> of all the cohort schedules an FLW was enrolled in, the share they have completed <b>so far</b>. Unlike "finished 1+ schedule" it does not rise simply from being in more cohorts — but read the multi-vs-single comparison with care, because it does not fall neutrally either: <b>about 22% of enrolment slots have not yet had their full schedule triggered</b>, those count as unfinished, and multi-cohort workers are more likely to be carrying one. The measure therefore understates finishing for everyone, and slightly more for multi-cohort workers.</div>
-                <div><b>Tier (RFM):</b> Recency + completion rate + answer depth, each scored 1–5. Recency is measured against the freshest session in the dataset, not the wall clock, so a lagging data pull cannot push everyone into a worse tier.</div>
+                <div><b>Per-cohort finish rate:</b> of all the cohort schedules an FLW was enrolled in, the share they have completed <b>so far</b>. Unlike "finished 1+ schedule" it does not rise simply from being in more cohorts - but read the multi-vs-single comparison with care, because it does not fall neutrally either: <b>about 22% of enrolment slots have not yet had their full schedule triggered</b>, those count as unfinished, and multi-cohort workers are more likely to be carrying one. The measure therefore understates finishing for everyone, and slightly more for multi-cohort workers.</div>
+                <div><b>Tier (RFM):</b> Recency + completion rate + answer depth, each scored 1-5. Recency is measured against the freshest session in the dataset, not the wall clock, so a lagging data pull cannot push everyone into a worse tier.</div>
                 <div><b>Persona:</b> rule-based behavioural segment. "Partial progress" means ≥50% of triggered interviews done but <i>no</i> schedule finished (it was previously labelled "Slow-but-finishing", which described the opposite of what it selects).</div>
-                <div><b>Drill-down:</b> the tab holds one character per FLW per dimension — attributes only, no identifier — so filtering happens in your browser. "×N" is the group's share of your selection divided by its share of all FLWs.</div>
-                <div><b>Colour on the right-hand %:</b> green ≥70, amber 50–69, red below 50. It is a reading aid only — for the per-cohort measure the normal range is roughly 40–70%, so amber is common and does not signal a problem.</div>
+                <div><b>Drill-down:</b> the tab holds one character per FLW per dimension - attributes only, no identifier - so filtering happens in your browser. "×N" is the group's share of your selection divided by its share of all FLWs.</div>
+                <div><b>Colour on the right-hand %:</b> green ≥70, amber 50-69, red below 50. It is a reading aid only - for the per-cohort measure the normal range is roughly 40-70%, so amber is common and does not signal a problem.</div>
                 <div><b>Co-workers in settlement</b> proxies informal peer support (the factor most consistently identified in community-health-worker retention research). <b>Pace</b> is each FLW's typical gap between interviews divided by what their own schedule asks, so subgroups on 3-day and 14-day cadences compare fairly.</div>
                 <div><b>Not shown here:</b> full per-FLW detail lives in the flw_analysis.csv export.</div>
               </Legend>
