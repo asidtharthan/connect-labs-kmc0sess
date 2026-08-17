@@ -575,13 +575,22 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     // The workflow list's "FLWs" column renders run.selected_count, which reads state.flw_count
     // (workflow/data_access.py:134). Nothing ever wrote it, so every run in the history showed a
     // dash. Write it once the session list has settled rather than on every poll.
+    // Also write a readable LLO label. The run-history table has no idea which LLOs a run covered —
+    // every row just reads "Run #14192" — and it cannot work it out for itself: the opportunity
+    // names live in this workflow's config, and a Django template cannot look up a dict by a
+    // variable key without a custom filter. Writing the label here keeps the platform-side change
+    // to a single column rendering a single string.
     const flwCountRef = React.useRef(null);
     React.useEffect(() => {
         if (isRunning || loadingSessions || !sessions.length) return;
-        if (flwCountRef.current === sessions.length) return;
-        flwCountRef.current = sessions.length;
-        onUpdateState({ flw_count: sessions.length });
-    }, [sessions, isRunning, loadingSessions]);
+        const llos = [];
+        rollup.byOpp.forEach(o => { if (llos.indexOf(o.llo) < 0) llos.push(o.llo); });
+        const label = llos.join(' · ');
+        const stamp = sessions.length + '|' + label;
+        if (flwCountRef.current === stamp) return;
+        flwCountRef.current = stamp;
+        onUpdateState({ flw_count: sessions.length, llo_summary: label });
+    }, [sessions, rollup, isRunning, loadingSessions]);
 
     // Runs stayed "In Progress" in the history for ever because nothing called the complete
     // endpoint. Completion is a human judgement here — the AI pass finishing is not the same as the
