@@ -212,7 +212,40 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     // outcome. Phase is derived rather than stored, so a page reload lands in the right place;
     // 'newRun' is the only manual override, for deliberately configuring another run.
     const [newRun, setNewRun] = React.useState(false);
-    const phase = isRunning ? 'running' : ((sessions.length && !newRun) ? 'results' : 'config');
+
+    // ── Scheduling ────────────────────────────────────────────────────────────
+    // There is no server-side scheduler a workflow template can call. Every path that creates an
+    // audit needs the OAuth access token that only exists in a logged-in browser session —
+    // start_job_api reads it from request.session['labs_oauth'], and run_workflow_job takes it as an
+    // argument — so a Celery-beat job would have no credentials of its own. What we can do is arm
+    // the run from this tab and fire it at a chosen time, which is enough to move the classifier
+    // work into the quiet hours. That is the actual goal; it just costs an open tab, and the UI says
+    // so plainly rather than implying a server-side guarantee we do not have.
+    const [scheduleMode, setScheduleMode] = React.useState(runState.schedule_mode || 'now');
+    const [scheduleTime, setScheduleTime] = React.useState(runState.schedule_time || '22:00');
+    const [armedFor, setArmedFor] = React.useState(null);
+    const [nowTs, setNowTs] = React.useState(Date.now());
+    // Next local-clock occurrence of HH:MM — today if it is still ahead of us, otherwise tomorrow.
+    const nextOccurrence = (hhmm) => {
+        const bits = String(hhmm == null ? '' : hhmm).split(':');
+        // Reject empty parts explicitly. Number('') is 0, so ':' would otherwise pass as a perfectly
+        // valid midnight and arm a run at a time nobody chose.
+        if (bits.length !== 2 || !bits[0].length || !bits[1].length) return null;
+        const h = Number(bits[0]), m = Number(bits[1]);
+        if (!isFinite(h) || !isFinite(m) || h !== Math.floor(h) || m !== Math.floor(m)) return null;
+        if (!(h >= 0 && h <= 23 && m >= 0 && m <= 59)) return null;
+        const d = new Date();
+        d.setHours(h, m, 0, 0);
+        if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+        return d.getTime();
+    };
+    const untilLabel = (ms) => {
+        const s = Math.max(0, Math.round(ms / 1000));
+        const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+        return h ? (h + 'h ' + m + 'm') : (m + 'm');
+    };
+    const phase = isRunning ? 'running'
+        : (armedFor ? 'scheduled' : ((sessions.length && !newRun) ? 'results' : 'config'));
 
     // Per-session image detail, loaded on demand. The sessions list carries only counts, so the
     // reason a photo failed (the classifier's own message) has to come from the bulk-data endpoint.
@@ -404,6 +437,32 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
             setProgress({ status: 'failed', error: String(err && err.message ? err.message : err) });
         }
     };
+
+    // Fire the armed run when its time arrives. handleCreate is held in a ref because the timer is
+    // installed once per armed window and must call the CURRENT one, not the closure captured when
+    // the schedule was set — otherwise a config change made while waiting would be silently ignored.
+    const handleCreateRef = React.useRef(handleCreate);
+    handleCreateRef.current = handleCreate;
+    React.useEffect(() => {
+        if (!armedFor || isRunning) return undefined;
+        const tick = setInterval(() => {
+            const now = Date.now();
+            setNowTs(now);
+            if (now >= armedFor) { setArmedFor(null); handleCreateRef.current(); }
+        }, 15000);
+        return () => clearInterval(tick);
+    }, [armedFor, isRunning]);
+
+    // A daily schedule re-arms for the next day once the run it triggered has finished. Watching the
+    // running -> idle edge rather than re-arming inside handleCreate means the repeat also survives a
+    // run the user kicked off by hand, and cannot double-arm while one is still in flight.
+    const wasRunning = React.useRef(false);
+    React.useEffect(() => {
+        if (wasRunning.current && !isRunning && scheduleMode === 'daily' && !armedFor) {
+            setArmedFor(nextOccurrence(scheduleTime));
+        }
+        wasRunning.current = isRunning;
+    }, [isRunning, scheduleMode, scheduleTime, armedFor]);
 
     // ── Roll the session records up for display ───────────────────────────────
     // IMPORTANT: /audit/api/workflow/<id>/sessions/ returns to_summary_dict() — id, title, status,
@@ -656,15 +715,21 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                 <div className="flex items-center gap-2 flex-wrap text-sm">
                     {[['config', '1. Configure'], ['running', '2. Processing'], ['results', '3. Results']].map((st, i) => {
                         const active = phase === st[0];
-                        const passedStep = (phase === 'running' && i === 0) || (phase === 'results' && i < 2);
+                        const passedStep = ((phase === 'running' || phase === 'scheduled') && i === 0)
+                            || (phase === 'results' && i < 2);
+                        // A scheduled run has finished configuring but has not started, so step 2 is
+                        // waiting rather than active — showing nothing active at all would read as broken.
+                        const waiting = phase === 'scheduled' && st[0] === 'running';
                         return (
                             <span key={st[0]} className="flex items-center gap-2">
                                 {i > 0 ? <i className="fa-solid fa-chevron-right text-gray-300 text-xs"></i> : null}
                                 <span className={'px-3 py-1 rounded-full font-medium '
                                     + (active ? 'bg-blue-600 text-white'
-                                        : passedStep ? 'bg-green-50 text-green-700 border border-green-200'
-                                            : 'bg-gray-100 text-gray-400')}>
-                                    {passedStep ? <i className="fa-solid fa-check mr-1"></i> : null}{st[1]}
+                                        : waiting ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                                            : passedStep ? 'bg-green-50 text-green-700 border border-green-200'
+                                                : 'bg-gray-100 text-gray-400')}>
+                                    {passedStep ? <i className="fa-solid fa-check mr-1"></i> : null}
+                                    {waiting ? <i className="fa-solid fa-clock mr-1"></i> : null}{st[1]}
                                 </span>
                             </span>
                         );
@@ -922,15 +987,64 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                     </p>
                 </div>
 
+                {/* When to run */}
+                <div className="border-t border-gray-200 pt-4">
+                    <div className="text-sm font-semibold text-gray-800 mb-2">When to run</div>
+                    <div className="flex items-center gap-4 flex-wrap text-sm">
+                        {[['now', 'Now'], ['at', 'Later, once'], ['daily', 'Every day']].map(o => (
+                            <label key={o[0]} className="inline-flex items-center gap-1.5 cursor-pointer">
+                                <input type="radio" name="kmc-schedule-mode" checked={scheduleMode === o[0]}
+                                    onChange={() => setScheduleMode(o[0])} />
+                                <span className={scheduleMode === o[0] ? 'font-medium text-gray-900' : 'text-gray-600'}>{o[1]}</span>
+                            </label>
+                        ))}
+                        {scheduleMode !== 'now' ? (
+                            <span className="inline-flex items-center gap-2">
+                                <span className="text-gray-500">at</span>
+                                <input type="time" value={scheduleTime}
+                                    onChange={e => setScheduleTime(e.target.value)}
+                                    className="px-2 py-1 border border-gray-300 rounded" />
+                                <span className="text-xs text-gray-400">
+                                    your local time
+                                    {nextOccurrence(scheduleTime)
+                                        ? ' · first run ' + new Date(nextOccurrence(scheduleTime)).toLocaleString()
+                                        : ' · enter a valid HH:MM'}
+                                </span>
+                            </span>
+                        ) : null}
+                    </div>
+                    {scheduleMode !== 'now' ? (
+                        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 mt-2">
+                            <i className="fa-solid fa-triangle-exclamation mr-1"></i>
+                            <span className="font-medium">This tab must stay open for a scheduled run to start.</span>{' '}
+                            Labs has no server-side scheduler a workflow can call — creating an audit needs the
+                            login token that only exists in your browser session — so the timer lives on this page.
+                            Once a run has started, the AI pass itself runs on the server and finishes even if you
+                            close the page. Overnight is the point: the classifiers are least contended then.
+                        </p>
+                    ) : null}
+                </div>
+
                 {/* Submit */}
                 <div className="border-t border-gray-200 pt-4">
-                    <button onClick={handleCreate}
+                    <button onClick={() => {
+                        if (scheduleMode === 'now') { handleCreate(); return; }
+                        const at = nextOccurrence(scheduleTime);
+                        if (!at) { setRunError('Enter the time as HH:MM before scheduling.'); return; }
+                        setRunError(null);
+                        onUpdateState({ schedule_mode: scheduleMode, schedule_time: scheduleTime });
+                        setNowTs(Date.now());
+                        setArmedFor(at);
+                    }}
                         disabled={!selected.length || !startDate || !endDate || isRunning}
                         title={!selected.length ? 'Select at least one opportunity' : (!startDate || !endDate ? 'Set a window' : '')}
                         className={'inline-flex items-center px-6 py-3 rounded-lg font-medium text-white '
                             + (!selected.length || !startDate || !endDate || isRunning ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700')}>
-                        <i className={'mr-2 fa-solid ' + (isRunning ? 'fa-spinner fa-spin' : 'fa-play')}></i>
-                        {isRunning ? 'Creating…' : ('Create ' + selected.length + ' audit' + (selected.length === 1 ? '' : 's') + ' with AI')}
+                        <i className={'mr-2 fa-solid ' + (isRunning ? 'fa-spinner fa-spin' : (scheduleMode === 'now' ? 'fa-play' : 'fa-clock'))}></i>
+                        {isRunning ? 'Creating…'
+                            : (scheduleMode === 'now'
+                                ? ('Create ' + selected.length + ' audit' + (selected.length === 1 ? '' : 's') + ' with AI')
+                                : ('Schedule ' + selected.length + ' audit' + (selected.length === 1 ? '' : 's')))}
                     </button>
                     <p className="text-xs text-gray-500 mt-2">
                         Opportunities are audited <span className="font-medium">one after another</span>, not in parallel —
@@ -949,6 +1063,48 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                     ) : null}
                 </div>
             </div>
+            ) : null}
+
+            {/* Armed and waiting. Same idea as the processing screen: the trigger form is put away so
+                nothing on screen reads as "not yet set up", and what is pending is stated exactly. */}
+            {phase === 'scheduled' ? (
+                <div className="bg-white rounded-lg shadow-sm p-6 border-l-4 border-amber-400">
+                    <div className="flex items-start gap-3">
+                        <i className="fa-solid fa-clock text-xl text-amber-500 mt-0.5"></i>
+                        <div className="flex-1">
+                            <div className="text-sm font-semibold text-gray-900">
+                                Scheduled — starts {new Date(armedFor).toLocaleString()}
+                                <span className="ml-2 font-normal text-gray-500">
+                                    (in {untilLabel(armedFor - nowTs)}{scheduleMode === 'daily' ? ', then daily' : ''})
+                                </span>
+                            </div>
+                            <div className="text-sm text-gray-600 mt-1">
+                                {selected.length} opportunit{selected.length === 1 ? 'y' : 'ies'} · {startDate} → {endDate}
+                                {maxPerFlw !== '' && Number(maxPerFlw) > 0
+                                    ? ' · max ' + Number(maxPerFlw) + ' photos per worker' : ''}
+                                {Number(samplePct) < 100 ? ' · ' + Number(samplePct) + '% sample' : ''}
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1">
+                                {selected.map(id => oppLabel(id)).join(' · ')}
+                            </div>
+                            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 mt-3">
+                                Leave this tab open. The countdown runs here, not on the server, so closing the
+                                page cancels the start. Anything already running is unaffected — that part is
+                                server-side and completes on its own.
+                            </p>
+                            <div className="mt-3 flex items-center gap-2">
+                                <button onClick={() => { setArmedFor(null); handleCreate(); }}
+                                    className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+                                    <i className="fa-solid fa-play mr-1.5"></i>Run now instead
+                                </button>
+                                <button onClick={() => { setArmedFor(null); setScheduleMode('now'); }}
+                                    className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 hover:border-red-400 hover:text-red-700">
+                                    Cancel schedule
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             ) : null}
 
             {/* Processing — its own screen. While a run is in flight this is all there is to look
@@ -1080,7 +1236,9 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
 
             {/* Field-worker results — one row per worker, the unit people act on. Expand a row to
                 see the photos the AI flagged, with the classifier's own reason. */}
-            {phase === 'results' ? (
+            {/* Also shown while a run is armed: a daily schedule should not blank out the results of
+                the run it is repeating. */}
+            {(phase === 'results' || phase === 'scheduled') ? (
                 <div className="bg-white rounded-lg shadow-sm overflow-hidden">
                     <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
                         <div>
