@@ -525,6 +525,17 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     // Human review status is deliberately separate from the AI verdict: a photo the AI matched is
     // still "pending" until a person signs it off, which is what "unless reviewed by a user the
     // status is pending" means. Conflating the two would let an unreviewed run look complete.
+    // Opportunities that were selected for the run but produced no audit sessions at all. Without
+    // these the results table silently drops them: a run over five opportunities that yields two
+    // looks identical to a run over two. There is then no way to tell "no photos in this window"
+    // from "audit creation failed here" without querying the backend by hand, which is exactly the
+    // position this run left us in.
+    const emptyOpps = React.useMemo(() => {
+        const seen = {};
+        rollup.byOpp.forEach(o => { seen[o.opp] = true; });
+        return (selected || []).filter(id => !seen[id]);
+    }, [rollup, selected]);
+
     const flwRows = React.useMemo(() => {
         return sessions.map(s => {
             const st = s.assessment_stats || {};
@@ -541,7 +552,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                 username: s.flw_username || '',
                 photos: photos, assessed: assessed,
                 match: st.ai_match || 0, noMatch: st.ai_no_match || 0, error: st.ai_error || 0,
-                pass: pass, fail: fail, pending: pending,
+                pass: pass, fail: fail, pending: pending, humanDone: humanDone,
                 neverReviewed: Math.max(0, photos - assessed),
                 pctPassed: humanDone > 0 ? Math.round(100 * pass / humanDone) : null,
                 reviewStatus: humanDone === 0 ? 'Pending' : (pending > 0 ? 'In review' : 'Reviewed'),
@@ -550,6 +561,36 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
         }).sort((a, b) => (b.neverReviewed - a.neverReviewed) || (b.noMatch - a.noMatch)
             || (b.error - a.error) || String(a.flw).localeCompare(String(b.flw)));
     }, [sessions]);
+
+    // The workflow list's "FLWs" column renders run.selected_count, which reads state.flw_count
+    // (workflow/data_access.py:134). Nothing ever wrote it, so every run in the history showed a
+    // dash. Write it once the session list has settled rather than on every poll.
+    const flwCountRef = React.useRef(null);
+    React.useEffect(() => {
+        if (isRunning || loadingSessions || !sessions.length) return;
+        if (flwCountRef.current === sessions.length) return;
+        flwCountRef.current = sessions.length;
+        onUpdateState({ flw_count: sessions.length });
+    }, [sessions, isRunning, loadingSessions]);
+
+    // Runs stayed "In Progress" in the history for ever because nothing called the complete
+    // endpoint. Completion is a human judgement here — the AI pass finishing is not the same as the
+    // audit being done — so it is a button, not an automatic consequence of the run ending.
+    const [runCompleted, setRunCompleted] = React.useState(
+        !!(instance && (instance.status === 'completed' || (instance.data || {}).status === 'completed')));
+    const [completing, setCompleting] = React.useState(false);
+    const markComplete = async () => {
+        if (completing || runCompleted) return;
+        setCompleting(true);
+        try {
+            const res = await actions.completeRun(instance.id, { overall_result: 'completed' });
+            if (res && res.error) { setRunError('Could not mark complete: ' + res.error); }
+            else { setRunCompleted(true); }
+        } catch (e) {
+            setRunError('Could not mark complete: ' + (e && e.message ? e.message : e));
+        }
+        setCompleting(false);
+    };
 
     const downloadCsv = () => {
         const head = ['FLW', 'Username', 'LLO', 'Opportunity', 'Opp ID', 'Scale', 'Agent', 'Photos',
@@ -735,10 +776,24 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                         );
                     })}
                     {phase === 'results' ? (
-                        <button onClick={() => { setNewRun(true); setProgress(null); setRunError(null); }}
-                            className="ml-auto px-3 py-1.5 text-sm rounded-lg border border-gray-300 hover:border-blue-400 hover:text-blue-700">
-                            <i className="fa-solid fa-rotate-right mr-1.5"></i>Configure another run
-                        </button>
+                        <span className="ml-auto flex items-center gap-2">
+                            {runCompleted ? (
+                                <span className="px-3 py-1.5 text-sm rounded-lg bg-green-50 text-green-800 border border-green-200 font-medium">
+                                    <i className="fa-solid fa-check mr-1.5"></i>Run marked complete
+                                </span>
+                            ) : (
+                                <button onClick={markComplete} disabled={completing}
+                                    title="Closes this run in the workflow history. Do it once you have reviewed what you intend to review — the AI pass finishing is not the same as the audit being done."
+                                    className="px-3 py-1.5 text-sm rounded-lg border border-green-300 text-green-800 hover:bg-green-50 disabled:opacity-50">
+                                    <i className={'mr-1.5 fa-solid ' + (completing ? 'fa-spinner fa-spin' : 'fa-flag-checkered')}></i>
+                                    {completing ? 'Marking…' : 'Mark run complete'}
+                                </button>
+                            )}
+                            <button onClick={() => { setNewRun(true); setProgress(null); setRunError(null); }}
+                                className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 hover:border-blue-400 hover:text-blue-700">
+                                <i className="fa-solid fa-rotate-right mr-1.5"></i>Configure another run
+                            </button>
+                        </span>
                     ) : null}
                     {phase === 'config' && sessions.length ? (
                         <button onClick={() => setNewRun(false)}
@@ -1224,12 +1279,37 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                         </td>
                                     </tr>
                                 ))}
+                                {/* Selected but empty. Stated outright rather than omitted — a missing
+                                    row reads as "not selected", which is a different and misleading thing. */}
+                                {emptyOpps.map(oid => (
+                                    <tr key={'empty-' + oid} className="border-t border-gray-100 bg-amber-50/40">
+                                        <td className="px-3 py-2 whitespace-nowrap">
+                                            <span className="font-medium text-gray-900">{meta(oid).llo || ('Opportunity ' + oid)}</span>
+                                            <span className="text-xs text-gray-500 ml-1">{meta(oid).version}</span>
+                                            <span className="text-xs text-gray-400 font-mono ml-1">#{oid}</span>
+                                        </td>
+                                        <td className="px-3 py-2"><ScalePill kind={scaleOf(oid)} unverified={meta(oid).unverified} /></td>
+                                        <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{agentName(effectiveAgent(oid))}</td>
+                                        <td colSpan={7} className="px-3 py-2 text-xs text-amber-800">
+                                            <i className="fa-solid fa-circle-info mr-1"></i>
+                                            <span className="font-medium">No audit created — 0 photos.</span>{' '}
+                                            Either no visits carried the weight photo between {startDate} and {endDate},
+                                            or audit creation did not succeed for this opportunity. Re-run this one on its
+                                            own to tell the two apart.
+                                        </td>
+                                    </tr>
+                                ))}
                             </tbody>
                         </table>
                     </div>
                     <div className="px-4 py-2 text-xs text-gray-500">
                         {sessions.length} session{sessions.length === 1 ? '' : 's'} across {rollup.byOpp.length} opportunit{rollup.byOpp.length === 1 ? 'y' : 'ies'} ·
                         counts read from the stored session records, not from the create response.
+                        {emptyOpps.length ? (
+                            <span className="text-amber-800 font-medium">
+                                {' · '}{emptyOpps.length} selected opportunit{emptyOpps.length === 1 ? 'y' : 'ies'} produced nothing
+                            </span>
+                        ) : null}
                     </div>
                 </div>
             ) : null}
@@ -1270,8 +1350,8 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                         AI: match / no match / errored
                                     </th>
                                     <th className="px-3 py-2 text-center font-medium"
-                                        title="What a person has signed off. Pending means nobody has reviewed it yet.">
-                                        Human: pass / fail / pending
+                                        title="Photos still waiting on a person. The AI verdict is a suggestion; sign-off happens on the review page.">
+                                        Needs your review
                                     </th>
                                     <th className="px-3 py-2 text-right font-medium"
                                         title="Of the photos a person has judged, the share marked pass">% passed</th>
@@ -1314,12 +1394,26 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                                 <span className="text-gray-300"> / </span>
                                                 <span className={r.error ? 'text-red-700 font-semibold' : 'text-gray-300'}>{r.error}</span>
                                             </td>
+                                            {/* An actionable link, not a dead count. The override-and-sign-off
+                                                flow already exists on the review page — AI verdict, per-photo
+                                                Pass/Fail/Incomplete, then "Complete Image Review". A column
+                                                reading "0 / 0 / 9" told nobody that, so nobody went there. */}
                                             <td className="px-3 py-2 text-center whitespace-nowrap">
-                                                <span className={r.pass ? 'text-green-700 font-semibold' : 'text-gray-300'}>{r.pass}</span>
-                                                <span className="text-gray-300"> / </span>
-                                                <span className={r.fail ? 'text-red-700 font-semibold' : 'text-gray-300'}>{r.fail}</span>
-                                                <span className="text-gray-300"> / </span>
-                                                <span className={r.pending ? 'text-gray-700' : 'text-gray-300'}>{r.pending}</span>
+                                                {r.pending > 0 ? (
+                                                    <a href={'/audit/' + r.id + '/bulk/?opportunity_id=' + r.opp}
+                                                        target="_blank" rel="noopener noreferrer"
+                                                        className="inline-flex items-center px-2 py-1 rounded text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100">
+                                                        {r.pending} photo{r.pending === 1 ? '' : 's'} need review →
+                                                    </a>
+                                                ) : r.humanDone > 0 ? (
+                                                    <span className="text-xs text-green-700 font-semibold">
+                                                        <i className="fa-solid fa-check mr-1"></i>
+                                                        All {r.humanDone} reviewed
+                                                        {r.fail ? <span className="text-red-700 font-normal"> · {r.fail} failed</span> : null}
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-xs text-gray-400">nothing to review yet</span>
+                                                )}
                                             </td>
                                             <td className="px-3 py-2 text-right font-semibold">
                                                 {r.pctPassed == null ? <span className="text-gray-300">—</span>
@@ -1336,7 +1430,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                             <td className="px-3 py-2 text-right whitespace-nowrap">
                                                 <button onClick={() => loadDetail(r.id)}
                                                     className="text-xs underline text-gray-600 hover:text-gray-900 mr-3">
-                                                    {expanded === r.id ? 'Hide flagged' : 'Why flagged'}
+                                                    {expanded === r.id ? 'Hide reasons' : 'Flagged photos & reasons'}
                                                 </button>
                                                 <a className="text-xs font-medium text-blue-600 hover:underline"
                                                     href={'/audit/' + r.id + '/bulk/?opportunity_id=' + r.opp}
