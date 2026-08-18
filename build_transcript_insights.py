@@ -275,6 +275,23 @@ def main():
         raise SystemExit(f"missing {SRC} - run pull_ocs_messages.py --all first")
     rng = random.Random(SEED)
 
+    # Some sessions carry no interview_topic even though others of the same code do, which left topics
+    # showing as "code A" instead of their name. Cheap pre-pass to resolve every code to the name its
+    # own sessions use most often, so no topic is reported by bare code.
+    name_votes = defaultdict(Counter)
+    for _ln in SRC.open(encoding="utf-8"):
+        _ln = _ln.strip()
+        if not _ln:
+            continue
+        try:
+            _r = json.loads(_ln)
+        except ValueError:
+            continue
+        _c, _t = str(_r.get("interview") or "").strip(), (_r.get("interview_topic") or "").strip()
+        if _c and _t:
+            name_votes[_c][_t] += 1
+    TOPIC_NAME = {c: v.most_common(1)[0][0] for c, v in name_votes.items()}
+
     # ---- coverage counters: these must reconcile to the archive or the run says so
     cov = Counter()
     L1 = {"flw_words": [], "bot_words": [], "roles": Counter(), "errors": 0, "system_msgs": 0, "system_words": 0}
@@ -339,7 +356,7 @@ def main():
         cov["sessions_analysed"] += 1
         cov["messages_analysed"] += len(msgs)
         lang = norm_lang(rec.get("preferred_language"))
-        topic = rec.get("interview_topic") or ("code " + code)
+        topic = (rec.get("interview_topic") or "").strip() or TOPIC_NAME.get(code) or ("code " + code)
         sid = rec.get("sid") or ""
         pid = rec.get("pid") or ""
         lang_stat[lang] += 1

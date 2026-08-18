@@ -4,6 +4,37 @@ A complete read of every interview transcript on record, from the individual mes
 
 *Every session in the archive was scanned: 21,916 sessions containing 547,445 messages. Nothing was sampled for the counts, and every figure in this document is read from that scan rather than typed in.*
 
+## Executive summary
+
+**What this is.** Every interview conversation the AI interviewer has ever had, read end to end and summarised - 21,916 sessions containing 547,445 messages. Not a sample. Of those, 9,952 were real interviews and are analysed here; the rest are people who opened the chat and stopped before a question was asked, plus test data.
+
+**The size of it.** 113,093 answers from 1,461 health workers across 27 interview topics. A typical worker did 6 interviews and wrote 1,269 words in total.
+
+### Six things worth knowing
+
+- **The answers have real content.** A typical answer is 15 words and the fullest tenth run past 47. About 32.4% contain a number and 14.2% explain a reason - and a reason is what lets you question a figure instead of just accepting it.
+- **Asking again rescues answers.** In 20,861 cases the first reply was unusable - blank, a single word, or "I do not know" - and the final answer was usable because the interviewer pushed back. On a paper or online form, that first unusable reply is what would have been filed.
+- **Workers admit what they do not know.** 1,650 answers say so plainly. That makes the dataset more trustworthy, not less: a survey where everyone answers confidently is the one to worry about.
+- **An interview is not one sitting.** Half finish within about 62 minutes, but a tenth stretch beyond 7 hours as people answer, leave and come back. 94.7% of interviews reach the end.
+- **Some topics draw people out far more than others.** Malaria 2 averages 38.7 words per answer against 13.2 for Community Demographics - roughly 2.9 times the depth. Compare findings within a topic, not across them.
+- **It is not all clean.** 6,059 answers are gibberish, a single character or a repeat - about 5.4% of the total. That is normal for open text at this scale, and it is stated here rather than left to be discovered.
+
+### What workers say is missing
+
+Counted from their own words rather than a prepared checklist. Grouping the obvious synonyms across English and Hausa, the shortages raised most often are **awareness and knowledge** (about 411 mentions), **money** (288), **security** (142), **access** (110) and **food** (67). Read it as what is top of mind for the people doing the work, not as a measured prevalence - what gets mentioned depends on what was asked.
+
+### How much to trust it
+
+- **The counts are complete.** Every session was read, and a separate check confirms that the ones analysed plus the ones excluded add up exactly to the archive, so nothing was quietly dropped.
+- **The quotes are real and unedited** - spelling and grammar exactly as typed. Each one was verified word for word against the conversation it came from. They are there to show what the data feels like; the counts above are the evidence.
+- **Both languages are included.** Around 40% of interviews are in Hausa, and the detection rules were built from the workers' own vocabulary in both languages, so Hausa answers are not under-counted.
+- **Nobody is identifiable.** No worker identifier appears anywhere, and anything resembling a phone number or email was removed before quoting.
+- **Two limits to keep in mind.** These are self-reports, so they tell you what workers experienced rather than what an audit would find. And nothing here judges whether an answer was correct - only how much was said and what kind of thing it was.
+
+### What to do with it
+
+Read on for the detail, or skip to **The extracts** for real quotes you can use in reporting. The spreadsheet alongside this document carries every extract with its topic, language and question, and is the right starting point for any deeper analysis, including work with an AI tool. One request before quoting outside the team: the Hausa extracts are flagged in the spreadsheet and need a Hausa speaker to add a translation first.
+
 ## What this is, and what it is not
 
 This is the open question - what is actually in these conversations - rather than a test of any single hypothesis. It is meant to be useful in three ways: as an orientation for anyone new to the project, as a source of real quotes for reports and presentations, and as a starting point for further analysis, since the full extract dump ships alongside it as a spreadsheet.
@@ -98,8 +129,8 @@ By topic, largest first. 'Words per answer' is the clearest signal of which subj
 
 | Topic | Sessions | Answers | Words per answer | Follow-ups per question | Do-not-know |
 |---|---|---|---|---|---|
-| code A | 1,437 | 15,685 | 13.2 | 0.76 | 1.4% |
-| code B | 1,166 | 13,547 | 20.2 | 0.86 | 1.2% |
+| Community Demographics | 1,437 | 15,685 | 13.2 | 0.76 | 1.4% |
+| Malaria | 1,166 | 13,547 | 20.2 | 0.86 | 1.2% |
 | Seasonal Malaria Chemoprevention | 979 | 9,510 | 25.6 | 1.21 | 1.4% |
 | Seasonal Malaria Chemoprevention 2 | 920 | 9,772 | 22.8 | 1.12 | 2.4% |
 | Bed Net Usage | 677 | 12,084 | 18.9 | 0.77 | 2.3% |
@@ -115,7 +146,7 @@ By topic, largest first. 'Words per answer' is the clearest signal of which subj
 | Malaria 2 | 239 | 1,951 | 38.7 | 1.67 | 3.9% |
 | Medicine Quality and Counterfeiting 2 | 197 | 1,623 | 24.1 | 1.02 | 4.7% |
 
-Among topics with enough volume to compare, **Malaria 2** draws the fullest answers at 38.7 words, and **code A** the shortest at 13.2. A 2.9-fold difference in how much people write is worth understanding before comparing findings across topics.
+Among topics with enough volume to compare, **Malaria 2** draws the fullest answers at 38.7 words, and **Community Demographics** the shortest at 13.2. A 2.9-fold difference in how much people write is worth understanding before comparing findings across topics.
 
 The topic where knowledge most often runs out is **Water & Diarrhea 4** (5.1% of answers contain an explicit do-not-know). That is a finding about the question set as much as about the workers.
 
@@ -170,15 +201,15 @@ What is deliberately NOT here is a translation. Guidance on multilingual qualita
 | Category | Found in corpus | Topics | In the dump |
 |---|---|---|---|
 | Unusually full answers | 9,148 | 27 | 162 |
-| Answers that explain WHY | 13,587 | 28 | 163 |
+| Answers that explain WHY | 13,587 | 27 | 162 |
 | Problems and shortages reported | 5,410 | 26 | 151 |
-| Numbers with reasoning attached | 5,379 | 28 | 157 |
+| Numbers with reasoning attached | 5,379 | 27 | 156 |
 | Candid and hedged answers (mostly Hausa) | 5,693 | 27 | 162 |
 | Concrete examples given | 1,682 | 27 | 135 |
 | Answers the probe rescued | 20,861 | 28 | 164 |
 | Recovered from not understanding | 206 | 17 | 87 |
 | Explicit 'I do not know' | 1,650 | 25 | 138 |
-| Low-quality or junk answers | 6,059 | 28 | 159 |
+| Low-quality or junk answers | 6,059 | 27 | 158 |
 | Platform errors mid-interview | 80 | 14 | 54 |
 | Sessions flagged as suspected AI use | 121 | 19 | 86 |
 
@@ -246,7 +277,7 @@ What is deliberately NOT here is a translation. Guidance on multilingual qualita
 
 ### Answers that explain WHY
 
-*Contains a causal marker (because / saboda / domin). These are the ones that tell you a mechanism, not just a number. Found 13,587 times across 28 topics (7082 english, 6403 hausa, 55 unknown).*
+*Contains a causal marker (because / saboda / domin). These are the ones that tell you a mechanism, not just a number. Found 13,587 times across 27 topics (7082 english, 6403 hausa, 55 unknown).*
 
 *Water & Diarrhea 3 - english* - asked: How common is it for families in your catchment area to consult a traditional healer or patent medicine vendor before coming to you when a child has diarrhea? If a traditional healer is consulted, what advice is offered ...
 
@@ -374,25 +405,25 @@ What is deliberately NOT here is a translation. Guidance on multilingual qualita
 
 ### Numbers with reasoning attached
 
-*A figure AND an explanation in the same answer - an estimate you can interrogate rather than a bare digit. Found 5,379 times across 28 topics (3197 english, 2126 hausa, 32 unknown).*
+*A figure AND an explanation in the same answer - an estimate you can interrogate rather than a bare digit. Found 5,379 times across 27 topics (3197 english, 2126 hausa, 32 unknown).*
 
-*Vitamin A Supplementation - english* - asked: When parents visit the clinic or Maternal, Neonatal, and Child Health Weeks (MNCHWs), what is usually the main reason (e.g. immunization, weighing, Vitamin A Supplementation (VAS), or something else)?
+*Water & Diarrhea - english* - asked: What do people in your catchment area typically do if their child under 5 has diarrhea? What do you recommend them to do? In general, what percentage of families do you think would do each of the following?: A) Do nothin...
 
-> 75 75 total across the service Based on personal observation because in my Area they goes to generally hospital
+> back then before our orientation the household they will give them buscopan or Antidiarrheal. from pharmacy they were also recommend as previous as been confirmed it good drugs by professional doctor's. we just add up and tell the effects of over using it. Less than 5% of family. because during the visitation most of them attend the venue 10% of them and this is done when the drugs don't work. therefore we will do fu...
 
 *Antibiotics and ACT Use 3 - english* - asked: In your experience, are there times when people treat themselves or a family member for an infection at home without visiting a health facility? What do they typically use, and what usually prompts them to do that?
 
 > yeah there are people that do like 1-2 out of 15 people do mostly because of no money to buy antibiotics for treatment because our community are very poor people here they often try traditional medicine, herbal like some powder, watery etc yeah sometimes poverty drives u to everything in this life but after all lifes matter than everything when traditional doesn't work they go to health facility and even by borrowing...
 
-*Malaria 2 - hausa* - asked: In your community, how common is it for pregnant women to attend antenatal care coverage (ANC) during their first trimester of pregnancy? For women who don't come in during that early period, what are the main reasons yo...
+*Malaria - english* - asked: What are the reasons that households are missed by Community Drug Distributors (CDDs) when distributing Seasonal Malaria Chemoprevention (SMC)? For every 100 households, how many do you think are missed?
 
-> ey muna samun Mata masu juna biyu suna zuwa awo ayankinmu acikin watanin uku nafarko sosai akalla Nuna samun kashi 9 cikin 10 mafi yawancin Wayanda basa zuwa Kai raayinsune wasukuma saboda wai abasu tunanin wai sunyi daurin zuwa awo dawuri bamutaba Jin wani da liliba abakainsu kawaidai basa zuwa
+> Mostly the one that are missing is because of the parent. because some parent don't care about SMC drugs to their children 1 or 2 approximately
 
-*Key terms: saboda = because; samun = getting / access*
+*Nutrition Prevalance and Programs - hausa* - asked: How do you identify these children with severe malnutrition (SAM)?
 
-*Vitamin A Supplementation - english* - asked: What changes would make your work distributing Vitamin A Supplementation (VAS) easier or more efficient?
+> ta hanyar rajista gida gida na maleriya idan aka zo wurin bada maganin malaria idan wannan watan ka shiga gida kaba akalla yaro 5 wani lokacin kuma zaka iya tarar da yaro 3 ko 2ga shi kuma kai mai bada maganin ka san yaro 5 ka ke ba magani gidan amma ka samu yaro 3 ko 2 daga nan zakayi tambaya ina sauran yaran zaa ce ai suna asibiti saboda rashin gina jiki
 
-> The payment increase will contribute a lot The distribution during MNCHW is a bit high because some mothers that not even knows they due will come for other services and their child records reveal it Apart from increase payment adding number of staffs to support the exercise Per facility only 2 staffs are selected e participated in the exercise so adding extra staffs will help
+*Key terms: rashin = lack of; saboda = because; amma = but; asibiti = hospital; magani = medicine; maganin = medicine for*
 
 *Antibiotics and ACT Use 2 - hausa* - asked: Think about households you visited in the past month. Out of every 10 people, how many do you think took Artemisinin-based Combination Therapy (ACT)?
 
@@ -404,31 +435,31 @@ What is deliberately NOT here is a translation. Guidance on multilingual qualita
 
 > yeah my workload is difficult because in our facility we've shortage of manpower. we the parmanent staff are small so there's no task shifting and task sharing. yeah there's a day in our working days that we used to share RUTF to the large number of clients so when we're doing that work many of the people whom we used to do the work together are volunteers and the work is not easy so as we're working we can be up to ...
 
-*Bed Net Usage - english* - asked: For every 10 households that use bednets, do they use them all year or only certain times of year? If only certain times of year, when is it used?
+*Malaria - english* - asked: What are the reasons that households are missed by Community Drug Distributors (CDDs) when distributing Seasonal Malaria Chemoprevention (SMC)? For every 100 households, how many do you think are missed?
 
-> 60% is during the raining season, 40% is yearly yes, the reason here is mostly they only believe that it is only during the raining season that they have mosquitoes around them, because they practice the measures to prevent themselves from being at stagnant area and bushes
+> 15 % must of them did not go because there parents always take the to farms
 
-*Malaria - hausa* - asked: What are the reasons that households are missed by Community Drug Distributors (CDDs) when distributing Seasonal Malaria Chemoprevention (SMC)? For every 100 households, how many do you think are missed?
+*Malaria 2 - english* - asked: When pregnant women do come for ANC visits at your facility or in your area, how consistently do they receive an ITN or Intermittent Preventive Treatment in pregnancy (IPTp)? Roughly what proportion of pregnant women do ...
 
-> saboda wasu mutanen basu son ana ba yaran su maganin riga kafi 20%
+> about 60% to 70% of pregnant women consistently receive an ITN during their first visit, while roughly 50% successfully complete the required three doses of IPTp-SP. from combined hard administrative data from our tally sheets and observations during daily clinical care. The main reasons women in our catchment area miss out on ITNs or drop out of their IPTp-SP doses come down to stock shortages, systemic healthcare b...
 
-*Key terms: saboda = because; maganin = medicine for*
+*Internal Topic - hausa* - asked: When you're doing interviews, how do you keep track of how many you can still do that day?
 
-*Malaria 3 - english* - asked: When you identify a child under 5 with danger signs of severe malaria and refer them to a hospital, what proportion of the caregivers actually end up reaching the hospital? For those who don't go, what reasons do caregiv...
+> yana da kyau. kuma salon yana burgeni ban taba fuskantar haka ba ana yi a yina daya wani kolaci saboda matsalar sabis yana kaini kwana 2 Ina bi kuma Ina tuntubar abokan aikin a guruf
 
-> can you please expatiate the question Not all the 10 children went to the hospital for treatment because of the hospital bill. 8 out 10 children went to the hospital and there's no other besides the hospital bill
+*Key terms: saboda = because; aikin = work; kwana = days*
 
-*Malaria 4 - hausa* - asked: Think about the malaria-related work you did last month - things like checking on sick children, distributing medication, or following up on cases. How much time did you spend conducting visits? How much time did you spe...
+*Malaria 3 - hausa* - asked: When caregivers bring their children under 5 for immunization visits under the EPI programme, how often do those children also receive an ITN? Out of every 10 children under 5 who come for immunization, roughly how many ...
 
-> a cikin sati muna Kai ziyara ga maras lafiya sau ukku muna shafe awa guda muna tafiya don Kai ziyarar sannan zamu iya daukar awa 6 domin duba su
+> 6 cikin 10 kwarewa daga aikin mu saboda kansu bai ida wayewa ba kan abun
 
-*Key terms: domin = because; lafiya = health*
+*Key terms: saboda = because; aikin = work*
 
-*Seasonal Malaria Chemoprevention 2 - hausa* - asked: Do distributors ever give SMC to children over 5 years old because they make a mistake, because the caregiver gives the wrong age, or for another reason? Out of every 10 children 6 to 10 years old in your community, how ...
+*Malaria 2 - hausa* - asked: In your community, how common is it for pregnant women to attend antenatal care coverage (ANC) during their first trimester of pregnancy? For women who don't come in during that early period, what are the main reasons yo...
 
-> a'a a bisa namu horo da muka musu yara sama da shekaru biyar baswa karba, kuma idan iyaye suka ce yaran basu kai ba suna amfani da qiyasi, idan har alamu ya nuna yaron ya wuce shekaru biyar basu bashi, wasu lokutan ma har takardan shaida suna nema don kiyaye bawa yara da suka wuce shekarun karban maganin gaskiya da kamar wahala a samu, amma bari nace 1 na bada 1 saboda ba lallai ne a iya dakatar da iyaye wajen boye s...
+> ey muna samun Mata masu juna biyu suna zuwa awo ayankinmu acikin watanin uku nafarko sosai akalla Nuna samun kashi 9 cikin 10 mafi yawancin Wayanda basa zuwa Kai raayinsune wasukuma saboda wai abasu tunanin wai sunyi daurin zuwa awo dawuri bamutaba Jin wani da liliba abakainsu kawaidai basa zuwa
 
-*Key terms: gaskiya = honestly / truly; saboda = because; amma = but; maganin = medicine for; yara = children; iyaye = parents*
+*Key terms: saboda = because; samun = getting / access*
 
 *Bed Net Usage - english* - asked: Thank you for sharing your experience as a recorder during the campaign and mentioning that your team performed well. Next part of the question: How did the most recent mass bed net campaign go? What percentage of total ...
 
@@ -742,31 +773,31 @@ Interviewer: "Yi haƙuri! Bari in sake faɗi da sauƙi: Idan kuna da ikon canza 
 
 ### Low-quality or junk answers
 
-*Gibberish, single characters or repeats. Counted honestly so the corpus is not oversold. Found 6,059 times across 28 topics (4334 english, 1679 hausa, 35 unknown).*
+*Gibberish, single characters or repeats. Counted honestly so the corpus is not oversold. Found 6,059 times across 27 topics (4334 english, 1679 hausa, 35 unknown).*
 
-*Medicine Quality and Counterfeiting 2 - english* - asked: Those are very practical identification methods — overlapping labels, missing NAFDAC numbers, and absent batch/manufacturing/expiry dates. Great observations! Next part: **Have you ever personally seen a medicine that yo...
-
-> yes
-
-*Malaria 3 - hausa* - asked: Have you heard of rectal artesunate? If yes, what is your sense of whether caregivers in your catchment area would be willing to accept and use it for a child with suspected severe malaria?
-
-> bansaniba
-
-*Vitamin A Supplementation - english* - asked: Outside the Maternal, Neonatal, and Child Health Week (MNCHW), how often can parents obtain Vitamin A Supplementation (VAS) in your catchment area? What are the other ways to get VAS?
-
-> no
-
-*Community & FLW Profile 2 - hausa* - asked: When nets or SMC campaigns occur, how does this affect your workload? Are you still able to complete your main responsibilities?
-
-> english
-
-*Community & FLW Profile 2 - english* - asked: Thank you! So farmers can access the subsidized fertilizers and equipment at the local government secretariat, and it is open to all farmers in the community. That's very clear! Now, the final part: **Are there any NGO p...
+*Vitamin A Supplementation - english* - asked: What changes would make your work distributing Vitamin A Supplementation (VAS) easier or more efficient?
 
 > No
 
-*Water & Diarrhea 3 - hausa* - asked: Out of all the water a typical family in your catchment area drinks in a day, how much of it would you say is purchased such as sachet or pouch water, versus water they collect for free? For the water they do buy, roughl...
+*Health Worker Experience - english* - asked: Have you ever had a sick child in front of you and not had what you needed to help them? What do you do? How often does that happen?
 
-> 20%
+> no
+
+*Medicine Quality & Counterfeiting 3 - english* - asked: Do you know if there is any government system in your area for checking or reporting fake medicines — for example, an inspector, a hotline, or a reporting form? Have you ever used it?
+
+> no
+
+*Malaria 4 - english* - asked: Thank you. So RDT testing is consistently available and caregivers generally accept it for their children — that's a strong practice in your area. Building on that, the next part asks: **Have you ever seen a caregiver re...
+
+> no
+
+*Malaria 4 - english* - asked: Have you ever seen a caregiver refuse to test their child for malaria with an RDT — even when you offered one? What reason did they give?
+
+> no
+
+*Malaria 5 - english* - asked: Thank you for confirming that's based on your personal experience. Moving on to the next part. **Have you ever come across malaria rapid diagnostic tests (RDTs) that you felt gave the wrong result, or that you did not tr...
+
+> No
 
 ### Platform errors mid-interview
 

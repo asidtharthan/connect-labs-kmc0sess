@@ -177,6 +177,117 @@ p(
     italic=True,
 )
 
+
+# ================================================================ ONE-PAGE EXECUTIVE READ
+# Deliberately first and deliberately short. Every number is computed, so this page cannot disagree
+# with the detail behind it.
+_rich_all = sorted([t for t in L6 if t["answers"] >= 300], key=lambda t: -t["mean_words"])
+_dk_all = sorted([t for t in L6 if t["answers"] >= 300], key=lambda t: -t["dontknow_pct"])
+_junk = gem("data_quality")["found"]
+_resc = gem("probe_rescue")["found"]
+_dk_n = gem("dontknow")["found"]
+_quotes_doc = 0  # filled in after SHOW is known; see the placeholder swap below
+
+
+def _bsum(words):
+    return sum(b["n"] for b in BARRIERS if b["word"] in words)
+
+
+h("Executive summary", 1)
+p(
+    f"**What this is.** Every interview conversation the AI interviewer has ever had, read end to end and "
+    f"summarised - {n(COV['sessions_in_archive'])} sessions containing {n(COV['messages_in_archive'])} "
+    f"messages. Not a sample. Of those, {n(COV['sessions_analysed'])} were real interviews and are "
+    f"analysed here; the rest are people who opened the chat and stopped before a question was asked, plus "
+    f"test data."
+)
+p(
+    f"**The size of it.** {n(L2['answers'])} answers from {n(L5['flws'])} health workers across "
+    f"{L0['topics']} interview topics. A typical worker did {L5['sessions_per_flw']['median']} interviews "
+    f"and wrote {n(L5['total_words_per_flw']['median'])} words in total."
+)
+
+h("Six things worth knowing", 2)
+li(
+    f"**The answers have real content.** A typical answer is {L2['words']['median']} words and the fullest "
+    f"tenth run past {L2['words']['p90']}. About {L2['markers']['digit']['pct']}% contain a number and "
+    f"{L2['markers']['reason']['pct']}% explain a reason - and a reason is what lets you question a figure "
+    f"instead of just accepting it."
+)
+li(
+    f"**Asking again rescues answers.** In {n(_resc)} cases the first reply was unusable - blank, a single "
+    f'word, or "I do not know" - and the final answer was usable because the interviewer pushed back. On '
+    f"a paper or online form, that first unusable reply is what would have been filed."
+)
+li(
+    f"**Workers admit what they do not know.** {n(_dk_n)} answers say so plainly. That makes the dataset "
+    f"more trustworthy, not less: a survey where everyone answers confidently is the one to worry about."
+)
+li(
+    f"**An interview is not one sitting.** Half finish within about {int(L4['duration_min']['median'])} "
+    f"minutes, but a tenth stretch beyond {int(L4['duration_min']['p90'] / 60)} hours as people answer, "
+    f"leave and come back. {L4['complete_pct']}% of interviews reach the end."
+)
+li(
+    f"**Some topics draw people out far more than others.** "
+    f"{_rich_all[0]['name']} averages {_rich_all[0]['mean_words']} words per answer against "
+    f"{_rich_all[-1]['mean_words']} for {_rich_all[-1]['name']} - roughly "
+    f"{round(_rich_all[0]['mean_words'] / max(_rich_all[-1]['mean_words'], 1), 1)} times the depth. Compare "
+    f"findings within a topic, not across them."
+    if len(_rich_all) >= 2
+    else "**Answer depth varies by topic**, so compare findings within a topic rather than across them."
+)
+li(
+    f"**It is not all clean.** {n(_junk)} answers are gibberish, a single character or a repeat - about "
+    f"{round(100 * _junk / max(L2['answers'], 1), 1)}% of the total. That is normal for open text at this "
+    f"scale, and it is stated here rather than left to be discovered."
+)
+
+if BARRIERS:
+    h("What workers say is missing", 2)
+    p(
+        f"Counted from their own words rather than a prepared checklist. Grouping the obvious synonyms "
+        f"across English and Hausa, the shortages raised most often are **awareness and knowledge** "
+        f"(about {n(_bsum({'awareness', 'sanin', 'knowledge', 'sani'}))} mentions), **money** "
+        f"({n(_bsum({'kudi', 'kudin', 'money'}))}), **security** ({n(_bsum({'tsaro'}))}), **access** "
+        f"({n(_bsum({'samun'}))}) and **food** ({n(_bsum({'abinci'}))}). Read it as what is top of mind for "
+        f"the people doing the work, not as a measured prevalence - what gets mentioned depends on what was "
+        f"asked."
+    )
+
+h("How much to trust it", 2)
+li(
+    "**The counts are complete.** Every session was read, and a separate check confirms that the ones "
+    "analysed plus the ones excluded add up exactly to the archive, so nothing was quietly dropped."
+)
+li(
+    "**The quotes are real and unedited** - spelling and grammar exactly as typed. Each one was verified "
+    "word for word against the conversation it came from. They are there to show what the data feels "
+    "like; the counts above are the evidence."
+)
+li(
+    "**Both languages are included.** Around 40% of interviews are in Hausa, and the detection rules were "
+    "built from the workers' own vocabulary in both languages, so Hausa answers are not under-counted."
+)
+li(
+    "**Nobody is identifiable.** No worker identifier appears anywhere, and anything resembling a phone "
+    "number or email was removed before quoting."
+)
+li(
+    "**Two limits to keep in mind.** These are self-reports, so they tell you what workers experienced "
+    "rather than what an audit would find. And nothing here judges whether an answer was correct - only "
+    "how much was said and what kind of thing it was."
+)
+
+h("What to do with it", 2)
+p(
+    "Read on for the detail, or skip to **The extracts** for real quotes you can use in reporting. The "
+    "spreadsheet alongside this document carries every extract with its topic, language and question, and "
+    "is the right starting point for any deeper analysis, including work with an AI tool. One request "
+    "before quoting outside the team: the Hausa extracts are flagged in the spreadsheet and need a Hausa "
+    "speaker to add a translation first."
+)
+
 # ================================================================ HOW TO READ
 h("What this is, and what it is not", 1)
 p(
