@@ -420,3 +420,5 @@ probe_validation_sample.txt
 probe_validation_labels.csv
 pull_msgs.log
 pull_all.log
+transcript_gems.csv
+insights_payload.json
