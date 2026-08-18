@@ -572,6 +572,25 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
             || (b.error - a.error) || String(a.flw).localeCompare(String(b.flw)));
     }, [sessions]);
 
+    // Filtering the worker table. A run across eleven opportunities produces hundreds of rows and
+    // the thing people actually do is "show me one LLO" or "find this person", so both are offered.
+    // visibleRows — not flwRows — feeds the table AND its header count: a filtered table above an
+    // unfiltered total is the exact chip-vs-rows mismatch that made an earlier dashboard untrustworthy.
+    const [lloFilter, setLloFilter] = React.useState('');
+    const [flwSearch, setFlwSearch] = React.useState('');
+    const lloOptions = React.useMemo(() => {
+        const seen = [];
+        flwRows.forEach(r => { if (seen.indexOf(r.llo) < 0) seen.push(r.llo); });
+        return seen.sort();
+    }, [flwRows]);
+    const visibleRows = React.useMemo(() => {
+        const q = flwSearch.trim().toLowerCase();
+        return flwRows.filter(r =>
+            (!lloFilter || r.llo === lloFilter)
+            && (!q || String(r.flw).toLowerCase().indexOf(q) >= 0
+                || String(r.username).toLowerCase().indexOf(q) >= 0));
+    }, [flwRows, lloFilter, flwSearch]);
+
     // The workflow list's "FLWs" column renders run.selected_count, which reads state.flw_count
     // (workflow/data_access.py:134). Nothing ever wrote it, so every run in the history showed a
     // dash. Write it once the session list has settled rather than on every poll.
@@ -637,8 +656,9 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
         }
         if (match === 0) {
             return { verdict: 'keep',
-                detail: testedName + ' read none of ' + scored + ' photos. It cannot read this scale, so the '
-                    + 'current setting is very likely right.' };
+                detail: 'Confirmed. ' + testedName + ' could not read any of the ' + scored + ' photos it '
+                    + 'scored — which is exactly what we expect if the current setting is correct. Nothing '
+                    + 'to change.' };
         }
         return { verdict: 'unclear',
             detail: testedName + ' read only ' + match + ' of ' + scored + '. Not a clean answer — widen the '
@@ -714,7 +734,9 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
             const v = scaleVerdict(match, noMatch, errored, agentName(other), otherKind);
             const verdict = v.verdict, detail = v.detail;
             setScaleTest(p => Object.assign({}, p, { [oid]: {
-                tested: other, kind: otherKind, photos: seen, match: match, noMatch: noMatch,
+                tested: other, kind: otherKind, photos: seen, scored: match + noMatch + errored,
+                notReviewed: Math.max(0, seen - (match + noMatch + errored)),
+                match: match, noMatch: noMatch,
                 errored: errored, verdict: verdict, detail: detail } }));
         } catch (e) {
             setScaleTest(p => Object.assign({}, p, { [oid]: {
@@ -730,7 +752,9 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
             const s = (v == null ? '' : String(v));
             return /[",\\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
         };
-        const lines = [head.join(',')].concat(flwRows.map(r => [
+        // Exports what is on screen, filters included. An export that silently disagrees with the
+        // table above it is worse than no export — you cannot tell which one is wrong.
+        const lines = [head.join(',')].concat(visibleRows.map(r => [
             r.flw, r.username, r.llo, oppLabel(r.opp), r.opp, scaleOf(r.opp), agentName(effectiveAgent(r.opp)),
             r.photos, r.assessed, r.match, r.noMatch, r.error, r.neverReviewed,
             r.pass, r.fail, r.pending, (r.pctPassed == null ? '' : r.pctPassed), r.reviewStatus,
@@ -1087,7 +1111,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                                         + (modeOf(id) === 'test' ? 'border-amber-400 text-amber-800' : 'border-gray-300')}>
                                                     <option value="dial">Dial (analog)</option>
                                                     <option value="digital">Digital</option>
-                                                    <option value="test">Test &amp; confirm…</option>
+                                                    <option value="test">Test &amp; confirm</option>
                                                 </select>
                                                 {meta(id).unverified ? (
                                                     <div className="text-xs text-amber-700 mt-1">
@@ -1130,21 +1154,37 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                                     {t.error ? (
                                                         <div className="text-xs text-red-700 mt-2">{t.error}</div>
                                                     ) : null}
+                                                    {/* 'keep' is a PASS, not a failure — the other agent being
+                                                        unable to read the scale is what confirms the setting. It was
+                                                        previously styled the same as a problem and read like one.
+                                                        Green, with a tick, and the headline says confirmed. */}
                                                     {t.verdict ? (
                                                         <div className={'mt-2 text-xs rounded p-2 border '
-                                                            + (t.verdict === 'inconclusive' || t.verdict === 'unclear'
-                                                                ? 'bg-gray-50 border-gray-200 text-gray-700'
-                                                                : 'bg-white border-amber-300 text-gray-800')}>
+                                                            + (t.verdict === 'keep'
+                                                                ? 'bg-green-50 border-green-300 text-green-900'
+                                                                : t.verdict === 'dial' || t.verdict === 'digital'
+                                                                    ? 'bg-amber-50 border-amber-400 text-amber-900'
+                                                                    : 'bg-gray-50 border-gray-200 text-gray-700')}>
                                                             <div className="font-semibold mb-0.5">
-                                                                {t.verdict === 'dial' || t.verdict === 'digital'
-                                                                    ? 'Looks like ' + t.verdict.toUpperCase()
-                                                                    : t.verdict === 'keep' ? 'Current setting looks right'
-                                                                        : t.verdict === 'unclear' ? 'Unclear' : 'Inconclusive'}
+                                                                {t.verdict === 'keep' ? (
+                                                                    <span><i className="fa-solid fa-circle-check mr-1"></i>
+                                                                        Confirmed — this opportunity is set correctly</span>
+                                                                ) : t.verdict === 'dial' || t.verdict === 'digital' ? (
+                                                                    <span><i className="fa-solid fa-triangle-exclamation mr-1"></i>
+                                                                        Change needed — this looks like {t.verdict.toUpperCase()}</span>
+                                                                ) : (
+                                                                    <span><i className="fa-solid fa-circle-question mr-1"></i>
+                                                                        {t.verdict === 'unclear' ? 'Unclear — no confident answer' : 'Inconclusive — too few verdicts'}</span>
+                                                                )}
                                                             </div>
                                                             <div>{t.detail}</div>
-                                                            <div className="text-gray-500 mt-1">
-                                                                {agentName(t.tested)} on {t.photos} photo(s): {t.match} match ·
-                                                                {' '}{t.noMatch} no match · {t.errored} errored
+                                                            {/* Reconciles: selected = scored + not reviewed. The counts
+                                                                below are of SCORED photos only, so stating the selected
+                                                                total on its own read as a mismatch (8 photos, 5 counts). */}
+                                                            <div className="text-gray-600 mt-1">
+                                                                Tested with {agentName(t.tested)} — {t.photos} photo(s) selected,
+                                                                {' '}{t.scored} scored{t.notReviewed ? ' (' + t.notReviewed + ' not reviewed)' : ''}:
+                                                                {' '}{t.match} match · {t.noMatch} no match · {t.errored} errored
                                                             </div>
                                                             {(t.verdict === 'dial' || t.verdict === 'digital') ? (
                                                                 <div className="mt-2">
@@ -1523,11 +1563,24 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                         <div>
                             <span className="text-sm font-semibold text-gray-800">Results by field worker</span>
                             <span className="ml-2 text-xs text-gray-400">
-                                {flwRows.length} worker{flwRows.length === 1 ? '' : 's'} · worst first · a worker stays
+                                {visibleRows.length}{visibleRows.length !== flwRows.length
+                                    ? ' of ' + flwRows.length : ''} worker{visibleRows.length === 1 ? '' : 's'} · worst first · a worker stays
                                 Pending until a person reviews their photos
                             </span>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <select value={lloFilter} onChange={e => setLloFilter(e.target.value)}
+                                className="px-2 py-1 text-sm border border-gray-300 rounded-lg">
+                                <option value="">All LLOs</option>
+                                {lloOptions.map(l => <option key={l} value={l}>{l}</option>)}
+                            </select>
+                            <input type="search" value={flwSearch} onChange={e => setFlwSearch(e.target.value)}
+                                placeholder="Find a field worker…"
+                                className="px-2 py-1 text-sm border border-gray-300 rounded-lg w-48" />
+                            {(lloFilter || flwSearch) ? (
+                                <button onClick={() => { setLloFilter(''); setFlwSearch(''); }}
+                                    className="text-xs underline text-gray-500 hover:text-gray-800">Clear</button>
+                            ) : null}
                             <button onClick={refreshSessions} className="text-xs underline text-gray-500 hover:text-gray-800">
                                 {loadingSessions ? 'Refreshing…' : 'Refresh'}
                             </button>
@@ -1559,7 +1612,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                 </tr>
                             </thead>
                             <tbody>
-                                {flwRows.map(r => {
+                                {visibleRows.map(r => {
                                     const d = detail[r.id] || {};
                                     const flagged = (d.rows || []).filter(x => x.ai_result === 'no_match' || x.ai_result === 'error');
                                     return [
