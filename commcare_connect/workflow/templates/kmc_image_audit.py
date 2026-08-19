@@ -724,9 +724,11 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
             });
             const all = await refreshSessions();
             let match = 0, noMatch = 0, errored = 0, seen = 0;
+            let probeSession = null;
             (all || []).forEach(s => {
                 if (s.tag !== SCALE_CHECK_TAG) return;
                 if ((s._opp || s.opportunity_id) !== oid) return;
+                if (probeSession == null) probeSession = s.id;
                 const st = s.assessment_stats || {};
                 seen += s.visit_count || 0;
                 match += st.ai_match || 0; noMatch += st.ai_no_match || 0; errored += st.ai_error || 0;
@@ -734,7 +736,8 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
             const v = scaleVerdict(match, noMatch, errored, agentName(other), otherKind);
             const verdict = v.verdict, detail = v.detail;
             setScaleTest(p => Object.assign({}, p, { [oid]: {
-                tested: other, kind: otherKind, photos: seen, scored: match + noMatch + errored,
+                tested: other, kind: otherKind, session: probeSession,
+                photos: seen, scored: match + noMatch + errored,
                 notReviewed: Math.max(0, seen - (match + noMatch + errored)),
                 match: match, noMatch: noMatch,
                 errored: errored, verdict: verdict, detail: detail } }));
@@ -1186,6 +1189,30 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                                                 {' '}{t.scored} scored{t.notReviewed ? ' (' + t.notReviewed + ' not reviewed)' : ''}:
                                                                 {' '}{t.match} match · {t.noMatch} no match · {t.errored} errored
                                                             </div>
+                                                            {t.session ? (
+                                                                <div className="mt-2">
+                                                                    <a href={'/audit/' + t.session + '/bulk/?opportunity_id=' + id}
+                                                                        target="_blank" rel="noopener noreferrer"
+                                                                        className="font-medium text-blue-700 hover:underline">
+                                                                        <i className="fa-solid fa-images mr-1"></i>
+                                                                        View the {t.scored} photo(s) this check judged →
+                                                                    </a>
+                                                                    <div className="text-gray-600 mt-1">
+                                                                        Look at them yourself before trusting the verdict. A dial scale has a
+                                                                        round clock face and a needle; a digital one has an LCD number.
+                                                                    </div>
+                                                                </div>
+                                                            ) : null}
+                                                            {meta(id).unverified ? (
+                                                                <div className="mt-2 text-gray-700">
+                                                                    <i className="fa-solid fa-lock mr-1"></i>
+                                                                    This opportunity stays marked <span className="font-medium">unconfirmed</span>
+                                                                    {' '}until its hardware is recorded in the workflow config — which this page
+                                                                    cannot write (there is no browser API for it). Once you have looked at the
+                                                                    photos, ask Claude: <span className="font-mono">"opportunity {id} is
+                                                                    {' '}{t.verdict === 'dial' || t.verdict === 'digital' ? t.verdict : scaleOf(id)}, confirm it"</span>.
+                                                                </div>
+                                                            ) : null}
                                                             {(t.verdict === 'dial' || t.verdict === 'digital') ? (
                                                                 <div className="mt-2">
                                                                     <button onClick={() => setMode(id, t.kind)}
