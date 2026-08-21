@@ -38,9 +38,14 @@ def _definition(**config_overrides):
 
 
 class _EagerResult:
-    def __init__(self, sessions=1, ok=True):
+    def __init__(self, sessions=1, ok=True, payload=None):
         self._ok = ok
-        self.result = {"sessions": [{"id": i} for i in range(sessions)]} if ok else "boom"
+        if not ok:
+            self.result = "boom"
+        elif payload is not None:
+            self.result = payload
+        else:
+            self.result = {"sessions": [{"id": i} for i in range(sessions)]}
 
     def successful(self):
         return self._ok
@@ -180,3 +185,41 @@ def test_run_state_carries_llo_summary_for_the_history_table(patched):
     state = patched["wda"].return_value.create_run.call_args.kwargs["initial_state"]
     assert state["llo_summary"] == "EHA / PIPN"
     assert state["selected_opps"] == [DIAL_OPP, DIGITAL_OPP]
+
+
+def test_empty_window_is_not_reported_as_failure(patched):
+    """A quiet week audits nothing, and that is correct. Reporting it as failed would have a weekly
+    schedule cry wolf until nobody reads it. Observed live: 10% of a two-day window rounded to zero
+    photos and the hook said status=failed with errors=[] — nothing to act on, and wrong."""
+    patched["task"].apply.return_value = _EagerResult(sessions=0)
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP]})
+    result = run_default(definition=definition, access_token="t", cadence="daily")
+    assert result["status"] == "empty"
+    assert result["sessions_created"] == 0
+    assert result["errors"] == []
+    assert result["empty_opportunities"] == [DIGITAL_OPP]
+
+
+def test_failure_inside_a_successful_task_is_recorded(patched):
+    """run_audit_creation can return success-shaped but carry an error — a live HTTP 500 from the
+    record-creation API did exactly that, and it vanished into an empty errors list."""
+    patched["task"].apply.return_value = _EagerResult(
+        sessions=0, payload={"success": False, "error": "500 from /export/labs_record/"}
+    )
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP]})
+    result = run_default(definition=definition, access_token="t", cadence="daily")
+    assert result["status"] == "failed"
+    assert any("500" in e for e in result["errors"])
+    assert result["empty_opportunities"] == []
+
+
+def test_partial_batch_reports_ready_and_names_the_empty_one(patched):
+    """One opportunity with data and one without is a success, not a failure - but the empty one
+    must still be named so nobody assumes it was audited."""
+    patched["task"].apply.side_effect = [_EagerResult(sessions=2), _EagerResult(sessions=0)]
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIAL_OPP, DIGITAL_OPP]})
+    result = run_default(definition=definition, access_token="t", cadence="daily")
+    assert result["status"] == "ready"
+    assert result["sessions_created"] == 2
+    assert result["empty_opportunities"] == [DIGITAL_OPP]
+    assert result["errors"] == []

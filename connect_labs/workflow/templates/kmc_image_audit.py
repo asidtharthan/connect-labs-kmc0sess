@@ -1964,6 +1964,7 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
 
     sessions_created = 0
     errors = []
+    empty = []  # opportunities whose window simply held no matching visits
     for opp_id in opp_ids:
         meta = opp_meta.get(str(opp_id)) or {}
         scale = meta.get("scale") or DIGITAL
@@ -1989,18 +1990,39 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
                 }
             )
             if eager.successful() and isinstance(eager.result, dict):
-                sessions_created += len(eager.result.get("sessions") or [])
+                result = eager.result
+                created = len(result.get("sessions") or [])
+                sessions_created += created
+                # A task can succeed having created nothing - either the window held no matching
+                # visits, or the audit app declined. Distinguish them: an explicit failure inside a
+                # successful task must not be swallowed, which is how a live HTTP 500 from the
+                # record-creation API surfaced as {status: failed, errors: []} with nothing to act on.
+                if not created:
+                    if result.get("success") is False or result.get("error"):
+                        errors.append("%s: %s" % (opp_id, result.get("error") or result))
+                    else:
+                        empty.append(opp_id)
             else:
                 errors.append("%s: %s" % (opp_id, eager.result))
         except Exception as exc:  # noqa: BLE001 - one bad opportunity must not end the batch
             logger.exception("kmc_image_audit scheduled run failed for opportunity %s", opp_id)
             errors.append("%s: %s" % (opp_id, exc))
 
+    # An empty window is a legitimate outcome, not a failure: a weekly schedule over a quiet period
+    # audits nothing and that is correct. Only report failure when something actually went wrong,
+    # otherwise a scheduled run cries wolf until nobody reads it.
+    if sessions_created:
+        status = "ready"
+    elif errors:
+        status = "failed"
+    else:
+        status = "empty"
     return {
         "run_id": run.id,
         "sessions_created": sessions_created,
-        "status": "ready" if sessions_created else "failed",
+        "status": status,
         "errors": errors,
+        "empty_opportunities": empty,
     }
 
 
