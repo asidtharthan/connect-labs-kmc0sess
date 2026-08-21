@@ -358,9 +358,12 @@ for r in bm.rows:
         _eng_started[r["subgroup"]].add(r["connect_id"])
 _eng_started["ALL"] = set().union(*_eng_started.values()) if _eng_started else set()  # program-wide distinct
 _eng_bad = []
+# Per-week arrays that must all be the same length. Deliberately lists only what the RENDER receives:
+# the rhythm counts, the `waiting` count and ended/end_date are stripped in build_dashboard_data
+# because nothing in the template reads them, so naming them here would fail on their absence.
 _eng_keys = ("weeks", "started", "finished_pct", "steady_pct", "incons_pct", "drop_pct",
              "waiting_pct", "inprog_pct", "rhythm_base", "finished", "new", "active", "slow",
-             "quiet", "waiting")
+             "quiet")
 
 
 def _eng_consistent(label, c, expect_started=None):
