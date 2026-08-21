@@ -148,7 +148,11 @@ def status_for(flw, cohort, topic):
     td = bm.cohort_info.get(cohort, {}).get("training_date")
     cad = bm.SUBGROUP_DESIGN[sg]["cadence"]
     if m:
-        if td and n < len(topics) and TODAY >= td + timedelta(days=n * cad):
+        # No exemption for the FINAL interview. Its deadline is a property of that interview -
+        # released, plus one gap to do it - so the last one has a deadline like every other. The old
+        # `n < len(topics)` carve-out meant nobody could ever be recorded as skipping their last
+        # interview, which is why a single-interview design showed an impossible 0% drop-off.
+        if td and TODAY >= td + timedelta(days=n * cad):
             return "available-missed-overdue"
         return "available-not-started"
     if not td or not cad:
@@ -204,7 +208,7 @@ def status_v2(flw, cohort, topic):
     started = bool(m) and m["is_started"] == "Y"
     td = bm.cohort_info.get(cohort, {}).get("training_date")
     rel = (td + timedelta(days=(n - 1) * cad_)) if (cad_ := bm.SUBGROUP_DESIGN[sg]["cadence"]) and td else None
-    nrel = (td + timedelta(days=n * cad_)) if td and n < len(topics) else None
+    nrel = (td + timedelta(days=n * cad_)) if td and cad_ else None   # final interview included
     avail = rel is not None and TODAY >= rel
     overdue = nrel is not None and TODAY >= nrel
     if completed:

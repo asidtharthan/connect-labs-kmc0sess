@@ -270,6 +270,17 @@ for _sg, _until in LINE_DOTTED_UNTIL.items():
     if _sg in line_active:
         line_active[_sg] = TODAY <= _until
 
+# ---- per-cohort grace override -------------------------------------------------------------------
+# How long after an interview is released does an FLW have to do it before it counts as missed?
+# The DEFAULT is one gap (that cohort's own interview spacing), which is why nothing is listed here:
+# a 3-day-gap cohort gets 3 days and a 14-day-gap cohort gets 14, automatically, with no tuning.
+#
+# Add an entry only when a cohort's owners want a different allowance, e.g. {"1PC1": 28} to give PANEL
+# cohort 1PC1 28 days instead of its usual 4. Keyed by cohort id, so cohorts of the same design can
+# differ. Deliberately a config dict rather than a dashboard control: every cohort is finished, so a
+# toggle would move nothing today and would only teach people that the controls do not work.
+GRACE_DAYS = {}
+
 
 # ---- Tables 1-3 ----
 def agg(keyfn, keys):
@@ -490,12 +501,29 @@ _sid2date = {e["sid"]: e["first"].date() for _lst in bm.ocs_by_key.values() for 
 _eng_flw_dates = defaultdict(lambda: defaultdict(set))     # sg -> flw -> {started session dates}
 _eng_comp_topic_dt = defaultdict(lambda: defaultdict(dict))  # sg -> flw -> {topic: earliest completed date}
 _eng_flw_llo = {}                                          # flw -> LLO (COWACDI / EHA), for the by-LLO split
+# sg -> flw -> [(deadline_date, completed_date_or_None)] for the interviews ACTUALLY PUT TO THAT FLW.
+# This is what replaced the flat 14-day silence rule: an FLW counts as dropped when one of their own
+# scheduled interviews went past its deadline unfinished. Only triggered slots appear here, so an FLW
+# who did everything that was sent to them is never blamed for interviews the bot never sent (the
+# `not-triggered` distinction the 2026-08-07 audit introduced for the matrix).
+_eng_deadlines = defaultdict(lambda: defaultdict(list))
+_eng_flw_cad = {}                                          # flw -> their own cohort's gap, for the ALL view
 _cohort_llo = getattr(bm, "cohort_llo", {})
 for r in bm.rows:
     _llo = _cohort_llo.get(r["cohort_id"])
     if _llo and r["connect_id"] not in _eng_flw_llo:
         _eng_flw_llo[r["connect_id"]] = _llo
     _d = _sid2date.get(r.get("matched_session_id"))
+    _rsg, _rflw = r["subgroup"], r["connect_id"]
+    _rcad = bm.SUBGROUP_DESIGN[_rsg]["cadence"] if _rsg in bm.SUBGROUP_DESIGN else None
+    _rtrain = bm.cohort_info.get(r["cohort_id"], {}).get("training_date")
+    if _rcad:
+        _eng_flw_cad.setdefault(_rflw, _rcad)
+        if _rtrain and r.get("interview_n"):
+            _eng_deadlines[_rsg][_rflw].append((
+                tsl.deadline_for(int(r["interview_n"]), _rtrain, _rcad, GRACE_DAYS.get(r["cohort_id"])),
+                _d if r.get("is_completed") == "Y" else None,
+            ))
     if r.get("is_started") == "Y" and _d:
         _eng_flw_dates[r["subgroup"]][r["connect_id"]].add(_d)
     if r.get("is_completed") == "Y" and _d:
@@ -550,12 +578,23 @@ def _eng_maxgap(ds):
     return max((b - a).days for a, b in zip(ds, ds[1:])) if len(ds) > 1 else 0
 
 
-def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date):
+def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date, deadlines=None, cad_of=None,
+                 gap_of=None):
     """Per-week series for one subgroup (or None if no sessions).
 
     Adds a FINISHED bucket (completed all scheduled interviews) that outranks the silence buckets, so a
     completer's inactivity reads as "done", not "dropped" (Neal's cross-cohort fix). The grid ends at the
     last actual session date, so an ended cohort naturally freezes there rather than trailing to today.
+
+    DROPPED is not a silence rule. It asks whether one of the FLW's own scheduled interviews went past
+    its deadline unfinished (`deadlines`, see topic_status_lib.dropped_at). The old rule was a flat 14
+    days for every cohort, which meant an ABT2-A worker waiting exactly on schedule (14-day gap) was
+    called a drop-out while a TRE worker (3-day gap) got nearly five missed turns of slack. It also
+    swept in FLWs who did everything that was ever sent to them, because the schedule stalled rather
+    than the person.
+
+    `cad_of` / `gap_of` map an FLW to their own cohort's gap and gap-threshold, so the ALL view stops
+    applying one 8-day number to eleven differently-paced designs. `gap_thresh` remains the fallback.
     """
     all_dates = [d for ds in flw_dates.values() for d in ds]
     if not all_dates:
@@ -566,11 +605,11 @@ def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date):
         Ws.append(w); w += timedelta(days=7)
     Ws.append(last)                          # final point = data's last date (freezes ended cohorts)
     weeks, started_s = [], []
-    steady_p, incons_p, drop_p, fin_p = [], [], [], []
-    new_s, active_s, slow_s, quiet_s, finst_s = [], [], [], [], []
+    steady_p, incons_p, drop_p, fin_p, wait_p = [], [], [], [], []
+    new_s, active_s, slow_s, quiet_s, finst_s, wait_s = [], [], [], [], [], []
     prevW = None
     for W in Ws:
-        started = steady = incons = drop = new = active = slow = quiet = fin = 0
+        started = steady = incons = drop = new = active = slow = quiet = fin = wait = 0
         for _flw, ds in flw_dates.items():
             dsW = sorted(d for d in ds if d <= W)
             if not dsW:
@@ -581,26 +620,35 @@ def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date):
             mg = _eng_maxgap(dsW)
             _fdate = finished_dates.get(_flw)
             is_finished = _fdate is not None and _fdate <= W
-            if is_finished:         fin += 1         # FINISHED outranks the silence buckets
-            elif sil > 14:          drop += 1        # then: dropped -> inconsistent -> steady
-            elif mg > gap_thresh or sil > gap_thresh: incons += 1
-            else:                   steady += 1
+            _gt = (gap_of or {}).get(_flw, gap_thresh)
+            _cad = (cad_of or {}).get(_flw) or max(_gt // 2, 1)
+            _prog = tsl.progress_at((deadlines or {}).get(_flw, ()), W, _fdate)
+            if is_finished:         fin += 1         # FINISHED outranks the other buckets
+            elif _prog == "dropped":  drop += 1      # let a sent interview go past its deadline
+            elif _prog == "waiting":  wait += 1      # did everything sent; schedule sent no more
+            elif mg > _gt or sil > _gt: incons += 1  # mid-run, with a gap longer than two of theirs
+            else:                   steady += 1      # mid-run and on pace
             if not is_finished:                      # FINISHED outranks new/active/slow/quiet too
                 is_new = (fd > prevW) if prevW is not None else (fd >= Ws[0] - timedelta(days=6))
-                if is_new:      new += 1             # then: new -> active -> slow -> quiet
-                elif sil <= 7:  active += 1
-                elif sil <= 14: slow += 1
-                else:           quiet += 1
+                # Bands are one gap / two gaps rather than a flat 7 and 14, so "active" means the same
+                # thing (on pace) in a 3-day cohort and a 14-day one.
+                if is_new:              new += 1     # then: new -> active -> slow -> quiet
+                elif sil <= _cad:       active += 1
+                elif sil <= 2 * _cad:   slow += 1
+                else:                   quiet += 1
         weeks.append(W.isoformat()); started_s.append(started)
         steady_p.append(round(100 * steady / started)); incons_p.append(round(100 * incons / started))
         drop_p.append(round(100 * drop / started)); fin_p.append(round(100 * fin / started))
+        wait_p.append(round(100 * wait / started))
         new_s.append(new); active_s.append(active); slow_s.append(slow); quiet_s.append(quiet)
-        finst_s.append(fin)
+        finst_s.append(fin); wait_s.append(wait)
         prevW = W
     ended = end_date is not None and TODAY > end_date
     return {"weeks": weeks, "started": started_s,
             "finished_pct": fin_p, "steady_pct": steady_p, "incons_pct": incons_p, "drop_pct": drop_p,
+            "waiting_pct": wait_p,
             "finished": finst_s, "new": new_s, "active": active_s, "slow": slow_s, "quiet": quiet_s,
+            "waiting": wait_s,
             "gap_thresh": gap_thresh, "total_started": started_s[-1],
             "ended": ended, "end_date": end_date.isoformat() if end_date else None}
 
@@ -611,36 +659,44 @@ for _sg in SG_PRESENT:
     _dlen = len(bm.SUBGROUP_DESIGN[_sg]["topics"])
     _gt, _end = 2 * bm.SUBGROUP_DESIGN[_sg]["cadence"], _eng_end.get(_sg)
     _fd, _fn = _eng_flw_dates.get(_sg, {}), _eng_finished_dates(_sg, _dlen)
-    _ce = _eng_compute(_fd, _fn, _gt, _end)
+    _dl = _eng_deadlines.get(_sg, {})
+    _ce = _eng_compute(_fd, _fn, _gt, _end, _dl, _eng_flw_cad)
     if _ce:
         cohort_engagement[_sg] = _ce
     _llo_out = {}
     for _llo in ("COWACDI", "EHA"):
         _fdl, _fnl = _eng_filter_llo(_fd, _fn, _llo)
-        _cl = _eng_compute(_fdl, _fnl, _gt, _end)
+        _cl = _eng_compute(_fdl, _fnl, _gt, _end, _dl, _eng_flw_cad)
         if _cl:
             _llo_out[_llo] = _cl
     if _llo_out:
         cohort_engagement_llo[_sg] = _llo_out
 # "ALL" = program-wide: every started FLW (distinct), each FLW's dates = the UNION of their real-topic
 # session dates across all subgroups. Each FLW's "finished" uses their OWN subgroup's schedule length.
-# Cadences are mixed, so steady/inconsistent uses an 8-day default (2x the 4-day modal cadence).
+# Cadences are mixed, so each FLW is judged against their OWN cohort's gap (_eng_flw_gap) rather than
+# the single 8-day number this used to apply to all eleven designs — 8 days was 2x the modal 4-day
+# cadence and therefore right for PANEL and wrong for the other ten.
 _eng_all_dates = defaultdict(set)
 _eng_all_finished = {}
+_eng_all_deadlines = defaultdict(list)
 for _sg_d in SG_PRESENT:
     _fd = _eng_finished_dates(_sg_d, len(bm.SUBGROUP_DESIGN[_sg_d]["topics"]))
     for _flw, _ds in _eng_flw_dates.get(_sg_d, {}).items():
         _eng_all_dates[_flw] |= _ds
+    for _flw, _dls in _eng_deadlines.get(_sg_d, {}).items():
+        _eng_all_deadlines[_flw].extend(_dls)
     for _flw, _dt in _fd.items():
         if _flw not in _eng_all_finished or _dt < _eng_all_finished[_flw]:
             _eng_all_finished[_flw] = _dt
-_ce_all = _eng_compute(_eng_all_dates, _eng_all_finished, 8, None)
+_eng_flw_gap = {_f: 2 * _c for _f, _c in _eng_flw_cad.items()}
+_ce_all = _eng_compute(_eng_all_dates, _eng_all_finished, 8, None, _eng_all_deadlines,
+                       _eng_flw_cad, _eng_flw_gap)
 if _ce_all:
     cohort_engagement["ALL"] = _ce_all
     _all_llo = {}
     for _llo in ("COWACDI", "EHA"):
         _fdl, _fnl = _eng_filter_llo(_eng_all_dates, _eng_all_finished, _llo)
-        _cl = _eng_compute(_fdl, _fnl, 8, None)
+        _cl = _eng_compute(_fdl, _fnl, 8, None, _eng_all_deadlines, _eng_flw_cad, _eng_flw_gap)
         if _cl:
             _all_llo[_llo] = _cl
     if _all_llo:
@@ -648,6 +704,84 @@ if _ce_all:
 print(f"[eng] cohort_engagement: "
       f"{[(sg, cohort_engagement[sg]['total_started'], cohort_engagement[sg]['finished'][-1]) for sg in cohort_engagement]}")
 print(f"[eng] by-LLO splits for: {sorted(cohort_engagement_llo)}")
+
+# ---- per-COHORT drop-off, each scored at its OWN end date (Ali's task 2) --------------------------
+# The weekly series above pools a whole design, and its "ended" flag uses the LATEST cohort in that
+# design. That scores a TRS cohort which closed on 15 April against the same calendar as one that
+# closed on 22 May, 37 days later. Here every cohort gets its own end date and is measured there, so
+# the numbers are comparable across designs and across start dates.
+def _cohort_start(c):
+    """A cohort's start date: its Connect invitation date, else the first interview trigger we saw.
+
+    The fallback matters. cohort_info's training_date comes from the Connect snapshot, which is missing
+    the newer cohorts (locally: all of PANEL, EXT, 2WT and ABT3 - 10 of 72) whenever the Connect pull is
+    stale, the documented 2026-08-04 case. Without a fallback those cohorts would silently vanish from
+    this chart, and they include PANEL. This is the same signal the dotted funnel line already falls
+    back to, so the two stay consistent.
+    """
+    td = bm.cohort_info.get(c, {}).get("training_date")
+    if td:
+        return td, "invitation"
+    ft = _cohort_first_trig.get(c)
+    return (ft.date(), "first trigger") if ft else (None, None)
+
+
+_coh_dl = defaultdict(lambda: defaultdict(list))    # cohort -> flw -> [(deadline, completed_or_None)]
+_coh_done = defaultdict(lambda: defaultdict(dict))  # cohort -> flw -> {topic: completed date}
+_coh_seen = defaultdict(set)
+for r in bm.rows:
+    _c, _f, _sg = r["cohort_id"], r["connect_id"], r["subgroup"]
+    if _sg not in bm.SUBGROUP_DESIGN:
+        continue
+    _cad = bm.SUBGROUP_DESIGN[_sg]["cadence"]
+    _tr = _cohort_start(_c)[0]
+    _d = _sid2date.get(r.get("matched_session_id"))
+    if r.get("is_started") == "Y" and _d:
+        _coh_seen[_c].add(_f)
+    if _tr and _cad and r.get("interview_n"):
+        _coh_dl[_c][_f].append((tsl.deadline_for(int(r["interview_n"]), _tr, _cad, GRACE_DAYS.get(_c)),
+                                _d if r.get("is_completed") == "Y" else None))
+    if r.get("is_completed") == "Y" and _d:
+        _coh_done[_c][_f][r["topic_code"]] = _d
+
+cohort_dropoff = []
+for _c, _inf in sorted(bm.cohort_info.items()):
+    _sg = _inf["subgroup"]
+    if _sg not in bm.SUBGROUP_DESIGN:
+        continue
+    _tops = bm.SUBGROUP_DESIGN[_sg]["topics"]
+    _cad = bm.SUBGROUP_DESIGN[_sg]["cadence"]
+    _tr, _tr_src = _cohort_start(_c)
+    if not _tr or not _cad:
+        continue                                     # no start date at all: cannot say when it ended
+    _end = tsl.cohort_end(_tops, _tr, _cad, GRACE_DAYS.get(_c))
+    _asof = min(_end, TODAY)                         # a cohort still running is scored as it stands
+    _tally = defaultdict(int)
+    for _f in sorted(_coh_seen.get(_c, ())):
+        _dts = _coh_done.get(_c, {}).get(_f, {})
+        _fdate = sorted(_dts.values())[len(_tops) - 1] if len(_dts) >= len(_tops) else None
+        _tally[tsl.progress_at(_coh_dl.get(_c, {}).get(_f, ()), _asof, _fdate)] += 1
+    _n = sum(_tally.values())
+    if not _n:
+        continue
+    # Compact on purpose: 72 rows x verbose keys came to 18.7 KB against 34 KB of render headroom.
+    # Only what cannot be derived downstream is shipped. The render recovers subgroup from cohortSG,
+    # interviews/gap from subgroupDesign, percentages and in-progress from the counts, and "closed"
+    # from `e` against today. `g` appears only when a cohort's grace differs from its gap, and `x`
+    # only when the start date came from the trigger fallback rather than a Connect invitation.
+    _row = {"c": _c, "s": _tr.isoformat(), "e": _end.isoformat(), "n": _n,
+            "f": _tally["finished"], "d": _tally["dropped"], "w": _tally["waiting"]}
+    if GRACE_DAYS.get(_c, _cad) != _cad:
+        _row["g"] = GRACE_DAYS[_c]
+    if _tr_src != "invitation":
+        _row["x"] = 1
+    cohort_dropoff.append(_row)
+_cd_tot = sum(c["n"] for c in cohort_dropoff)
+_cd_f, _cd_d, _cd_w = (sum(c[k] for c in cohort_dropoff) for k in ("f", "d", "w"))
+print(f"[eng] cohort_dropoff: {len(cohort_dropoff)} cohorts, {_cd_tot} FLW-cohort pairs, "
+      f"finished={_cd_f} dropped={_cd_d} waiting={_cd_w} "
+      f"in_progress={_cd_tot - _cd_f - _cd_d - _cd_w} "
+      f"(fallback start dates: {sum(1 for c in cohort_dropoff if c.get('x'))})")
 
 payload = {
     "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),  # stamped at build; render shows this
@@ -671,6 +805,7 @@ payload = {
     "line_status": line_status,       # per-point release status (not-available/in-progress/settled)
     "line_active": line_active,       # per-subgroup: still actively triggering -> dotted funnel line
     "deimpact": deimpact,             # {sg: {last_n, count}} penult/last artifact summary
+    "cohort_dropoff": cohort_dropoff,  # per-cohort outcome scored at that cohort's OWN end date
     "table1": t1,
     "table2": t2,
     "table3": t3,

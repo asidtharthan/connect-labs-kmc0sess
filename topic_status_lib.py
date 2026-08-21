@@ -40,7 +40,32 @@ STATE_IDX = {s: i for i, s in enumerate(STATES)}
 STATES_APPLICABLE = [s for s in STATES if s != "not-applicable"]
 
 
-def status_for(topic, topics, master_row, training_date, cadence, today):
+def release_for(n, training_date, cadence):
+    """The date interview `n` becomes available: the cohort start plus its position in the schedule."""
+    return training_date + timedelta(days=(n - 1) * cadence)
+
+
+def deadline_for(n, training_date, cadence, grace=None):
+    """The date interview `n` stops being open.
+
+    Released at (n-1) x cadence, then one further cadence to actually do it - i.e. the deadline is the
+    moment the NEXT interview would have fallen due. `grace` overrides that one-cadence allowance for a
+    cohort whose owners want it longer or shorter; with grace=cadence (the default) this reproduces the
+    original rule exactly.
+    """
+    return training_date + timedelta(days=(n - 1) * cadence + (cadence if grace is None else grace))
+
+
+def cohort_end(topics, training_date, cadence, grace=None):
+    """When a cohort is over: the deadline of its LAST interview.
+
+    Used to score each cohort at its own end date. Cohorts of one design start weeks apart, so a single
+    date shared across the design scores early cohorts against a calendar they never ran in.
+    """
+    return deadline_for(len(topics), training_date, cadence, grace)
+
+
+def status_for(topic, topics, master_row, training_date, cadence, today, grace=None):
     """State of one (FLW, cohort, topic) slot.
 
     `master_row` is the FLW's master row for this topic in this cohort, or None. A master row exists
@@ -55,8 +80,16 @@ def status_for(topic, topics, master_row, training_date, cadence, today):
     if m and m["is_started"] == "Y":
         return "started-not-completed"
     if m:
-        # triggered, but no session: the FLW was actually asked, so the window language is fair
-        if training_date and cadence and n < len(topics) and today >= training_date + timedelta(days=n * cadence):
+        # Triggered, but no session: the FLW was actually asked, so the window language is fair.
+        #
+        # The FINAL interview used to be exempt here (`n < len(topics)`), a leftover from the upstream
+        # scheduling bug where a terminal frequency_days=9999 left the last interview with no next date.
+        # The exemption meant nobody could ever be marked as having skipped their last interview: a
+        # 13-of-13 PANEL worker who dropped the last one read as still-open forever, and 2WT - a
+        # single-interview design - could never register a miss at all, showing an impossible 0%
+        # drop-off. The deadline is a property of THIS interview (released, plus one gap to do it), so
+        # it applies to the last one exactly like every other.
+        if training_date and cadence and today >= deadline_for(n, training_date, cadence, grace):
             return "available-missed-overdue"
         return "available-not-started"
     # no trigger form for this slot
@@ -65,13 +98,59 @@ def status_for(topic, topics, master_row, training_date, cadence, today):
         # so training_date is None — the documented 2026-08-04 case). Without a schedule we cannot say
         # the interview was DUE, so we must not accuse the pipeline of missing it either.
         return "available-not-started"
-    if today < training_date + timedelta(days=(n - 1) * cadence):
+    if today < release_for(n, training_date, cadence):
         return "not-available-yet"  # not due yet — nothing has gone wrong
     return "not-triggered"  # due per the schedule and never sent
 
 
-def status_idx(topic, topics, master_row, training_date, cadence, today):
-    return STATE_IDX[status_for(topic, topics, master_row, training_date, cadence, today)]
+def status_idx(topic, topics, master_row, training_date, cadence, today, grace=None):
+    return STATE_IDX[status_for(topic, topics, master_row, training_date, cadence, today, grace)]
+
+
+# States that mean "an interview was put to this FLW and its window has since closed without a finished
+# session". This is the shared definition of disengagement: the retention graphs used to run their own
+# flat 14-day silence rule instead, which meant a 14-day-gap cohort called an on-schedule worker a
+# drop-out while a 3-day-gap cohort gave them nearly five missed turns of slack.
+OVERDUE_STATES = frozenset({"available-missed-overdue"})
+
+
+def progress_at(deadlines, asof, finished_date=None):
+    """Where does this FLW stand as of `asof`? One of four states.
+
+    `deadlines` is an iterable of (deadline_date, completed_date_or_None) covering the interviews
+    ACTUALLY SENT to this FLW - never slots the bot skipped.
+
+      finished     completed their whole design. Outranks everything.
+      dropped      an interview they were sent went past its deadline unfinished.
+      in-progress  they have a live interview whose deadline has not arrived yet.
+      waiting      they completed everything sent to them, but their design is not complete -
+                   nothing further was ever sent, so there is nothing for them to do.
+
+    `waiting` exists because folding it into `dropped` blames FLWs for a schedule that stopped, and
+    folding it into steady/inconsistent reads as "they are fine" when they never finished. On live data
+    it is 491 FLW-cohort pairs, 15% of starters and 69% of TRE, so it is far too large to mislabel.
+
+    Dropped is recoverable on purpose: complete the interview late and the FLW stops counting as
+    dropped, matching how the old silence rule behaved.
+    """
+    if finished_date is not None and finished_date <= asof:
+        return "finished"
+    overdue = live = False
+    for dl, done in deadlines:
+        if done is not None and done <= asof:
+            continue  # done by now, nothing outstanding for this slot
+        if dl <= asof:
+            overdue = True
+        else:
+            live = True
+    if overdue:
+        return "dropped"
+    return "in-progress" if live else "waiting"
+
+
+def dropped_at(deadlines, asof, finished_date=None):
+    """Thin wrapper kept for callers that only need the boolean."""
+    return progress_at(deadlines, asof, finished_date) == "dropped"
 
 
 def universe_for(cohort, cohort_flws, cohort_flw_meta, interviewed_by_cohort):

@@ -199,6 +199,9 @@ out = {
     "connectPendingSubgroups": payload.get("connect_pending_subgroups", []),
     "cohortEngagement": payload.get("cohort_engagement", {}),
     "cohortEngagementLLO": payload.get("cohort_engagement_llo", {}),
+    # Per-cohort outcome, each cohort scored at its OWN end date rather than a date shared across its
+    # whole design. Feeds the cross-cohort drop-off comparison.
+    "cohortDropoff": payload.get("cohort_dropoff", []),
     "flwEngagement": bfa.aggregate(bfa.build_records()),  # per-FLW cross-cohort analysis (compact aggregates)
     "granular": granular,
     "granular_total": len(bm.rows),

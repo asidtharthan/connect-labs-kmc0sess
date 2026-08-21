@@ -42,6 +42,19 @@ PERSONA_ORDER = [
 ]
 
 
+# Cadence-relative thresholds. Every "days" threshold below used to be a fixed number - 14 days
+# recently-active, 21 days for a break, 14-60 days for the at-risk pool - applied to designs whose
+# interviews are anywhere from 3 to 14 days apart. Two gaps means the same thing in every design;
+# 14 days does not (it is one interview in ABT2-A and nearly five in TRE). Falls back to 7 days when
+# a design has no cadence, e.g. a single-interview cohort with nothing to space.
+FALLBACK_GAP_DAYS = 7
+
+
+def _gap(x):
+    """One gap for this FLW: the spacing their own schedule asks for."""
+    return x.get("design_cadence_days") or FALLBACK_GAP_DAYS
+
+
 def build_records():
     """One record per unique FLW who started ≥1 interview, unioned across all their cohorts."""
     TODAY, DEMO, DESIGN = bm.TODAY, bm.flw_demographics, bm.SUBGROUP_DESIGN
@@ -262,8 +275,9 @@ def build_records():
     def persona(x):
         cr, depth, started = x["completion_rate"], x["progression_depth"], x["interviews_started"]
         rec, mg, mc = x["recency_days"], x["max_gap_days"], x["median_cadence_days"]
-        steady = (mc is None) or (mg <= 2 * mc) or mg <= 10
-        reengaged = mc is not None and mg >= 21 and rec is not None and rec <= 14
+        cad = _gap(x)
+        steady = (mc is None) or (mg <= 2 * mc) or mg <= 2 * cad
+        reengaged = mc is not None and mg >= 3 * cad and rec is not None and rec <= 2 * cad
         if started == 1 and not x["finished_any"]:
             return "One-and-done"
         if x["finished_any"] and cr >= 0.8 and steady:
@@ -282,16 +296,16 @@ def build_records():
         return "Lapsed"
 
     for x in records:
-        r = x["recency_days"]
+        r, _c = x["recency_days"], _gap(x)
         R = (
             5
-            if r is not None and r <= 7
+            if r is not None and r <= _c
             else 4
-            if r is not None and r <= 14
+            if r is not None and r <= 2 * _c
             else 3
-            if r is not None and r <= 30
+            if r is not None and r <= 4 * _c
             else 2
-            if r is not None and r <= 60
+            if r is not None and r <= 8 * _c
             else 1
         )
         cr = x["completion_rate"]
@@ -418,7 +432,7 @@ def aggregate(records):
         if not x["finished_any"]
         and x["cohorts_offered_full"] > 0
         and x["recency_days"] is not None
-        and 14 <= x["recency_days"] <= 60
+        and 2 * _gap(x) <= x["recency_days"] <= 8 * _gap(x)
     ]
     unfinished_total = sum(1 for x in records if not x["finished_any"])
     combos = Counter(x["subgroups"] for x in records if x["n_cohorts"] > 1)

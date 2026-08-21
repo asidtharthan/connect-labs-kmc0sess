@@ -359,7 +359,7 @@ for r in bm.rows:
 _eng_started["ALL"] = set().union(*_eng_started.values()) if _eng_started else set()  # program-wide distinct
 _eng_bad = []
 _eng_keys = ("weeks", "started", "finished_pct", "steady_pct", "incons_pct", "drop_pct",
-             "finished", "new", "active", "slow", "quiet")
+             "waiting_pct", "finished", "new", "active", "slow", "quiet", "waiting")
 
 
 def _eng_consistent(label, c, expect_started=None):
@@ -369,8 +369,13 @@ def _eng_consistent(label, c, expect_started=None):
     for i in range(len(c["weeks"])):
         if c["finished"][i] + c["new"][i] + c["active"][i] + c["slow"][i] + c["quiet"][i] != c["started"][i]:
             _eng_bad.append(f"{label}[{i}]: Panel3 stack != Panel1 started")
-        if not (99 <= c["finished_pct"][i] + c["steady_pct"][i] + c["incons_pct"][i] + c["drop_pct"][i] <= 101):
-            _eng_bad.append(f"{label}[{i}]: quality % sum != 100")
+        # WAITING joined the quality split: FLWs who completed everything sent to them but whose
+        # design never finished because nothing further was sent. Previously they were absorbed into
+        # steady/inconsistent, which read as "on track" for people who had in fact stopped.
+        _q = (c["finished_pct"][i] + c["steady_pct"][i] + c["incons_pct"][i] + c["drop_pct"][i]
+              + c["waiting_pct"][i])
+        if not (99 <= _q <= 101):
+            _eng_bad.append(f"{label}[{i}]: quality % sum != 100 ({_q})")
     if any(c["started"][i] > c["started"][i + 1] for i in range(len(c["started"]) - 1)):
         _eng_bad.append(f"{label}: started not monotonic")
     if c["total_started"] != (c["started"][-1] if c["started"] else 0):
