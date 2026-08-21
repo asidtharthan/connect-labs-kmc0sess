@@ -596,6 +596,19 @@ def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date, deadlines=None
 
     `cad_of` / `gap_of` map an FLW to their own cohort's gap and gap-threshold, so the ALL view stops
     applying one 8-day number to eleven differently-paced designs. `gap_thresh` remains the fallback.
+
+    TWO INDEPENDENT READINGS, not one stack:
+
+      OUTCOME  finished / dropped / waiting / in-progress - mutually exclusive, sums to 100.
+      RHYTHM   steady / inconsistent - computed for EVERY starter with 2+ interviews, sums to 100.
+
+    Rhythm used to be the residual of the outcome stack, which meant it only ever described FLWs who
+    were in none of the other buckets. Once every cohort closed, that residual emptied and the KPI
+    tiles showed 0% steady. Rhythm is not an outcome, it is a property of how someone worked, and a
+    finisher has a rhythm just as much as a dropout does.
+
+    Rhythm uses the largest gap BETWEEN interviews, not current silence. Silence keeps growing after
+    someone stops, so a finisher would drift into "inconsistent" purely because the calendar moved.
     """
     all_dates = [d for ds in flw_dates.values() for d in ds]
     if not all_dates:
@@ -606,11 +619,12 @@ def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date, deadlines=None
         Ws.append(w); w += timedelta(days=7)
     Ws.append(last)                          # final point = data's last date (freezes ended cohorts)
     weeks, started_s = [], []
-    steady_p, incons_p, drop_p, fin_p, wait_p = [], [], [], [], []
-    new_s, active_s, slow_s, quiet_s, finst_s, wait_s = [], [], [], [], [], []
+    steady_p, incons_p, drop_p, fin_p, wait_p, inprog_p = [], [], [], [], [], []
+    new_s, active_s, slow_s, quiet_s, finst_s, wait_s, rbase_s = [], [], [], [], [], [], []
     prevW = None
     for W in Ws:
         started = steady = incons = drop = new = active = slow = quiet = fin = wait = 0
+        inprog = rbase = 0
         for _flw, ds in flw_dates.items():
             dsW = sorted(d for d in ds if d <= W)
             if not dsW:
@@ -624,11 +638,17 @@ def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date, deadlines=None
             _gt = (gap_of or {}).get(_flw, gap_thresh)
             _cad = (cad_of or {}).get(_flw) or max(_gt // 2, 1)
             _prog = tsl.progress_at((deadlines or {}).get(_flw, ()), W, _fdate)
-            if is_finished:         fin += 1         # FINISHED outranks the other buckets
+            # ---- OUTCOME: where they ended up. Mutually exclusive.
+            if is_finished:           fin += 1       # FINISHED outranks the other outcomes
             elif _prog == "dropped":  drop += 1      # let a sent interview go past its deadline
             elif _prog == "waiting":  wait += 1      # did everything sent; schedule sent no more
-            elif mg > _gt or sil > _gt: incons += 1  # mid-run, with a gap longer than two of theirs
-            else:                   steady += 1      # mid-run and on pace
+            else:                     inprog += 1    # still has a live interview in hand
+            # ---- RHYTHM: how they worked. Independent of the outcome, so a finisher counts too.
+            # Needs at least two interviews - one interview has no gap to judge.
+            if len(dsW) >= 2:
+                rbase += 1
+                if mg > _gt:        incons += 1
+                else:               steady += 1
             if not is_finished:                      # FINISHED outranks new/active/slow/quiet too
                 is_new = (fd > prevW) if prevW is not None else (fd >= Ws[0] - timedelta(days=6))
                 # Bands are one gap / two gaps rather than a flat 7 and 14, so "active" means the same
@@ -638,16 +658,20 @@ def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date, deadlines=None
                 elif sil <= 2 * _cad:   slow += 1
                 else:                   quiet += 1
         weeks.append(W.isoformat()); started_s.append(started)
-        steady_p.append(round(100 * steady / started)); incons_p.append(round(100 * incons / started))
+        # outcome shares are of everyone who started; rhythm shares are of those with 2+ interviews
         drop_p.append(round(100 * drop / started)); fin_p.append(round(100 * fin / started))
-        wait_p.append(round(100 * wait / started))
+        wait_p.append(round(100 * wait / started)); inprog_p.append(round(100 * inprog / started))
+        _rb = rbase or 1
+        steady_p.append(round(100 * steady / _rb)); incons_p.append(round(100 * incons / _rb))
         new_s.append(new); active_s.append(active); slow_s.append(slow); quiet_s.append(quiet)
-        finst_s.append(fin); wait_s.append(wait)
+        finst_s.append(fin); wait_s.append(wait); rbase_s.append(rbase)
         prevW = W
     ended = end_date is not None and TODAY > end_date
     return {"weeks": weeks, "started": started_s,
-            "finished_pct": fin_p, "steady_pct": steady_p, "incons_pct": incons_p, "drop_pct": drop_p,
-            "waiting_pct": wait_p,
+            # outcome: sums to 100 across all starters
+            "finished_pct": fin_p, "drop_pct": drop_p, "waiting_pct": wait_p, "inprog_pct": inprog_p,
+            # rhythm: sums to 100 across starters with 2+ interviews (rhythm_base)
+            "steady_pct": steady_p, "incons_pct": incons_p, "rhythm_base": rbase_s,
             "finished": finst_s, "new": new_s, "active": active_s, "slow": slow_s, "quiet": quiet_s,
             "waiting": wait_s,
             "gap_thresh": gap_thresh, "total_started": started_s[-1],

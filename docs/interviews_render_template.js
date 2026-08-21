@@ -432,9 +432,9 @@ function WorkflowUI(props) {
         base: "FLWs who started ≥ 1 interview",
         gotcha: "Introduced 2026-08-21. These FLWs were previously absorbed into Steady/Inconsistent, which reads as “on track” for people who in fact never finished. On the live data they were 491 FLW-cohort pairs, 15% of starters and 69% of TRE, so they are far too many to mislabel. They are NOT drop-outs and must not be added to a drop-off figure." },
       { g: "Engagement", name: "Steady vs Inconsistent", where: "Funnels → Cohort Engagement",
-        how: "Steady = never a gap longer than the cohort’s gap threshold. Inconsistent = at least one longer gap. The threshold is twice that cohort’s interview cadence. Applies only to FLWs still mid-schedule - a finisher is Finished, and someone with an overdue or exhausted schedule is Dropped or Waiting.",
-        base: "FLWs who started ≥ 1 interview",
-        gotcha: "Cadence-relative on purpose, so a 3-day and a 14-day cohort are judged fairly. It is therefore NOT a fixed number of days across subgroups. On the ALL COHORTS view each FLW is now judged against their OWN design’s cadence; until 2026-08-21 that view applied a single 8-day threshold, which was twice the modal 4-day cadence and therefore right for PANEL and wrong for the other ten designs." },
+        how: "Steady = never a gap longer than the cohort’s gap threshold. Inconsistent = at least one longer gap. The threshold is twice that cohort’s interview cadence. This is a SEPARATE reading from the outcome (Finished / Dropped / Waiting / In progress), not one of its buckets - a finisher has a rhythm just as much as a dropout does, and the two pairs each sum to 100% on their own base. Measured on the largest gap BETWEEN interviews, not time since the last one.",
+        base: "Starters with 2+ interviews (rhythm_base). One interview gives no gap to judge, so a single-interview design reads “not measurable” rather than 0%",
+        gotcha: "Cadence-relative on purpose, so a 3-day and a 14-day cohort are judged fairly. It is therefore NOT a fixed number of days across subgroups. On the ALL COHORTS view each FLW is now judged against their OWN design’s cadence; until 2026-08-21 that view applied a single 8-day threshold, which was twice the modal 4-day cadence and therefore right for PANEL and wrong for the other ten designs. Also from 2026-08-21: rhythm was previously the LEFTOVER of the outcome stack, so it only described FLWs in none of the other buckets - once every cohort closed it emptied to 0% and the KPI tile lost the signal entirely. Reading an earlier week was rejected because the last non-zero week was 9 to 14 weeks in the past for most designs, which would have labelled a stale number as current." },
       { g: "Engagement", name: "New / Active / Slow / Quiet", where: "Funnels → Cohort Engagement panel 3",
         how: "Status right now, in priority order: first-ever interview this week (New), last interview within ONE interview gap (Active), one to two gaps (Slow), more than two gaps (Quiet). Finished takes precedence over all four.",
         base: "FLWs who started ≥ 1 interview",
@@ -1426,7 +1426,8 @@ function WorkflowUI(props) {
   // Return a copy of an engagement series sliced to weeks [0..endIdx].
   function sliceCe(ce, endIdx) {
     var keys = ["weeks", "started", "finished_pct", "steady_pct", "incons_pct", "drop_pct",
-      "waiting_pct", "finished", "new", "active", "slow", "quiet", "waiting"];
+      "waiting_pct", "inprog_pct", "rhythm_base", "finished", "new", "active", "slow", "quiet",
+      "waiting"];
     var out = Object.assign({}, ce);
     keys.forEach(function (k) { if (Array.isArray(ce[k])) out[k] = ce[k].slice(0, endIdx + 1); });
     return out;
@@ -1494,19 +1495,23 @@ function WorkflowUI(props) {
       eng2Inst.current = new window.Chart(eng2Ref.current.getContext("2d"), {
         type: "line",
         data: { labels: labels, datasets: [
+          // ---- OUTCOME: where each starter ended up. These four sum to 100.
           { label: "Finished: completed all interviews", data: ce.finished_pct, borderColor: "#5E35B1", backgroundColor: "#5E35B1" },
-          { label: "Steady: never a gap > " + gt + " days", data: ce.steady_pct, borderColor: "#2E7D32", backgroundColor: "#2E7D32" },
-          { label: "Inconsistent: at least one " + (gt + 1) + "+ day gap", data: ce.incons_pct, borderColor: "#F9A825", backgroundColor: "#F9A825" },
           // Dropped is no longer a flat 14-day silence rule. It asks whether an interview THIS FLW was
           // actually sent went past its deadline (released, plus one interview gap to do it) unfinished,
           // so it means the same thing in a 3-day-gap design and a 14-day-gap one.
-          { label: "Dropped off: let a due interview pass (not finished)", data: ce.drop_pct, borderColor: "#C62828", backgroundColor: "#C62828" },
-          // Split out of Steady/Inconsistent, where they read as "on track" despite never finishing.
-          { label: "Waiting: did everything sent, nothing more sent", data: ce.waiting_pct, borderColor: "#0277BD", backgroundColor: "#0277BD" }
+          { label: "Dropped off: let a due interview pass", data: ce.drop_pct, borderColor: "#C62828", backgroundColor: "#C62828" },
+          { label: "Waiting: did everything sent, nothing more sent", data: ce.waiting_pct, borderColor: "#0277BD", backgroundColor: "#0277BD" },
+          { label: "Still in progress", data: ce.inprog_pct, borderColor: "#607D8B", backgroundColor: "#607D8B" },
+          // ---- RHYTHM: a SEPARATE reading over starters with 2+ interviews. These two sum to 100 on
+          // their own base, which is why they are dashed - they are not part of the stack above. They
+          // used to be the leftover of it, so they emptied to 0% the moment every cohort closed.
+          { label: "Rhythm - steady: never a gap > " + gt + " days", data: ce.steady_pct, borderColor: "#2E7D32", backgroundColor: "#2E7D32", borderDash: [6, 4] },
+          { label: "Rhythm - inconsistent: one " + (gt + 1) + "+ day gap", data: ce.incons_pct, borderColor: "#F9A825", backgroundColor: "#F9A825", borderDash: [6, 4] }
         ].map(function (d) { return Object.assign({ fill: false, tension: 0.2, borderWidth: 3, pointRadius: 3, pointHoverRadius: 6 }, d); }) },
         options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 16 } },
           plugins: { legend: { position: "bottom", labels: { boxWidth: 14, font: { size: 11 } } },
-            title: { display: true, text: "Engagement quality among FLWs who started" },
+            title: { display: true, text: "Outcome (solid, of all starters) and rhythm (dashed, of those with 2+ interviews)" },
             tooltip: { callbacks: { label: function (c) { return c.dataset.label.split(":")[0] + ": " + c.parsed.y + "%"; } } } },
           scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: "% of started FLWs" }, ticks: { callback: function (v) { return v + "%"; } } } } },
         plugins: [linePointLabels(), whiteBg, apm]
@@ -1517,10 +1522,10 @@ function WorkflowUI(props) {
         type: "bar",
         data: { labels: labels, datasets: [
           { label: "Finished: completed all interviews", data: ce.finished, backgroundColor: "#5E35B1" },
-          { label: "Active: interview within last 7 days (started earlier)", data: ce.active, backgroundColor: "#2E7D32" },
+          { label: "Active: interview within one gap (started earlier)", data: ce.active, backgroundColor: "#2E7D32" },
           { label: "Started this week (first-ever interview)", data: ce.new, backgroundColor: "#42A5F5" },
-          { label: "Slow: last interview 8-14 days ago", data: ce.slow, backgroundColor: "#F9A825" },
-          { label: "Quiet: 14+ days since last interview (not finished)", data: ce.quiet, backgroundColor: "#C62828" }
+          { label: "Slow: last interview one to two gaps ago", data: ce.slow, backgroundColor: "#F9A825" },
+          { label: "Quiet: more than two gaps since last interview", data: ce.quiet, backgroundColor: "#C62828" }
         ] },
         options: { responsive: true, maintainAspectRatio: false,
           plugins: { legend: { position: "bottom", labels: { boxWidth: 14, font: { size: 11 } } },
@@ -1838,11 +1843,23 @@ function WorkflowUI(props) {
           // point of the chart read as two answers to one question: PANEL showed 12% here and 9% on
           // the chart, and on TRE the same pair is 92% vs 71% (Andrea, 2026-08-13).
           var asOf = DATA.today ? " · as of " + fmtWk(DATA.today) : "";
+          // Waiting and rhythm read the same index as the other tiles. Rhythm sits on its own base
+          // (starters with 2+ interviews), so the tile states that base rather than implying it is a
+          // share of everyone - and says "not measurable" when a design gives nobody a second
+          // interview to compare against, instead of showing a misleading 0%.
+          var waitPctNow = full.waiting_pct ? full.waiting_pct[nf] : null;
+          var rBase = full.rhythm_base ? full.rhythm_base[nf] : 0;
+          var steadyNow = full.steady_pct ? full.steady_pct[nf] : null;
           var kpi = [
             { label: "Started interviewing", val: started, sub: "unique FLWs" + asOf, color: "#1565C0" },
             { label: "Finished", val: finished + "%", sub: "completed all interviews" + asOf, color: "#5E35B1" },
-            { label: "Active now", val: activeNow, sub: "interviewed in last 7d" + asOf, color: "#2E7D32" },
-            { label: "Dropped off", val: drop + "%", sub: "silent 14+, not finished" + asOf, color: "#C62828" }
+            { label: "Active now", val: activeNow, sub: "interviewed within one gap" + asOf, color: "#2E7D32" },
+            { label: "Dropped off", val: drop + "%", sub: "let a due interview pass" + asOf, color: "#C62828" },
+            { label: "Waiting", val: (waitPctNow == null ? "-" : waitPctNow + "%"),
+              sub: "did all sent, nothing more sent" + asOf, color: "#0277BD" },
+            { label: "Steady rhythm", val: (rBase ? steadyNow + "%" : "not measurable"),
+              sub: (rBase ? "of " + rBase.toLocaleString() + " with 2+ interviews" : "needs 2+ interviews")
+                + asOf, color: "#2E7D32" }
           ];
           // Windowed reading of the same two headline metrics, for the reconciliation note below.
           var dropWin = ce.drop_pct ? ce.drop_pct[ce.drop_pct.length - 1] : drop;
@@ -1852,9 +1869,9 @@ function WorkflowUI(props) {
             <React.Fragment>
               <div className="text-xs bg-indigo-50 border border-indigo-100 rounded px-3 py-2 text-gray-700">
                 {engSg === "ALL" ? (
-                  <span><b>Program-wide roll-up.</b> <b>{started}</b> FLWs have started interviewing across all cohorts; <b>{finished}%</b> have <b>finished</b> their whole schedule and only <b>{drop}%</b> dropped off (silent 14+ without finishing). Cohorts run different-length schedules, so read this as the recruitment + completion picture; for one cohort's engagement detail, pick it above.</span>
+                  <span><b>Program-wide roll-up.</b> <b>{started}</b> FLWs have started interviewing across all cohorts; <b>{finished}%</b> have <b>finished</b> their whole schedule and <b>{drop}%</b> dropped off, meaning an interview they were sent went past its deadline unfinished. A further <b>{waitPctNow}%</b> are <b>waiting</b>: they did everything sent to them, but their schedule sent no more. Cohorts run different-length schedules, so read this as the recruitment + completion picture; for one cohort's engagement detail, pick it above.</span>
                 ) : (
-                  <span><b>Read this as recruitment + engagement, not attrition.</b> Of <b>{started}</b> FLWs who started interviewing in {scope}, <b>{finished}%</b> <b>finished</b> all their interviews and <b>{activeNow}</b> are active right now; only <b>{drop}%</b> truly dropped off (silent 14+ days without finishing). A dip in the retention curve is mostly <i>finishers</i>, <i>later starts</i> and <i>slower cadence</i> - not people quitting.{engWin === "active" && hasTail ? <span> <b>The tiles above are as of {fmtWk(DATA.today)}; the charts below stop at ~{endTxt}</b> (the active window).{windowLags ? <span> So the charts end on <b>{finPctWin}% finished / {dropWin}% dropped</b> while the current figures are <b>{finished}% / {drop}%</b> - the gap is activity in the trimmed weeks, not two different measures.</span> : null} Switch to Full timeline for the complete series.</span> : null}</span>
+                  <span><b>Read this as recruitment + engagement, not attrition.</b> Of <b>{started}</b> FLWs who started interviewing in {scope}, <b>{finished}%</b> <b>finished</b> all their interviews and <b>{activeNow}</b> are active right now. <b>{drop}%</b> dropped off, meaning an interview they were sent went past its deadline (one interview gap after it was sent) unfinished, and <b>{waitPctNow}%</b> are <b>waiting</b> because they did everything sent and nothing more was sent. A dip in the retention curve is mostly <i>finishers</i>, <i>later starts</i> and <i>slower cadence</i> - not people quitting.{engWin === "active" && hasTail ? <span> <b>The tiles above are as of {fmtWk(DATA.today)}; the charts below stop at ~{endTxt}</b> (the active window).{windowLags ? <span> So the charts end on <b>{finPctWin}% finished / {dropWin}% dropped</b> while the current figures are <b>{finished}% / {drop}%</b> - the gap is activity in the trimmed weeks, not two different measures.</span> : null} Switch to Full timeline for the complete series.</span> : null}</span>
                 )}
               </div>
               <div className="flex flex-wrap gap-2 px-1">
@@ -1873,7 +1890,7 @@ function WorkflowUI(props) {
               <div style={{ height: "300px" }}><canvas ref={eng3Ref}></canvas></div>
               <Legend title="How to read these three panels">
                 <div><b>Panel 1 - recruitment:</b> cumulative FLWs who have started interviewing (appeared in the interview data). Not invited counts.</div>
-                <div><b>Panel 2 - engagement quality:</b> each starter is <b>Finished</b> (completed all their interviews), Steady (never a gap &gt; {ce.gap_thresh} days), Inconsistent (≥1 gap of {ce.gap_thresh + 1}+ days), or Dropped off (silent 14+ days without finishing). Finished outranks the rest - a completer's silence is <i>done</i>, not dropout. <b>Steady is a one-way ratchet</b> - a single long gap moves an FLW to Inconsistent permanently.</div>
+                <div><b>Panel 2 - two separate readings.</b> The <b>solid</b> lines are the <b>outcome</b> and cover every starter: <b>Finished</b> (completed all their interviews), <b>Dropped off</b> (an interview they were sent went past its deadline - one gap after it was sent - unfinished), <b>Waiting</b> (did everything sent to them, but nothing more was sent, so their schedule stopped rather than they did), and <b>Still in progress</b>. Those four sum to 100%. The <b>dashed</b> lines are <b>rhythm</b> and answer a different question - of the starters with two or more interviews, how many kept a steady pace (never a gap &gt; {ce.gap_thresh} days). Those two sum to 100% on their own base, so they are not part of the stack above. <b>Rhythm is a one-way ratchet</b> - a single long gap moves an FLW to Inconsistent permanently. Rhythm uses the largest gap between interviews, not time since the last one, so a finisher does not drift into Inconsistent as the calendar moves.</div>
                 <div><b>Panel 3 - status now:</b> where every starter stands at each week's end - Finished, Active (≤7d), Started-this-week, Slow (8-14d), Quiet (14+d). Totals equal Panel 1 by construction.</div>
                 <div className="text-gray-400">x-axis is the week-ending date. <b>Active window</b> trims the trailing weeks once fewer than the cutoff ({engThr}%) of the cohort's FLWs are newly starting/finishing per week - so a completed cohort isn't shown as a long inactive tail; <b>Full timeline</b> shows the whole period, Apr through today, unannotated - tick “mark active-window end” if you want the boundary drawn. For <b>ALL cohorts</b> the active window runs as long as ANY cohort is still active, so it reaches close to today while individual finished cohorts trim earlier. {engSg === "ALL" ? ce.gap_thresh + "-day gap threshold (program-wide default - cohorts here have mixed cadences)" : ce.gap_thresh + " = 2× the " + engSg + " interview cadence"}; the 14-day dropout window is cadence-independent.</div>
               </Legend>
@@ -3344,7 +3361,7 @@ function WorkflowUI(props) {
               {FE.atRisk && FE.atRisk.n ? (
                 <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-gray-700">
                   <b>Reachable now: {FE.atRisk.n} FLWs.</b> Started, finished no schedule, were offered a complete one,
-                  and have been silent 14-60 days - recent enough that a nudge is plausible.
+                  and have been silent between two and eight interview gaps - recent enough that a nudge is plausible.
                   {(FE.atRisk.byState || []).length
                     ? <span> Concentrated in {(FE.atRisk.byState || []).map(function (x) { return x.k + " (" + x.n + ")"; }).join(", ")}.</span>
                     : null}

@@ -359,7 +359,8 @@ for r in bm.rows:
 _eng_started["ALL"] = set().union(*_eng_started.values()) if _eng_started else set()  # program-wide distinct
 _eng_bad = []
 _eng_keys = ("weeks", "started", "finished_pct", "steady_pct", "incons_pct", "drop_pct",
-             "waiting_pct", "finished", "new", "active", "slow", "quiet", "waiting")
+             "waiting_pct", "inprog_pct", "rhythm_base", "finished", "new", "active", "slow",
+             "quiet", "waiting")
 
 
 def _eng_consistent(label, c, expect_started=None):
@@ -369,13 +370,22 @@ def _eng_consistent(label, c, expect_started=None):
     for i in range(len(c["weeks"])):
         if c["finished"][i] + c["new"][i] + c["active"][i] + c["slow"][i] + c["quiet"][i] != c["started"][i]:
             _eng_bad.append(f"{label}[{i}]: Panel3 stack != Panel1 started")
-        # WAITING joined the quality split: FLWs who completed everything sent to them but whose
-        # design never finished because nothing further was sent. Previously they were absorbed into
-        # steady/inconsistent, which read as "on track" for people who had in fact stopped.
-        _q = (c["finished_pct"][i] + c["steady_pct"][i] + c["incons_pct"][i] + c["drop_pct"][i]
-              + c["waiting_pct"][i])
-        if not (99 <= _q <= 101):
-            _eng_bad.append(f"{label}[{i}]: quality % sum != 100 ({_q})")
+        # TWO independent readings, each summing to 100 on its own base.
+        #   outcome: finished / dropped / waiting / in-progress, over everyone who started
+        #   rhythm:  steady / inconsistent, over starters with 2+ interviews (rhythm_base)
+        # Rhythm used to be the residual of the outcome stack, so it emptied to 0 once every cohort
+        # closed. Checking them as one sum would hide exactly that failure.
+        _o = (c["finished_pct"][i] + c["drop_pct"][i] + c["waiting_pct"][i] + c["inprog_pct"][i])
+        if not (99 <= _o <= 101):
+            _eng_bad.append(f"{label}[{i}]: outcome % sum != 100 ({_o})")
+        _r = c["steady_pct"][i] + c["incons_pct"][i]
+        _rb = c["rhythm_base"][i]
+        if _rb and not (99 <= _r <= 101):
+            _eng_bad.append(f"{label}[{i}]: rhythm % sum != 100 ({_r}) on base {_rb}")
+        if not _rb and _r:
+            _eng_bad.append(f"{label}[{i}]: rhythm % non-zero ({_r}) with an empty base")
+        if _rb > c["started"][i]:
+            _eng_bad.append(f"{label}[{i}]: rhythm base {_rb} exceeds started {c['started'][i]}")
     if any(c["started"][i] > c["started"][i + 1] for i in range(len(c["started"]) - 1)):
         _eng_bad.append(f"{label}: started not monotonic")
     if c["total_started"] != (c["started"][-1] if c["started"] else 0):
