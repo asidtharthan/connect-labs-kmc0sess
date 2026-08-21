@@ -183,6 +183,28 @@ for _cohort, _info in bm.cohort_info.items():
             _row["u"] = 1
         flw_matrix.append(_row)
 
+# The rhythm COUNT arrays exist only so build_payload_agg can pool the All-cohorts figure from its
+# parts; the render reads the percentages and the base, never the counts. Shipping them cost ~3 KB
+# across 12 series plus their two per-LLO copies, which pushed the injected render to 513.6 KB and
+# tripped the 512 KB gate. Dropped here rather than upstream so the pooling still has them.
+# Also dropped: the `waiting` per-week COUNT array (the render uses waiting_pct and the KPI tile only),
+# and `ended` / `end_date`, which no longer have a single reader anywhere in the template.
+_ENG_DROP = ("steady", "incons", "waiting", "ended", "end_date")
+
+
+def _eng_trim(series_map):
+    out = {}
+    for _k, _v in (series_map or {}).items():
+        if isinstance(_v, dict) and "weeks" in _v:
+            out[_k] = {a: b for a, b in _v.items() if a not in _ENG_DROP}
+        elif isinstance(_v, dict):
+            out[_k] = {a: (({c: d for c, d in b.items() if c not in _ENG_DROP}
+                            if isinstance(b, dict) else b)) for a, b in _v.items()}
+        else:
+            out[_k] = _v
+    return out
+
+
 out = {
     "built_at": payload.get("built_at", ""),
     "today": payload.get("today", ""),
@@ -197,8 +219,9 @@ out = {
     "topicStatusCohort": payload["topic_status_cohort"],
     "dropoff": payload["dropoff"],
     "connectPendingSubgroups": payload.get("connect_pending_subgroups", []),
-    "cohortEngagement": payload.get("cohort_engagement", {}),
-    "cohortEngagementLLO": payload.get("cohort_engagement_llo", {}),
+    "cohortEngagement": _eng_trim(payload.get("cohort_engagement", {})),
+    "cohortEngagementLLO": {_sg: _eng_trim(_v) for _sg, _v in
+                            (payload.get("cohort_engagement_llo") or {}).items()},
     # Per-cohort outcome, each cohort scored at its OWN end date rather than a date shared across its
     # whole design. Feeds the cross-cohort drop-off comparison.
     "cohortDropoff": payload.get("cohort_dropoff", []),

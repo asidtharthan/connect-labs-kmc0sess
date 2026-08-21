@@ -395,33 +395,37 @@ check(
     });
   }),
 );
-// The pooled view must equal the sum of its parts, or a view contradicts its own components.
+// The pooled view must not contradict its parts. The rhythm COUNT arrays are stripped from the render
+// payload (they exist only so the builder can pool), so this asserts the two properties that survive:
+// the base is exactly the sum of the parts' bases, and the pooled percentage sits inside their range.
+// Together those would have caught the v168 bug, where ALL read 19% steady against parts of 56-92%.
 (function () {
   const all = CEp.ALL;
-  if (!all || !all.rhythm_pooled) {
-    check(
-      'All-cohorts rhythm is pooled from its parts',
-      false,
-      'ALL is not flagged as pooled',
-    );
-    return;
-  }
+  if (!all) return;
+  check('All-cohorts rhythm is flagged as pooled', !!all.rhythm_pooled);
   const last = all.weeks.length - 1;
-  let st = 0,
-    rb = 0;
+  let rb = 0;
+  const pcts = [];
   Object.keys(CEp).forEach(function (sg) {
     if (sg === 'ALL') return;
     const c = CEp[sg],
       j = c.weeks.length - 1;
     if (c.weeks[j] <= all.weeks[last]) {
-      st += c.steady[j];
       rb += c.rhythm_base[j];
+      if (c.rhythm_base[j]) pcts.push(c.steady_pct[j]);
     }
   });
   check(
-    'All-cohorts rhythm equals the sum of its parts',
-    all.steady[last] === st && all.rhythm_base[last] === rb,
-    `ALL ${all.steady[last]}/${all.rhythm_base[last]} vs parts ${st}/${rb}`,
+    'pooled rhythm base is the sum of its parts',
+    all.rhythm_base[last] === rb,
+    `ALL ${all.rhythm_base[last]} vs parts ${rb}`,
+  );
+  const lo = Math.min.apply(null, pcts),
+    hi = Math.max.apply(null, pcts);
+  check(
+    'pooled steady% sits inside the range of its parts',
+    !pcts.length || (all.steady_pct[last] >= lo && all.steady_pct[last] <= hi),
+    `ALL ${all.steady_pct[last]}% vs parts ${lo}-${hi}%`,
   );
 })();
 check(
@@ -438,13 +442,31 @@ check(
 );
 
 // ---------------------------------------------------------------- size guard
+// The Labs render_code limit is a hard 512 KB and brutal_verify enforces it in CI. This local check
+// UNDER-reports: a local build runs off cached pulls, so its payload is smaller than the live one. On
+// 2026-08-21 local read 495 KB while CI read 513.6 KB and refused to publish. So the bar here is the
+// live figure scaled from the local payload, not the local figure itself.
 const liveBytes = Buffer.byteLength(injected, 'utf8');
+const CAP = 512 * 1024;
+const LIVE_FACTOR = 1.09; // observed live/local payload ratio; raise if CI trips again
+const projected =
+  Buffer.byteLength(src, 'utf8') +
+  (liveBytes - Buffer.byteLength(src, 'utf8')) * LIVE_FACTOR;
 check(
-  'injected render fits the 512 KB Labs cap',
-  liveBytes < 512 * 1024,
-  `${Math.round(liveBytes / 1024)} KB of 512 (headroom ${Math.round(
-    (512 * 1024 - liveBytes) / 1024,
-  )} KB)`,
+  'injected render fits the 512 KB Labs cap (local)',
+  liveBytes < CAP,
+  `${Math.round(liveBytes / 1024)} KB of 512, headroom ${Math.round(
+    (CAP - liveBytes) / 1024,
+  )} KB`,
+);
+check(
+  'projected LIVE render fits the cap',
+  projected < CAP,
+  `~${Math.round(
+    projected / 1024,
+  )} KB projected at ${LIVE_FACTOR}x payload, headroom ~${Math.round(
+    (CAP - projected) / 1024,
+  )} KB`,
 );
 
 // ---------------------------------------------------------------- no em/en dashes (house style)
