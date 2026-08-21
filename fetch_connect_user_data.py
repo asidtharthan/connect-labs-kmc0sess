@@ -66,6 +66,8 @@ def _cohort_to_sg(c):
         return "2WT"
     if re.search(r"EC[CE]\d", c):  # Extension cohorts: 1ECC1 (COWACDI), 1ECE1 (EHA)
         return "EXT"
+    if re.search(r"NPS\d", c):  # NPS cohorts: 1NPS1 (COWACDI only) - before the P[CE]\d Panel pattern
+        return "NPS"
     if re.search(r"P[CE]\d", c):
         return "PANEL"
     return None

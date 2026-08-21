@@ -48,6 +48,8 @@ _DEFAULT_DOMAINS = [
     # Extension cohorts — separate domains, cohorts 1ECC1 (COWACDI) / 1ECE1 (EHA).
     "connect-int-ng-cowac-ext",
     "connect-int-ng-eha-ext",
+    # NPS (Net Promoter Score) - single-interview cohort 1NPS1, COWACDI only (no EHA domain exists).
+    "connect-int-ng-cowac-nps",
 ]
 # Creds from env (HQ_API_KEY/HQ_USERNAME[/HQ_DOMAINS]) for CI/server, else .hq_creds.json locally.
 _creds_file = ROOT / ".hq_creds.json"

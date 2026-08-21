@@ -76,6 +76,7 @@ def cohort_to_sg(c):
     if "ABT3" in c: return "ABT3-A" if "A" in c[5:] else "ABT3-B"
     if re.search(r"2WT[CE]\d", c): return "2WT"
     if re.search(r"EC[CE]\d", c): return "EXT"  # Extension cohorts: 1ECC1 (COWACDI), 1ECE1 (EHA)
+    if re.search(r"NPS\d", c): return "NPS"  # NPS cohorts: 1NPS1 (COWACDI only) - before the Panel pattern
     if re.search(r"P[CE]\d", c): return "PANEL"
     return None
 
@@ -271,7 +272,7 @@ for sg in cf:
 
 # D-tables 1/2/3
 ROLL = {"TRS": "TRS", "TRE": "TRE", "ABT1-A": "ABT1", "ABT1-B": "ABT1", "ABT2-A": "ABT2", "ABT2-B": "ABT2",
-        "PANEL": "PANEL", "ABT3-A": "ABT3", "ABT3-B": "ABT3", "2WT": "2WT", "EXT": "EXT"}
+        "PANEL": "PANEL", "ABT3-A": "ABT3", "ABT3-B": "ABT3", "2WT": "2WT", "EXT": "EXT", "NPS": "NPS"}
 
 
 def agg(keyfn):

@@ -12,11 +12,11 @@ import topic_status_lib as tsl
 TODAY = date.today()  # drives status time-gating; dynamic so the daily job gates against the real date
 # Canonical topic order; include every topic ANY subgroup design uses (auto-picks up 12/13/C from the
 # CCHQ-derived schedule) so topic-completion never silently drops a topic the bot actually runs.
-_CANON_TOPICS = ["A", "B", "C", "D", "E", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "8S", "8L", "10S", "10L", "11S", "11L", "13L", "99", "F", "G"]
+_CANON_TOPICS = ["A", "B", "C", "D", "E", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "8S", "8L", "10S", "10L", "11S", "11L", "13L", "99", "101", "F", "G"]
 TOPICS = [t for t in _CANON_TOPICS if any(t in bm.SUBGROUP_DESIGN[sg]["topics"] for sg in bm.SUBGROUP_DESIGN)]
-SG_ORDER = ["TRS", "TRE", "ABT1-A", "ABT1-B", "ABT2-A", "ABT2-B", "PANEL", "ABT3-A", "ABT3-B", "2WT", "EXT"]
+SG_ORDER = ["TRS", "TRE", "ABT1-A", "ABT1-B", "ABT2-A", "ABT2-B", "PANEL", "ABT3-A", "ABT3-B", "2WT", "EXT", "NPS"]
 ROLL = {"TRS": "TRS", "TRE": "TRE", "ABT1-A": "ABT1", "ABT1-B": "ABT1", "ABT2-A": "ABT2", "ABT2-B": "ABT2",
-        "PANEL": "PANEL", "ABT3-A": "ABT3", "ABT3-B": "ABT3", "2WT": "2WT", "EXT": "EXT"}
+        "PANEL": "PANEL", "ABT3-A": "ABT3", "ABT3-B": "ABT3", "2WT": "2WT", "EXT": "EXT", "NPS": "NPS"}
 
 # ---- cells: unique (flw,cohort,interview_n) ----
 cell = {}
@@ -263,8 +263,9 @@ for _c in set(_cohort_first_trig) | set(bm.cohort_info):
 # keeps the data-driven estimate above, so new subgroups still auto-derive. Update when the rollout
 # schedule changes; drop an entry once its date has passed to hand the subgroup back to the estimate.
 LINE_DOTTED_UNTIL = {
-    "PANEL": date(2026, 7, 31),  # dotted through Jul 31 -> solid Aug 1
-    "EXT": date(2026, 8, 9),     # dotted through Aug 9  -> solid Aug 10
+    # Empty: the PANEL (Jul 31) and EXT (Aug 9) pins have both expired, so every subgroup now falls back
+    # to the data-driven estimate above. Both consumers iterate .items(), so an empty dict is a no-op.
+    # Add {"<SG>": date(Y, M, D)} again when a rollout schedule needs to override the estimate.
 }
 for _sg, _until in LINE_DOTTED_UNTIL.items():
     if _sg in line_active:
