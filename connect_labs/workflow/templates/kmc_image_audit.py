@@ -101,6 +101,11 @@ WEIGHT_FIELD_PATH = "child_weight_visit"
 # child_details/upload_weight_image — a different path, not audited here.
 PHOTO_FORM_NAMES = ["Record Visit Details"]
 
+# Stands in for "no cap" when a dry run needs a selection purely to count what an armed
+# run would produce. Far above any real per-worker photo count (the busiest worker on the
+# largest opportunity has ~380 across four months), so it never truncates in practice.
+UNCAPPED = 1_000_000
+
 AGENT_FOR_SCALE = {DIGITAL: "scale_validation", DIAL: "scale_dial_read"}
 
 DEFINITION = {
@@ -2119,6 +2124,15 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
         max_per_flw = int(defaults.get("max_per_flw") or 0)
     except (TypeError, ValueError):
         max_per_flw = 0
+    # Report what a run WOULD do and create nothing.
+    #
+    # Plain truthiness, deliberately, because the two ways of misreading this are not
+    # equally costly. The dialog always sends a real boolean, but a value set by hand
+    # through the API might be the STRING "true" - and a strict `is True` check would
+    # read that as armed and spend real classifier budget on someone who asked for a
+    # report. Truthiness errs the other way: the worst a stray "false" can do is decline
+    # to create audits and tell you why.
+    dry_run = bool(defaults.get("dry_run"))
 
     owner_id = definition.opportunity_id or (definition.opportunity_ids or [None])[0]
     if not owner_id:
@@ -2163,6 +2177,7 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
     sessions_created = 0
     errors = []
     empty = []  # opportunities whose window simply held no matching visits
+    planned = []  # dry run only: what each opportunity WOULD have audited
     for opp_id in opp_ids:
         meta = opp_meta.get(str(opp_id)) or {}
         scale = meta.get("scale") or DIGITAL
@@ -2178,7 +2193,9 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
         )
         try:
             extra_kwargs = {}
-            if max_per_flw > 0:
+            # A dry run selects even when uncapped, purely so it can report the volume an
+            # armed run would produce - the number most worth seeing before arming one.
+            if max_per_flw > 0 or dry_run:
                 # Choose the visits here rather than letting the creation task select them,
                 # because a cap cannot be expressed in AuditCriteria: count_per_flw applies
                 # only to last_n_per_flw, which ignores the date window entirely.
@@ -2188,7 +2205,9 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
                         data_access=data_access,
                         opp_id=opp_id,
                         criteria=criteria,
-                        cap=max_per_flw,
+                        # No cap means "take everything this worker has"; a sentinel keeps
+                        # one code path instead of a second uncapped selection branch.
+                        cap=max_per_flw if max_per_flw > 0 else UNCAPPED,
                         photo_form_names=photo_form_names,
                     )
                 finally:
@@ -2203,6 +2222,30 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
                 extra_kwargs["flw_visit_ids"] = flw_visit_ids
                 # Passing the flat union too lets the task skip re-selecting visits.
                 extra_kwargs["visit_ids"] = capped_visit_ids
+                logger.info(
+                    "kmc_image_audit opp %s: capped to %d photos across %d workers (cap %d)",
+                    opp_id,
+                    len(capped_visit_ids),
+                    len(flw_visit_ids),
+                    max_per_flw,
+                )
+
+            if dry_run:
+                # Everything above has run for real - the selection, the form filter, the
+                # cap, the rename guard - so this reports what an armed run would do
+                # having actually asked live data. Only the audit creation is skipped.
+                planned.append(
+                    {
+                        "opportunity_id": opp_id,
+                        "llo": meta.get("llo") or str(opp_id),
+                        "agent": agent_id,
+                        "workers": len(extra_kwargs.get("flw_visit_ids") or {}) or None,
+                        "photos": len(extra_kwargs.get("visit_ids") or []) or None,
+                        "capped": bool(max_per_flw),
+                    }
+                )
+                logger.info("kmc_image_audit DRY RUN opp %s: %s", opp_id, planned[-1])
+                continue
 
             eager = run_audit_creation.apply(
                 kwargs={
@@ -2237,19 +2280,55 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
     # An empty window is a legitimate outcome, not a failure: a weekly schedule over a quiet period
     # audits nothing and that is correct. Only report failure when something actually went wrong,
     # otherwise a scheduled run cries wolf until nobody reads it.
-    if sessions_created:
+    if dry_run:
+        # Its own status, so a report is never mistaken for a run that created nothing.
+        # Errors still count: a dry run that could not even select is a real failure, and
+        # is the cheapest possible warning that an armed run would fail the same way.
+        status = "failed" if errors and not planned else "dry_run"
+    elif sessions_created:
         status = "ready"
     elif errors:
         status = "failed"
     else:
         status = "empty"
-    return {
+
+    outcome = {
         "run_id": run.id,
         "sessions_created": sessions_created,
         "status": status,
         "errors": errors,
         "empty_opportunities": empty,
     }
+    if dry_run:
+        outcome["dry_run"] = True
+        outcome["planned"] = planned
+
+    # Record the outcome ON the run. Without this the run carries only the settings it
+    # started with, so the run history shows a row with no hint of what happened and the
+    # only account of a partial failure is a Celery log nobody reads. Best effort: losing
+    # the summary must not turn a run that DID create audits into a failure.
+    try:
+        wda = WorkflowDataAccess(access_token=access_token, opportunity_id=owner_id)
+        try:
+            wda.update_run_state(
+                run.id,
+                {
+                    "sessions_created": sessions_created,
+                    "run_status": status,
+                    "run_errors": errors,
+                    "empty_opportunities": empty,
+                    "max_per_flw": max_per_flw or None,
+                    "dry_run": dry_run,
+                    "planned": planned,
+                },
+            )
+        finally:
+            wda.close()
+    except Exception:  # noqa: BLE001 - the summary is diagnostics, not the deliverable
+        logger.exception("kmc_image_audit could not record the outcome on run %s", run.id)
+
+    logger.info("kmc_image_audit run %s finished: %s", run.id, outcome)
+    return outcome
 
 
 TEMPLATE["supports_default_run"] = True
@@ -2291,5 +2370,13 @@ TEMPLATE["schedule_options"] = [
         "help": "Share of each worker's visits considered, applied before the cap.",
         "min": 1,
         "max": 100,
+    },
+    {
+        "key": "dry_run",
+        "type": "bool",
+        "label": "Dry run — report only, create no audits",
+        "help": "Selects the photos and records the per-opportunity counts on the run, "
+        "without creating audits or calling the AI. The safe way to check a schedule's "
+        "settings and volume against live data before arming it.",
     },
 ]

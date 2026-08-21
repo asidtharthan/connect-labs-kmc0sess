@@ -133,7 +133,7 @@ def template_supports_default_run(template_key: str | None) -> bool:
     return bool(template and template.get("supports_default_run") and callable(template.get("run_default")))
 
 
-SCHEDULE_OPTION_TYPES = ("int", "multi_int")
+SCHEDULE_OPTION_TYPES = ("int", "multi_int", "bool")
 
 # The config key every schedulable template keeps its headless-run settings under. Named
 # here rather than per template so the scheduling UI and the endpoint that saves it agree
@@ -161,6 +161,9 @@ def template_schedule_options(template_key: str | None) -> list[dict]:
         opportunities a schedule covers. ``choices_from_config`` names the config key
         holding ``{value: label}``, so the choices come from the workflow's OWN config
         and stay correct per definition instead of being frozen at import.
+    ``bool``
+        An on/off flag, e.g. a dry run that reports what it would do and creates
+        nothing.
 
     Returns [] for templates that declare none, which is every template but one.
     """
@@ -185,7 +188,7 @@ def template_schedule_options(template_key: str | None) -> list[dict]:
         if opt_type == "int":
             resolved["min"] = int(opt.get("min", 1))
             resolved["max"] = int(opt.get("max", 1000000))
-        else:
+        elif opt_type == "multi_int":
             resolved["choices_from_config"] = opt.get("choices_from_config") or ""
         options.append(resolved)
     return options

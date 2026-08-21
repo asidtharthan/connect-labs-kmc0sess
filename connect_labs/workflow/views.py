@@ -166,6 +166,21 @@ def _resolve_pipeline_sources_for_run(
     return ordered_sources, configs_by_alias
 
 
+def _schedule_seed_value(option):
+    """One schedule option's current value, shaped for the dialog's JS state.
+
+    Kept out of the Django template because the "nothing set yet" cases are what a
+    template filter gets subtly wrong: an unset integer must seed as "" so the input
+    renders blank and posts back as "clear it", NOT as 0 (a cap of zero) or as the string
+    "None".
+    """
+    if option["type"] == "multi_int":
+        return option.get("selected") or []
+    if option["type"] == "bool":
+        return bool(option.get("value"))
+    return "" if option.get("value") is None else option["value"]
+
+
 class WorkflowTemplateListAPIView(LoginRequiredMixin, View):
     """API endpoint to list available workflow templates."""
 
@@ -260,16 +275,7 @@ class WorkflowListView(LoginRequiredMixin, TemplateView):
             # rather than assembled in the template: every value is an int or list of
             # ints, and json.dumps gets the "no value set" cases right without relying on
             # Django filters to produce valid JS.
-            "schedule_defaults_seed": json.dumps(
-                {
-                    opt["key"]: (
-                        opt["selected"]
-                        if opt["type"] == "multi_int"
-                        else ("" if opt["value"] is None else opt["value"])
-                    )
-                    for opt in schedule_options
-                }
-            ),
+            "schedule_defaults_seed": json.dumps({opt["key"]: _schedule_seed_value(opt) for opt in schedule_options}),
         }
 
     def get_context_data(self, **kwargs):
@@ -3525,6 +3531,14 @@ def _clean_schedule_defaults(raw, options):
     values = {}
     for key, value in raw.items():
         opt = by_key[key]
+
+        if opt["type"] == "bool":
+            # Strict: a truthy string like "false" silently arming a live run is exactly
+            # the kind of near-miss a dry-run flag exists to prevent.
+            if not isinstance(value, bool):
+                return None, f"{opt['label']} must be true or false"
+            values[key] = value
+            continue
 
         if opt["type"] == "int":
             # Blank clears the setting. run_default treats a missing key as "no cap",

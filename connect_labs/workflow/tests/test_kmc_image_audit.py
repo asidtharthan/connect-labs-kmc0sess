@@ -556,3 +556,99 @@ def test_every_offered_setting_actually_changes_a_run(patched, option_key):
     definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP], "sample_percentage": 45})
     run_default(definition=definition, access_token="t", cadence="daily")
     assert patched["task"].apply.call_args.kwargs["kwargs"]["criteria"]["sample_percentage"] == 45
+
+
+# ── Dry run and the outcome record ────────────────────────────────────────────
+
+
+def test_dry_run_creates_nothing_but_reports_what_it_would_do(patched):
+    patched["ada"].return_value.get_visit_ids_for_audit.side_effect = _selection(
+        [_visit(1, "alice", "2026-08-01"), _visit(2, "alice", "2026-08-02"), _visit(3, "bob", "2026-08-01")]
+    )
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP], "max_per_flw": 1, "dry_run": True})
+    result = run_default(definition=definition, access_token="t", cadence="daily")
+
+    patched["task"].apply.assert_not_called(), "a dry run must not create audits"
+    assert result["status"] == "dry_run"
+    assert result["dry_run"] is True
+    assert result["sessions_created"] == 0
+    # One entry per opportunity, carrying the volume an armed run would produce.
+    assert len(result["planned"]) == 1
+    plan = result["planned"][0]
+    assert plan["opportunity_id"] == DIGITAL_OPP
+    assert plan["workers"] == 2
+    assert plan["photos"] == 2, "cap of 1 across two workers"
+    assert plan["capped"] is True
+
+
+def test_dry_run_reports_volume_even_when_uncapped(patched):
+    """The number most worth seeing before arming a schedule is what an uncapped run
+    would produce, so the selection has to happen even with no cap set."""
+    patched["ada"].return_value.get_visit_ids_for_audit.side_effect = _selection(
+        [_visit(i, "alice", "2026-08-01") for i in range(1, 6)]
+    )
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP], "dry_run": True})
+    result = run_default(definition=definition, access_token="t", cadence="daily")
+
+    patched["task"].apply.assert_not_called()
+    plan = result["planned"][0]
+    assert plan["photos"] == 5, "uncapped, so every photo-bearing visit counts"
+    assert plan["capped"] is False
+
+
+def test_dry_run_is_not_armed_by_a_falsy_value(patched):
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP], "dry_run": False})
+    result = run_default(definition=definition, access_token="t", cadence="daily")
+
+    assert result.get("dry_run") is None
+    patched["task"].apply.assert_called_once()
+
+
+def test_a_string_dry_run_errs_towards_creating_nothing(patched):
+    """Set by hand through the API it may arrive as a string. Truthiness is deliberate:
+    reading "true" as armed would spend real classifier budget on someone who asked for
+    a report, while the opposite mistake only costs a report."""
+    patched["ada"].return_value.get_visit_ids_for_audit.side_effect = _selection([_visit(1, "alice", "2026-08-01")])
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP], "dry_run": "true"})
+    result = run_default(definition=definition, access_token="t", cadence="daily")
+
+    assert result["status"] == "dry_run"
+    patched["task"].apply.assert_not_called()
+
+
+def test_a_dry_run_that_cannot_even_select_is_a_failure(patched):
+    """Cheapest possible warning that an armed run would fail the same way."""
+    patched["ada"].return_value.get_visit_ids_for_audit.side_effect = _selection([], unfiltered=[7, 8])
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP], "dry_run": True})
+    result = run_default(definition=definition, access_token="t", cadence="daily")
+
+    assert result["status"] == "failed"
+    assert result["errors"]
+
+
+def test_the_outcome_is_recorded_on_the_run(patched):
+    """Without this the run history shows a row with no hint of what happened, and a
+    partial failure lives only in a Celery log."""
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP], "max_per_flw": 4})
+    patched["ada"].return_value.get_visit_ids_for_audit.side_effect = _selection([_visit(1, "alice", "2026-08-01")])
+    run_default(definition=definition, access_token="t", cadence="daily")
+
+    patched["wda"].return_value.update_run_state.assert_called_once()
+    run_id, state = patched["wda"].return_value.update_run_state.call_args.args
+    assert run_id == 4242
+    assert state["run_status"] == "ready"
+    assert state["sessions_created"] == 1
+    assert state["max_per_flw"] == 4
+    assert state["run_errors"] == []
+
+
+def test_failing_to_record_the_outcome_does_not_fail_the_run(patched):
+    """The summary is diagnostics. Losing it must not turn a run that DID create audits
+    into a reported failure."""
+    patched["wda"].return_value.update_run_state.side_effect = RuntimeError("labs API down")
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP]})
+
+    result = run_default(definition=definition, access_token="t", cadence="daily")
+
+    assert result["status"] == "ready"
+    assert result["sessions_created"] == 1

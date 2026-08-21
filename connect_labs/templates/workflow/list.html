@@ -1382,7 +1382,14 @@
                         </p>
                         {% for opt in workflow.schedule_options %}
                         <div>
+                            {% if opt.type == 'bool' %}
+                            <label class="flex items-center gap-2 text-sm font-medium">
+                                <input type="checkbox" x-model="scheduleDefaults['{{ opt.key|escapejs }}']">
+                                <span>{{ opt.label }}</span>
+                            </label>
+                            {% else %}
                             <label class="block text-sm font-medium mb-1">{{ opt.label }}</label>
+                            {% endif %}
                             {% if opt.type == 'multi_int' %}
                             <div class="space-y-1">
                                 {% for choice in opt.choices %}
@@ -1394,7 +1401,7 @@
                                 </label>
                                 {% endfor %}
                             </div>
-                            {% else %}
+                            {% elif opt.type == 'int' %}
                             <input type="number" min="{{ opt.min }}" max="{{ opt.max }}"
                                    x-model="scheduleDefaults['{{ opt.key|escapejs }}']"
                                    placeholder="not set"
