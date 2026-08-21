@@ -375,7 +375,8 @@ def status_for(flw, cohort, sg, topic):
     td = train_date.get(cohort)
     cad = DESIGN[sg]["cadence"]
     if m:
-        if td and n < len(topics) and TODAY >= td + timedelta(days=n * cad): return "available-missed-overdue"
+        # final interview included: its deadline is release + one gap, like every other interview
+        if td and TODAY >= td + timedelta(days=n * cad): return "available-missed-overdue"
         return "available-not-started"
     if not td or not cad: return "available-not-started"   # schedule unknown -> not provably due
     if TODAY < td + timedelta(days=(n - 1) * cad): return "not-available-yet"
