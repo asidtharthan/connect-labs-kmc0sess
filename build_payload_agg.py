@@ -621,6 +621,7 @@ def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date, deadlines=None
     weeks, started_s = [], []
     steady_p, incons_p, drop_p, fin_p, wait_p, inprog_p = [], [], [], [], [], []
     new_s, active_s, slow_s, quiet_s, finst_s, wait_s, rbase_s = [], [], [], [], [], [], []
+    steady_s, incons_s = [], []
     prevW = None
     for W in Ws:
         started = steady = incons = drop = new = active = slow = quiet = fin = wait = 0
@@ -665,6 +666,7 @@ def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date, deadlines=None
         steady_p.append(round(100 * steady / _rb)); incons_p.append(round(100 * incons / _rb))
         new_s.append(new); active_s.append(active); slow_s.append(slow); quiet_s.append(quiet)
         finst_s.append(fin); wait_s.append(wait); rbase_s.append(rbase)
+        steady_s.append(steady); incons_s.append(incons)
         prevW = W
     ended = end_date is not None and TODAY > end_date
     return {"weeks": weeks, "started": started_s,
@@ -672,6 +674,7 @@ def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date, deadlines=None
             "finished_pct": fin_p, "drop_pct": drop_p, "waiting_pct": wait_p, "inprog_pct": inprog_p,
             # rhythm: sums to 100 across starters with 2+ interviews (rhythm_base)
             "steady_pct": steady_p, "incons_pct": incons_p, "rhythm_base": rbase_s,
+            "steady": steady_s, "incons": incons_s,
             "finished": finst_s, "new": new_s, "active": active_s, "slow": slow_s, "quiet": quiet_s,
             "waiting": wait_s,
             "gap_thresh": gap_thresh, "total_started": started_s[-1],
@@ -716,14 +719,56 @@ for _sg_d in SG_PRESENT:
 _eng_flw_gap = {_f: 2 * _c for _f, _c in _eng_flw_cad.items()}
 _ce_all = _eng_compute(_eng_all_dates, _eng_all_finished, 8, None, _eng_all_deadlines,
                        _eng_flw_cad, _eng_flw_gap)
+
+
+def _pool_rhythm(target, parts):
+    """Rebuild a pooled series' RHYTHM from its parts instead of recomputing it on unioned dates.
+
+    ALL gives each FLW the union of their session dates across every subgroup. That is right for the
+    outcome (did this person finish anything, did they let a deadline pass) but wrong for rhythm: an FLW
+    who ran TRS in April and EXT in August has a four-month hole in the union, so they scored
+    "inconsistent" despite having kept perfect pace inside each cohort. It also picked their cadence by
+    whichever subgroup happened to appear first in the master rows, which is arbitrary for anyone in
+    more than one. The result was ALL reading 19% steady while every individual design read 56-92% - a
+    flat contradiction between a view and its own parts.
+
+    A gap BETWEEN two cohorts is not an interrupted rhythm, it is two separate engagements. So pool the
+    per-subgroup classifications: for each of ALL's weeks, take each subgroup's most recent week at or
+    before it and add up the counts. ALL then cannot disagree with its parts by construction.
+    """
+    weeks = target["weeks"]
+    st, ic, rb = [0] * len(weeks), [0] * len(weeks), [0] * len(weeks)
+    for part in parts:
+        pw = part["weeks"]
+        j = 0
+        for i, w in enumerate(weeks):
+            while j + 1 < len(pw) and pw[j + 1] <= w:
+                j += 1
+            if pw[j] <= w:
+                st[i] += part["steady"][j]
+                ic[i] += part["incons"][j]
+                rb[i] += part["rhythm_base"][j]
+    target["steady"], target["incons"], target["rhythm_base"] = st, ic, rb
+    target["steady_pct"] = [round(100 * a / (b or 1)) for a, b in zip(st, rb)]
+    target["incons_pct"] = [round(100 * a / (b or 1)) for a, b in zip(ic, rb)]
+    # A pooled base counts FLW-per-cohort enrolments, not unique FLWs, so it can legitimately exceed
+    # this series' started count (an FLW in two cohorts has two rhythms). Flagged so the gates and the
+    # render label it honestly instead of implying it is a share of people.
+    target["rhythm_pooled"] = True
+    return target
+
+
 if _ce_all:
+    _ce_all = _pool_rhythm(_ce_all, [cohort_engagement[_s] for _s in SG_PRESENT
+                                     if _s in cohort_engagement])
     cohort_engagement["ALL"] = _ce_all
     _all_llo = {}
     for _llo in ("COWACDI", "EHA"):
         _fdl, _fnl = _eng_filter_llo(_eng_all_dates, _eng_all_finished, _llo)
         _cl = _eng_compute(_fdl, _fnl, 8, None, _eng_all_deadlines, _eng_flw_cad, _eng_flw_gap)
         if _cl:
-            _all_llo[_llo] = _cl
+            _all_llo[_llo] = _pool_rhythm(_cl, [cohort_engagement_llo[_s][_llo] for _s in SG_PRESENT
+                                                if _llo in cohort_engagement_llo.get(_s, {})])
     if _all_llo:
         cohort_engagement_llo["ALL"] = _all_llo
 print(f"[eng] cohort_engagement: "

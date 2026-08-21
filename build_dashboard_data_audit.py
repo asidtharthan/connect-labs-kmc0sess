@@ -384,7 +384,9 @@ def _eng_consistent(label, c, expect_started=None):
             _eng_bad.append(f"{label}[{i}]: rhythm % sum != 100 ({_r}) on base {_rb}")
         if not _rb and _r:
             _eng_bad.append(f"{label}[{i}]: rhythm % non-zero ({_r}) with an empty base")
-        if _rb > c["started"][i]:
+        # A POOLED rhythm base counts enrolments (FLW x cohort), so it may exceed the unique-FLW
+        # started count. Only an unpooled series must stay within it.
+        if not c.get("rhythm_pooled") and _rb > c["started"][i]:
             _eng_bad.append(f"{label}[{i}]: rhythm base {_rb} exceeds started {c['started'][i]}")
     if any(c["started"][i] > c["started"][i + 1] for i in range(len(c["started"]) - 1)):
         _eng_bad.append(f"{label}: started not monotonic")
