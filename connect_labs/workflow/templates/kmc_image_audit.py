@@ -1962,6 +1962,13 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
     finally:
         wda.close()
 
+    # A REAL username. create_record puts this straight into the payload it POSTs to
+    # /export/labs_record/, and a synthetic "scheduler" — matching no upstream user — made every
+    # session creation fail with HTTP 500 while the identical criteria succeeded from the UI
+    # (verified: UI run 15241 created 10 sessions / 386 images on the same window and sample).
+    # Fall back to empty rather than inventing one; create_record omits the key when falsy.
+    username = getattr(definition, "username", None) or (definition.data or {}).get("username") or ""
+
     sessions_created = 0
     errors = []
     empty = []  # opportunities whose window simply held no matching visits
@@ -1982,7 +1989,7 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
             eager = run_audit_creation.apply(
                 kwargs={
                     "access_token": access_token,
-                    "username": "scheduler",
+                    "username": username,
                     "opportunities": [{"id": opp_id, "name": meta.get("llo") or str(opp_id)}],
                     "criteria": criteria,
                     "workflow_run_id": run.id,

@@ -223,3 +223,25 @@ def test_partial_batch_reports_ready_and_names_the_empty_one(patched):
     assert result["sessions_created"] == 2
     assert result["empty_opportunities"] == [DIGITAL_OPP]
     assert result["errors"] == []
+
+
+def test_never_sends_a_synthetic_username(patched):
+    """Regression: create_record puts username straight into the payload it POSTs to
+    /export/labs_record/. A literal "scheduler" matched no upstream user and made EVERY session
+    creation fail with HTTP 500, while the identical criteria succeeded from the UI. An empty
+    username works (the key is omitted); an invented one does not. Verified live: run 15253 created
+    5 sessions once this stopped fabricating a name."""
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP]})
+    run_default(definition=definition, access_token="t", cadence="daily")
+    sent = patched["task"].apply.call_args.kwargs["kwargs"]["username"]
+    assert sent == "", "expected an empty username, got %r" % sent
+    assert sent != "scheduler"
+
+
+def test_uses_the_definitions_username_when_it_has_one(patched):
+    """When the workflow record does carry a username, attribute the audit to it rather than
+    dropping it — the UI attributes sessions to the person who triggered them."""
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP]})
+    definition.username = "real_person"
+    run_default(definition=definition, access_token="t", cadence="daily")
+    assert patched["task"].apply.call_args.kwargs["kwargs"]["username"] == "real_person"
