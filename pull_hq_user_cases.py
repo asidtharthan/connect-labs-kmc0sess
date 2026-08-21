@@ -37,6 +37,10 @@ _DEFAULT_DOMAINS = [
     # Extension cohorts — 1ECC1 (COWACDI) / 1ECE1 (EHA).
     "connect-int-ng-cowac-ext",
     "connect-int-ng-eha-ext",
+    # NPS (Net Promoter Score) - cohort 1NPS1, COWACDI only (no EHA domain exists).
+    "connect-int-ng-cowac-nps",
+    # KNOWN GAP: the 2WT and ABT3 domains are deliberately absent here. Backfilling them would change
+    # untrained_flw for those existing cohorts and shift already-published numbers, so leave as-is.
 ]
 
 _creds_file = ROOT / ".hq_creds.json"

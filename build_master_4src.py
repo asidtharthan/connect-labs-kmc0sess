@@ -47,6 +47,8 @@ ALL_DOMAINS = [
     # Extension cohorts — separate domains, cohorts 1ECC1 (COWACDI) / 1ECE1 (EHA).
     "connect-int-ng-cowac-ext",
     "connect-int-ng-eha-ext",
+    # NPS (Net Promoter Score) - single-interview cohort 1NPS1, COWACDI only (no EHA domain exists).
+    "connect-int-ng-cowac-nps",
 ]
 
 # FALLBACK only — the live SUBGROUP_DESIGN is derived from the CommCare HQ `interview_schedule`
@@ -65,6 +67,7 @@ _FALLBACK_DESIGN = {
     "ABT3-A": {"topics": ["8S", "13", "10S", "11S"], "cadence": 3},
     "ABT3-B": {"topics": ["8L", "13L", "10L", "11L"], "cadence": 3},
     "2WT": {"topics": ["14"], "cadence": 14},  # 2-Week Test: single interview on topic 14; live design from CCHQ lookup
+    "NPS": {"topics": ["101"], "cadence": 9},  # NPS: single terminal interview on topic 101 (cohort window 2026-08-21..2026-08-30); live design from CCHQ lookup
     "EXT": {"topics": ["11", "C", "99"], "cadence": 3},  # Extension: 3 interviews (Water & Diarrhea 2, Nutrition, Qualitative); live design from CCHQ lookup
 }
 # Authoritative map locked to master_v7_2026-06-10 (incl. the 'Prevalance' typo in C).
@@ -99,6 +102,7 @@ TOPIC_NAMES = {
     "F": "Care Seeking Behavior",
     "G": "Trust, Beliefs & Health Perceptions",
     "99": "Qualitative Interview",  # Extension cohort's 3rd interview (open-ended experience/feedback)
+    "101": "NPS",  # NPS cohort's single terminal interview (literal interview_topic value OCS returns)
 }
 # Question count per topic (Cohort Tracker → Topics_Master). Design metadata for Breakdowns → By Topic.
 TOPIC_QUESTIONS = {
@@ -107,6 +111,7 @@ TOPIC_QUESTIONS = {
     "8": 10, "9": 5, "10": 8, "11": 10, "12": 13, "13": 7, "14": 20,
     "8S": 7, "8L": 20, "10S": 7, "10L": 20, "11S": 7, "11L": 20, "13L": 20,
     "99": 1,  # Extension qualitative interview: 1 multi-part question
+    "101": 9,  # OCS state reports total_questions=1, but that Q1 block holds 9 concatenated sub-questions
 }
 COHORT_TYPE_MAP = {
     "TRS": "Standard",
@@ -120,6 +125,7 @@ COHORT_TYPE_MAP = {
     "ABT3-B": "ABT3 B",
     "2WT": "2WT (2-Week Test)",
     "EXT": "Extension",
+    "NPS": "NPS (Net Promoter Score)",
 }
 
 # Cohorts seen in the data whose id doesn't map to any known subgroup design. Collected (not dropped
@@ -145,6 +151,8 @@ def cohort_to_sg(c):
         return "2WT"
     if re.search(r"EC[CE]\d", c):  # Extension cohorts: 1ECC1 (COWACDI), 1ECE1 (EHA) — COWACDI+EHA share one EXT subgroup
         return "EXT"
+    if re.search(r"NPS\d", c):  # NPS cohorts: 1NPS1 (COWACDI only) - tested before the P[CE]\d Panel pattern
+        return "NPS"
     if re.search(r"P[CE]\d", c):  # Panel cohorts: 1PC1 (COWACDI), 1PE1 (EHA) — tight pattern, not a loose "PE" substring
         return "PANEL"
 

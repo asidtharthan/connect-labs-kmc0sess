@@ -258,11 +258,36 @@ check(
   'Dropped label no longer claims a 14-day silence rule',
   !/Dropped off: silent 14\+ days/.test(injected),
 );
+// Every per-week array must be trimmed together in Active-window mode, or a sliced chart pairs week N
+// labels with week M values. Asserted by NAME rather than by exact list text, so adding a series later
+// fails this check loudly instead of silently going stale.
+const sliceList = (injected.match(/var keys = \[([\s\S]*?)\];/) || [])[1] || '';
+const mustSlice = [
+  'weeks',
+  'started',
+  'finished_pct',
+  'drop_pct',
+  'waiting_pct',
+  'inprog_pct',
+  'steady_pct',
+  'incons_pct',
+  'rhythm_base',
+  'finished',
+  'new',
+  'active',
+  'slow',
+  'quiet',
+  'waiting',
+];
+const notSliced = mustSlice.filter(function (k) {
+  return sliceList.indexOf('"' + k + '"') < 0;
+});
 check(
-  'waiting arrays are trimmed with the rest in Active-window mode',
-  /"waiting_pct", "finished", "new", "active", "slow", "quiet", "waiting"/.test(
-    injected,
-  ),
+  'every per-week array is trimmed in Active-window mode',
+  notSliced.length === 0,
+  notSliced.length
+    ? `missing: ${notSliced.join(', ')}`
+    : `${mustSlice.length} arrays`,
 );
 
 // ---------------------------------------------------------------- the docs tab must not drift
@@ -313,6 +338,74 @@ check(
 check(
   'docs states the deadline is one interview gap',
   !!docsMetrics && /one interview gap after it was released/.test(docsMetrics),
+);
+
+// ---------------------------------------------------------------- outcome vs rhythm split
+// Regression guard for the bug this pass fixed: rhythm used to be the residual of the outcome stack,
+// so it read 0% at the final point of every series once all cohorts closed.
+const CEp = payload.cohortEngagement || {};
+const badOutcome = [],
+  badRhythm = [],
+  flatRhythm = [];
+Object.keys(CEp).forEach(function (sg) {
+  const c = CEp[sg],
+    n = (c.weeks || []).length;
+  if (!n) return;
+  const last = n - 1;
+  const o =
+    c.finished_pct[last] +
+    c.drop_pct[last] +
+    c.waiting_pct[last] +
+    c.inprog_pct[last];
+  if (o < 99 || o > 101) badOutcome.push(sg + '=' + o);
+  const r = c.steady_pct[last] + c.incons_pct[last],
+    rb = c.rhythm_base[last];
+  if (rb && (r < 99 || r > 101)) badRhythm.push(sg + '=' + r);
+  if (rb && r === 0) flatRhythm.push(sg);
+});
+check(
+  'outcome shares sum to 100 at the final week',
+  badOutcome.length === 0,
+  badOutcome.length
+    ? badOutcome.join(', ')
+    : `${Object.keys(CEp).length} series`,
+);
+check(
+  'rhythm shares sum to 100 on their own base',
+  badRhythm.length === 0,
+  badRhythm.length ? badRhythm.join(', ') : '',
+);
+check(
+  'rhythm is NOT flat zero where it is measurable',
+  flatRhythm.length === 0,
+  flatRhythm.length
+    ? `collapsed for: ${flatRhythm.join(', ')}`
+    : 'the bug this pass fixed',
+);
+check(
+  'rhythm base never exceeds starters',
+  Object.keys(CEp).every(function (sg) {
+    const c = CEp[sg],
+      n = (c.weeks || []).length;
+    return (
+      !n ||
+      c.rhythm_base.every(function (b, i) {
+        return b <= c.started[i];
+      })
+    );
+  }),
+);
+check(
+  'chart distinguishes the two readings',
+  /Rhythm - steady/.test(injected) && /borderDash/.test(injected),
+);
+check(
+  'no stale fixed-day copy in engagement or FLW tab',
+  !/silent 14\+|silent 14-60|8-14 days ago|14\+ days since/.test(injected),
+);
+check(
+  "single-interview designs read 'not measurable', not 0%",
+  /not measurable/.test(injected),
 );
 
 // ---------------------------------------------------------------- size guard
