@@ -203,7 +203,11 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
         return Promise.all(ids.map(oid =>
             fetch('/audit/api/workflow/' + instance.id + '/sessions/?opportunity_id=' + oid)
                 .then(r => r.json())
-                .then(d => ((d && d.success && d.sessions) ? d.sessions.map(s => Object.assign({ _opp: oid }, s)) : []))
+                .then(d => ((d && d.success && d.sessions)
+                    // Keep which request produced it, for debugging, but never let it override
+                    // the session own opportunity_id.
+                    ? d.sessions.map(s => Object.assign({ _requested_opp: oid }, s))
+                    : []))
                 .catch(() => [])
         )).then(arrs => {
             const seen = {}; const all = [];
@@ -339,6 +343,15 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                     audit_type: 'date_range',
                     startDate: startDate,
                     endDate: endDate,
+                    // Without this the preview returns visits of EVERY type and the cap slices
+                    // blind: a worker whose photo visits fall outside the first N silently
+                    // yields fewer photos than the cap, or none.
+                    related_fields: [{
+                        image_path: WEIGHT_IMAGE_PATH,
+                        field_path: WEIGHT_FIELD_PATH,
+                        label: 'Scale Weight Reading',
+                        filter_by_image: true,
+                    }],
                     sample_percentage: Number(samplePct) > 0 ? Number(samplePct) : 100,
                 },
             }),
@@ -496,7 +509,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
         const T = { flws: 0, images: 0, assessed: 0, match: 0, noMatch: 0, error: 0, aiPending: 0,
             humanPass: 0, humanFail: 0, humanPending: 0, notReviewed: 0, unstarted: 0 };
         sessions.forEach(s => {
-            const oid = s._opp || s.opportunity_id;
+            const oid = s.opportunity_id || s._requested_opp;
             const m = meta(oid);
             const o = byOpp[oid] || (byOpp[oid] = { opp: oid, llo: m.llo || '?', scale: m.scale || '?',
                 sessions: 0, images: 0, assessed: 0, match: 0, noMatch: 0, error: 0, aiPending: 0,
@@ -555,7 +568,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     const flwRows = React.useMemo(() => {
         return sessions.map(s => {
             const st = s.assessment_stats || {};
-            const oid = s._opp || s.opportunity_id;
+            const oid = s.opportunity_id || s._requested_opp;
             const photos = s.image_count || 0;
             const assessed = st.total || 0;
             const pass = st.pass || 0;
@@ -738,7 +751,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
             let probeSession = null;
             (all || []).forEach(s => {
                 if (s.tag !== SCALE_CHECK_TAG) return;
-                if ((s._opp || s.opportunity_id) !== oid) return;
+                if ((s.opportunity_id || s._requested_opp) !== oid) return;
                 if (probeSession == null) probeSession = s.id;
                 const st = s.assessment_stats || {};
                 seen += s.image_count || 0;
