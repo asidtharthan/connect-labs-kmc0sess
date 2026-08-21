@@ -382,19 +382,48 @@ check(
     ? `collapsed for: ${flatRhythm.join(', ')}`
     : 'the bug this pass fixed',
 );
+// An unpooled series' rhythm base must stay within its starters. A POOLED one (All cohorts) counts
+// enrolments rather than unique FLWs, so it may exceed them by design.
 check(
-  'rhythm base never exceeds starters',
+  'rhythm base never exceeds starters (unpooled series)',
   Object.keys(CEp).every(function (sg) {
     const c = CEp[sg],
       n = (c.weeks || []).length;
-    return (
-      !n ||
-      c.rhythm_base.every(function (b, i) {
-        return b <= c.started[i];
-      })
-    );
+    if (!n || c.rhythm_pooled) return true;
+    return c.rhythm_base.every(function (b, i) {
+      return b <= c.started[i];
+    });
   }),
 );
+// The pooled view must equal the sum of its parts, or a view contradicts its own components.
+(function () {
+  const all = CEp.ALL;
+  if (!all || !all.rhythm_pooled) {
+    check(
+      'All-cohorts rhythm is pooled from its parts',
+      false,
+      'ALL is not flagged as pooled',
+    );
+    return;
+  }
+  const last = all.weeks.length - 1;
+  let st = 0,
+    rb = 0;
+  Object.keys(CEp).forEach(function (sg) {
+    if (sg === 'ALL') return;
+    const c = CEp[sg],
+      j = c.weeks.length - 1;
+    if (c.weeks[j] <= all.weeks[last]) {
+      st += c.steady[j];
+      rb += c.rhythm_base[j];
+    }
+  });
+  check(
+    'All-cohorts rhythm equals the sum of its parts',
+    all.steady[last] === st && all.rhythm_base[last] === rb,
+    `ALL ${all.steady[last]}/${all.rhythm_base[last]} vs parts ${st}/${rb}`,
+  );
+})();
 check(
   'chart distinguishes the two readings',
   /Rhythm - steady/.test(injected) && /borderDash/.test(injected),
