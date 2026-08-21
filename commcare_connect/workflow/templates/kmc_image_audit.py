@@ -483,8 +483,14 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     // session data here.
     //
     // Substitutions, both verified against live run 13250:
-    //   visit_count == image count            858 == 858 (this audit takes one weight photo per visit)
-    //   visit_count - assessment_stats.total  == the images the AI never reached (13, exact)
+    //   image_count                           the number of IMAGES extracted for this session
+    //   image_count - assessment_stats.total  == images the AI never reached
+    //
+    // Use image_count, NEVER visit_count. visit_images is keyed by VISIT and each value is a LIST of
+    // images (audit/data_access.py: image_count = sum(len(imgs) for imgs in visit_images.values())),
+    // so a visit can carry several weight photos or none at all. Counting visits as photos inflated
+    // the denominator and invented a "never reviewed" gap on runs that were in fact complete: run
+    // 14978 reported 163 of 394 unreviewed when it was 231 images and 231 assessments — 100% done.
     const rollup = React.useMemo(() => {
         const byOpp = {}; const byLlo = {};
         const T = { flws: 0, images: 0, assessed: 0, match: 0, noMatch: 0, error: 0, aiPending: 0,
@@ -496,7 +502,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                 sessions: 0, images: 0, assessed: 0, match: 0, noMatch: 0, error: 0, aiPending: 0,
                 humanPass: 0, humanFail: 0, humanPending: 0, notReviewed: 0, unstarted: 0 });
             const st = s.assessment_stats || {};
-            const imgs = s.visit_count || 0;
+            const imgs = s.image_count || 0;
             const assessed = st.total || 0;
             const gap = Math.max(0, imgs - assessed);
             o.sessions += 1; T.flws += 1;
@@ -550,7 +556,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
         return sessions.map(s => {
             const st = s.assessment_stats || {};
             const oid = s._opp || s.opportunity_id;
-            const photos = s.visit_count || 0;
+            const photos = s.image_count || 0;
             const assessed = st.total || 0;
             const pass = st.pass || 0;
             const fail = st.fail || 0;
@@ -730,7 +736,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                 if ((s._opp || s.opportunity_id) !== oid) return;
                 if (probeSession == null) probeSession = s.id;
                 const st = s.assessment_stats || {};
-                seen += s.visit_count || 0;
+                seen += s.image_count || 0;
                 match += st.ai_match || 0; noMatch += st.ai_no_match || 0; errored += st.ai_error || 0;
             });
             const v = scaleVerdict(match, noMatch, errored, agentName(other), otherKind);
