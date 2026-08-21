@@ -2254,3 +2254,42 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
 
 TEMPLATE["supports_default_run"] = True
 TEMPLATE["run_default"] = run_default
+
+# What the schedule dialog may write into config.schedule_defaults. Both are read by
+# run_default above; declaring them here is what gives them an editing surface, so a
+# schedule's volume can be changed without an MCP call or a release.
+#
+# max_per_flw matters most: the dashboard's own cap field writes RUN state, which a
+# scheduled run never reads. Before this, a schedule created right after setting a cap on
+# screen ran uncapped and said nothing about it.
+TEMPLATE["schedule_options"] = [
+    {
+        "key": "opportunity_ids",
+        "type": "multi_int",
+        "label": "Opportunities to audit",
+        # opp_names lives on this workflow's own config, so the list stays right per
+        # definition instead of being frozen to OPP_META at import.
+        "choices_from_config": "opp_names",
+        "help": "Each selected opportunity gets its own audit, scored by the agent its scale "
+        "hardware requires. Selecting none would audit nothing, so at least one is required.",
+    },
+    {
+        "key": "max_per_flw",
+        "type": "int",
+        "label": "Max photos per field worker",
+        "help": (
+            "Blank means no cap. Sampling is proportional, so without a cap the busiest "
+            "workers crowd out the rest and a run's size is unpredictable."
+        ),
+        "min": 1,
+        "max": 500,
+    },
+    {
+        "key": "sample_percentage",
+        "type": "int",
+        "label": "Sample %",
+        "help": "Share of each worker's visits considered, applied before the cap.",
+        "min": 1,
+        "max": 100,
+    },
+]

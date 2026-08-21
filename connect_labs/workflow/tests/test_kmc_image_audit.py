@@ -469,3 +469,90 @@ def test_the_cap_filter_survives_the_real_criteria_parser():
     params = inspect.signature(AnalysisPipeline.filter_visits_for_audit).parameters
     assert "deliver_unit_types" in params
     assert "related_fields" not in params
+
+
+# ── The schedule dialog's settings ────────────────────────────────────────────
+
+
+def test_schedule_defaults_key_agrees_with_the_registry():
+    """The template names the config key as a literal to avoid a circular import, so
+    nothing but a test stops the two drifting and the dialog writing where run_default
+    does not read."""
+    from connect_labs.workflow.templates import SCHEDULE_DEFAULTS_CONFIG_KEY
+    from connect_labs.workflow.templates.kmc_image_audit import SCHEDULE_DEFAULTS_KEY
+
+    assert SCHEDULE_DEFAULTS_KEY == SCHEDULE_DEFAULTS_CONFIG_KEY
+
+
+def test_declared_options_are_well_formed():
+    from connect_labs.workflow.templates import SCHEDULE_OPTION_TYPES, template_schedule_options
+
+    options = template_schedule_options(TEMPLATE_KEY)
+    assert options, "the dialog would offer nothing"
+    for opt in options:
+        assert opt["type"] in SCHEDULE_OPTION_TYPES
+        assert opt["label"] and opt["label"] != opt["key"], "every option needs a human label"
+        assert opt["help"], "an unexplained scheduling knob invites a wrong setting"
+
+
+def test_option_choices_come_from_the_workflows_own_config():
+    """Frozen choices would go stale the moment a workflow's opportunity set changed."""
+    from connect_labs.workflow.templates import schedule_options_for_definition
+
+    definition = SimpleNamespace(
+        template_type=TEMPLATE_KEY,
+        data={
+            "config": {
+                "opp_names": {"1487": "PIPN (V3)", "1236": "EHA (V2+)"},
+                "schedule_defaults": {"opportunity_ids": [1487], "max_per_flw": 12},
+            }
+        },
+    )
+    by_key = {o["key"]: o for o in schedule_options_for_definition(definition)}
+
+    # Sorted by id so the dialog's order does not depend on dict ordering.
+    assert by_key["opportunity_ids"]["choices"] == [
+        {"value": 1236, "label": "EHA (V2+)"},
+        {"value": 1487, "label": "PIPN (V3)"},
+    ]
+    # Current values come back so the dialog opens on what the schedule would really use.
+    assert by_key["opportunity_ids"]["selected"] == [1487]
+    assert by_key["max_per_flw"]["value"] == 12
+
+
+def test_options_are_empty_for_a_template_that_cannot_be_scheduled():
+    from connect_labs.workflow.templates import template_schedule_options
+
+    assert template_schedule_options("performance_review") == []
+    assert template_schedule_options(None) == []
+
+
+@pytest.mark.parametrize("option_key", ["opportunity_ids", "max_per_flw", "sample_percentage"])
+def test_every_offered_setting_actually_changes_a_run(patched, option_key):
+    """The dialog must not offer a setting run_default ignores — that is precisely the
+    lie this surface was built to remove (a cap set on screen, a run without it)."""
+    from connect_labs.workflow.templates import template_schedule_options
+
+    assert option_key in {o["key"] for o in template_schedule_options(TEMPLATE_KEY)}
+
+    patched["ada"].return_value.get_visit_ids_for_audit.side_effect = _selection(
+        [_visit(1, "alice", "2026-08-01"), _visit(2, "alice", "2026-08-02")]
+    )
+
+    if option_key == "opportunity_ids":
+        definition = _definition(schedule_defaults={"opportunity_ids": [DIAL_OPP]})
+        run_default(definition=definition, access_token="t", cadence="daily")
+        audited = [c.kwargs["kwargs"]["opportunities"][0]["id"] for c in patched["task"].apply.call_args_list]
+        assert audited == [DIAL_OPP]
+        return
+
+    if option_key == "max_per_flw":
+        definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP], "max_per_flw": 1})
+        run_default(definition=definition, access_token="t", cadence="daily")
+        kwargs = patched["task"].apply.call_args.kwargs["kwargs"]
+        assert len(kwargs["flw_visit_ids"]["alice"]) == 1
+        return
+
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP], "sample_percentage": 45})
+    run_default(definition=definition, access_token="t", cadence="daily")
+    assert patched["task"].apply.call_args.kwargs["kwargs"]["criteria"]["sample_percentage"] == 45
