@@ -139,6 +139,12 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     const OPP_META = cfg.opp_meta || {};
     const WEIGHT_IMAGE_PATH = cfg.weight_image_path || 'anthropometric/upload_weight_image';
     const WEIGHT_FIELD_PATH = cfg.weight_field_path || 'child_weight_visit';
+    // The only form carrying WEIGHT_IMAGE_PATH — verified against the deliver app of every
+    // scheduled opportunity (1236/1488/1739/1790) plus observed data for 1487; the name is
+    // identical in all five. Registration forms declare an upload_weight_image too, but at
+    // child_details/upload_weight_image, which is a different path and is not audited.
+    // Used to make the per-worker cap count photos rather than visits (see previewFlwVisits).
+    const PHOTO_FORM_NAMES = cfg.photo_form_names || ['Record Visit Details'];
     const AGENT_FOR_SCALE = cfg.agent_for_scale || { digital: 'scale_validation', dial: 'scale_dial_read' };
     // Sessions created by a scale-hardware probe carry this tag so they can be told apart from real
     // audit sessions and excluded from every figure the run reports.
@@ -231,7 +237,11 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
         return Promise.all(ids.map(oid =>
             fetch('/audit/api/workflow/' + instance.id + '/sessions/?opportunity_id=' + oid)
                 .then(r => r.json())
-                .then(d => ((d && d.success && d.sessions) ? d.sessions.map(s => Object.assign({ _opp: oid }, s)) : []))
+                .then(d => ((d && d.success && d.sessions)
+                    // Keep which request produced it, for debugging, but never let it override
+                    // the session own opportunity_id.
+                    ? d.sessions.map(s => Object.assign({ _requested_opp: oid }, s))
+                    : []))
                 .catch(() => [])
         )).then(arrs => {
             const seen = {}; const all = [];
@@ -367,6 +377,17 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                     audit_type: 'date_range',
                     startDate: startDate,
                     endDate: endDate,
+                    // Narrow to the ONE form that carries WEIGHT_IMAGE_PATH, or the cap slices
+                    // blind: a worker whose photo visits fall outside the first N silently
+                    // yields fewer photos than the cap, or none. On opp 1487, 40% of visits are
+                    // registration forms with no photo at that path at all.
+                    //
+                    // It must be deliver_unit_types, NOT related_fields. The preview endpoint
+                    // drops related_fields when it normalises criteria, and the selection layer
+                    // (filter_visits_for_audit) has no such parameter in the first place --
+                    // filter_by_image is applied later, at image extraction. deliver_unit_types
+                    // matches form.@name and IS pushed into SQL, so it actually filters here.
+                    deliver_unit_types: PHOTO_FORM_NAMES,
                     sample_percentage: Number(samplePct) > 0 ? Number(samplePct) : 100,
                 },
             }),
@@ -524,7 +545,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
         const T = { flws: 0, images: 0, assessed: 0, match: 0, noMatch: 0, error: 0, aiPending: 0,
             humanPass: 0, humanFail: 0, humanPending: 0, notReviewed: 0, unstarted: 0 };
         sessions.forEach(s => {
-            const oid = s._opp || s.opportunity_id;
+            const oid = s.opportunity_id || s._requested_opp;
             const m = meta(oid);
             const o = byOpp[oid] || (byOpp[oid] = { opp: oid, llo: m.llo || '?', scale: m.scale || '?',
                 sessions: 0, images: 0, assessed: 0, match: 0, noMatch: 0, error: 0, aiPending: 0,
@@ -583,7 +604,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     const flwRows = React.useMemo(() => {
         return sessions.map(s => {
             const st = s.assessment_stats || {};
-            const oid = s._opp || s.opportunity_id;
+            const oid = s.opportunity_id || s._requested_opp;
             const photos = s.image_count || 0;
             const assessed = st.total || 0;
             const pass = st.pass || 0;
@@ -610,6 +631,11 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     // the thing people actually do is "show me one LLO" or "find this person", so both are offered.
     // visibleRows — not flwRows — feeds the table AND its header count: a filtered table above an
     // unfiltered total is the exact chip-vs-rows mismatch that made an earlier dashboard untrustworthy.
+    // Per-photo filter for the expanded detail. The platform's review page filters on the HUMAN
+    // result only, so with every photo still pending there is no way to isolate what the AI
+    // actually said — which is the question people are trying to answer. Filter on both.
+    const [photoAi, setPhotoAi] = React.useState('flagged');
+    const [photoHuman, setPhotoHuman] = React.useState('');
     const [lloFilter, setLloFilter] = React.useState('');
     const [flwSearch, setFlwSearch] = React.useState('');
     const lloOptions = React.useMemo(() => {
@@ -761,7 +787,7 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
             let probeSession = null;
             (all || []).forEach(s => {
                 if (s.tag !== SCALE_CHECK_TAG) return;
-                if ((s._opp || s.opportunity_id) !== oid) return;
+                if ((s.opportunity_id || s._requested_opp) !== oid) return;
                 if (probeSession == null) probeSession = s.id;
                 const st = s.assessment_stats || {};
                 seen += s.image_count || 0;
@@ -887,7 +913,11 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     // produced, with FLW and photo counts filled in. Same component, two truths, never mixed.
     const coverage = (phase === 'config')
         ? selected.map(id => ({ opp: id, llo: meta(id).llo || ('#' + id), flws: null, photos: null }))
-        : rollup.byOpp.map(o => ({ opp: o.opp, llo: o.llo, flws: o.sessions, photos: o.images }));
+        : rollup.byOpp.map(o => ({ opp: o.opp, llo: o.llo, flws: o.sessions, photos: o.images }))
+            // Selected but produced nothing: shown here for the same reason the table below
+            // shows them. A strip listing four LLOs above a table listing five is a header
+            // contradicting its own body.
+            .concat(emptyOpps.map(id => ({ opp: id, llo: meta(id).llo || ('#' + id), flws: 0, photos: 0 })));
     const winLabel = (startDate && endDate) ? (startDate + ' → ' + endDate) : 'no window set';
 
     return (
@@ -1014,8 +1044,12 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                         <Card label="FLW audits" value={num(rollup.flws)} sub={rollup.byOpp.length + ' opportunit' + (rollup.byOpp.length === 1 ? 'y' : 'ies')} tone="border-blue-400" />
                         <Card label="Weight photos" value={num(rollup.images)} sub="one per audited visit" tone="border-gray-300" />
-                        <Card label="AI reviewed" value={num(rollup.reviewed)}
-                            sub={rollup.notReviewed ? (rollup.notReviewed + ' never reviewed') : (pct(rollup.reviewed, rollup.images) + ' of photos')}
+                        <Card label="AI scored" value={num(rollup.reviewed)}
+                            sub={rollup.aiPending
+                                ? (rollup.aiPending + ' awaiting a verdict')
+                                : rollup.notReviewed
+                                    ? (rollup.notReviewed + ' never reviewed')
+                                    : (pct(rollup.reviewed, rollup.images) + ' of photos')}
                             tone={rollup.notReviewed ? 'border-red-500' : 'border-indigo-400'} />
                         <Card label="Match" value={num(rollup.match)} sub={pct(rollup.match, rollup.scored) + ' of scored'} tone="border-green-500" />
                         <Card label="No match" value={num(rollup.noMatch)} sub={rollup.noMatchPct + '% of scored'} tone="border-amber-500" />
@@ -1675,7 +1709,22 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                             <tbody>
                                 {visibleRows.map(r => {
                                     const d = detail[r.id] || {};
-                                    const flagged = (d.rows || []).filter(x => x.ai_result === 'no_match' || x.ai_result === 'error');
+                                    // Every photo, not just the flagged ones: a match with its reason is
+                                    // evidence too, and a photo the AI never reached is invisible otherwise.
+                                    const allRows = d.rows || [];
+                                    const aiOf = (x) => x.ai_result || 'not_reviewed';
+                                    const flagged = allRows.filter(x => {
+                                        const ai = aiOf(x);
+                                        const okAi = photoAi === '' ? true
+                                            : photoAi === 'flagged' ? (ai === 'no_match' || ai === 'error')
+                                                : ai === photoAi;
+                                        const okHuman = !photoHuman
+                                            || (photoHuman === 'pending' ? !x.result : x.result === photoHuman);
+                                        return okAi && okHuman;
+                                    });
+                                    const tally = allRows.reduce((acc, x) => {
+                                        acc[aiOf(x)] = (acc[aiOf(x)] || 0) + 1; return acc;
+                                    }, {});
                                     return [
                                         <tr key={r.id} className="border-t border-gray-100 hover:bg-gray-50">
                                             <td className="px-3 py-2 whitespace-nowrap">
@@ -1757,15 +1806,42 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                                 <td colSpan={8} className="px-4 py-3">
                                                     {d.loading ? <div className="text-xs text-gray-500">Loading photo detail…</div> : null}
                                                     {d.error ? <div className="text-xs text-red-700">Could not load detail: {d.error}</div> : null}
+                                                    {d.rows ? (
+                                                        <div className="flex items-center gap-2 flex-wrap text-xs mb-2">
+                                                            <span className="font-semibold text-gray-700">Show photos:</span>
+                                                            {[['flagged', 'Needs a look', (tally.no_match || 0) + (tally.error || 0)],
+                                                              ['match', 'Matched', tally.match || 0],
+                                                              ['no_match', 'No match', tally.no_match || 0],
+                                                              ['error', 'Errored', tally.error || 0],
+                                                              ['not_reviewed', 'Not reviewed', tally.not_reviewed || 0],
+                                                              ['', 'All', allRows.length]].map(o => (
+                                                                <button key={o[0] || 'all'} onClick={() => setPhotoAi(o[0])}
+                                                                    className={'px-2 py-0.5 rounded border '
+                                                                        + (photoAi === o[0]
+                                                                            ? 'bg-blue-600 text-white border-blue-600'
+                                                                            : 'bg-white border-gray-300 text-gray-700 hover:border-blue-400')}>
+                                                                    {o[1]} ({o[2]})
+                                                                </button>
+                                                            ))}
+                                                            <span className="ml-2 text-gray-500">Human:</span>
+                                                            <select value={photoHuman} onChange={e => setPhotoHuman(e.target.value)}
+                                                                className="px-1 py-0.5 border border-gray-300 rounded">
+                                                                <option value="">any</option>
+                                                                <option value="pending">pending</option>
+                                                                <option value="pass">passed</option>
+                                                                <option value="fail">failed</option>
+                                                            </select>
+                                                        </div>
+                                                    ) : null}
                                                     {d.rows && !flagged.length ? (
                                                         <div className="text-xs text-gray-500">
-                                                            Nothing flagged for this worker — every photo either matched or was never reviewed.
+                                                            No photos match this filter — {allRows.length} in this audit.
                                                         </div>
                                                     ) : null}
                                                     {flagged.length ? (
                                                         <div>
                                                             <div className="text-xs font-semibold text-gray-700 mb-2">
-                                                                {flagged.length} photo{flagged.length === 1 ? '' : 's'} the AI flagged — with its reason
+                                                                Showing {flagged.length} of {allRows.length} photo{allRows.length === 1 ? '' : 's'} — every row carries the classifier reason
                                                             </div>
                                                             <div className="overflow-x-auto">
                                                                 <table className="min-w-full text-xs">
@@ -1791,15 +1867,24 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                                                                                     <td className="px-2 py-1 text-right font-mono">{reading != null ? reading : '—'}</td>
                                                                                     <td className="px-2 py-1 whitespace-nowrap">
                                                                                         <span className={'px-1.5 py-0.5 rounded font-semibold '
-                                                                                            + (x.ai_result === 'no_match' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800')}>
-                                                                                            {x.ai_result === 'no_match' ? 'No match' : 'Errored'}
+                                                                                            + (x.ai_result === 'match' ? 'bg-green-100 text-green-800'
+                                                                                                : x.ai_result === 'no_match' ? 'bg-amber-100 text-amber-800'
+                                                                                                    : x.ai_result === 'error' ? 'bg-red-100 text-red-800'
+                                                                                                        : 'bg-gray-100 text-gray-600')}>
+                                                                                            {x.ai_result === 'match' ? 'Match'
+                                                                                                : x.ai_result === 'no_match' ? 'No match'
+                                                                                                    : x.ai_result === 'error' ? 'Errored' : 'Not reviewed'}
                                                                                         </span>
                                                                                     </td>
                                                                                     <td className="px-2 py-1 text-gray-700">
                                                                                         {x.ai_notes ? x.ai_notes
-                                                                                            : (x.ai_result === 'no_match'
-                                                                                                ? 'The classifier read the scale and it did not match the typed weight; no further detail was returned.'
-                                                                                                : 'No reason recorded.')}
+                                                                                            : x.ai_result === 'match'
+                                                                                                ? 'Matched the typed weight; no further detail was returned.'
+                                                                                                : x.ai_result === 'no_match'
+                                                                                                    ? 'Did not match the typed weight; no further detail was returned.'
+                                                                                                    : x.ai_result === 'error'
+                                                                                                        ? 'The classifier call failed; no verdict was produced.'
+                                                                                                        : 'The AI never reached this photo — unreviewed, not passed.'}
                                                                                     </td>
                                                                                     <td className="px-2 py-1 whitespace-nowrap">
                                                                                         {x.result
