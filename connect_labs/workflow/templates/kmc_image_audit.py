@@ -80,6 +80,27 @@ OPP_META = {
 WEIGHT_IMAGE_PATH = "anthropometric/upload_weight_image"
 WEIGHT_FIELD_PATH = "child_weight_visit"
 
+# The ONLY form that carries WEIGHT_IMAGE_PATH, and therefore the only form worth selecting
+# from when capping photos per worker.
+#
+# This constant exists because visit SELECTION cannot filter by image. related_fields /
+# filter_by_image is applied at image EXTRACTION time; the selection layer
+# (filter_visits_for_audit) accepts no such parameter and silently drops the key. Capping raw
+# selected visits therefore caps visits of every type: on opp 1487, 80 of 200 sampled visits
+# are registration forms carrying no photo at this path at all (40%), so a cap of 20 could
+# yield anywhere from 20 photos down to zero depending on submission order.
+#
+# deliver_unit_types IS honoured by the selection backend — it matches form.@name and is
+# pushed into SQL — which makes it the cheap, window-size-independent way to make the cap
+# mean photos rather than visits.
+#
+# Verified against the deliver app definition of every scheduled opportunity — 1236 (EHA),
+# 1488 (NAMA), 1739 (Kikapu), 1790 (BERI) — plus observed form data for 1487 (PIPN): the name
+# is identical in all five, and in each app the audited path appears in this form and nowhere
+# else. The registration forms do declare an upload_weight_image, but at
+# child_details/upload_weight_image — a different path, not audited here.
+PHOTO_FORM_NAMES = ["Record Visit Details"]
+
 AGENT_FOR_SCALE = {DIGITAL: "scale_validation", DIAL: "scale_dial_read"}
 
 DEFINITION = {
@@ -104,6 +125,9 @@ DEFINITION = {
         "opp_meta": OPP_META,
         "weight_image_path": WEIGHT_IMAGE_PATH,
         "weight_field_path": WEIGHT_FIELD_PATH,
+        # Overridable so a form rename upstream can be absorbed with a definition patch
+        # instead of a release. See PHOTO_FORM_NAMES for why the cap needs it.
+        "photo_form_names": PHOTO_FORM_NAMES,
         "agent_for_scale": AGENT_FOR_SCALE,
     },
     "pipeline_sources": [],
@@ -1852,10 +1876,12 @@ READING_LABEL = "Scale Weight Reading"
 def _scheduled_criteria(*, opp_id, opp_meta, window_start, window_end, sample_percentage, image_path, field_path):
     """The same AuditCriteria the render code builds, assembled server-side.
 
-    filter_by_image narrows VISIT selection to visits carrying the weight photo;
-    it does not narrow the images on a matched visit. Kept identical to the UI so
-    a scheduled run and a hand-triggered one produce the same sessions for the
-    same window.
+    filter_by_image narrows the IMAGES kept once a visit's form JSON has been parsed,
+    at extraction time. It does NOT narrow visit selection: filter_visits_for_audit
+    takes no related_fields parameter and the key is dropped before it gets there. A
+    visit carrying no weight photo is therefore still selected here, and simply
+    contributes no images later - which is harmless for an uncapped run and is exactly
+    why a cap needs _capped_flw_visit_ids instead of slicing this selection.
     """
     meta = opp_meta.get(str(opp_id)) or {}
     label = meta.get("llo") or "Opportunity %s" % opp_id
@@ -1873,9 +1899,73 @@ def _scheduled_criteria(*, opp_id, opp_meta, window_start, window_end, sample_pe
                 "filter_by_image": True,
             }
         ],
-        "title": "KMC Image Audit - %s - %s to %s" % (label, window_start, window_end),
+        "title": f"KMC Image Audit - {label} - {window_start} to {window_end}",
         "tag": SESSION_TAG,
     }
+
+
+class _FormRenamed(Exception):
+    """The photo-bearing form matched nothing while the window held visits.
+
+    Raised rather than returning an empty selection so the caller reports a failure for
+    that opportunity instead of creating zero sessions and calling it an empty window.
+    """
+
+
+def _capped_flw_visit_ids(*, data_access, opp_id, criteria, cap, photo_form_names):
+    """Pick up to ``cap`` photo-bearing visits per field worker, most recent first.
+
+    Returns ``(flw_visit_ids, visit_ids)`` - the per-worker mapping run_audit_creation
+    groups sessions by, and the flat union that lets it skip its own visit-fetch stage.
+
+    The cap is applied to visits of the photo-bearing form only (see PHOTO_FORM_NAMES).
+    Sampling stays in the criteria and is applied by the backend before the cap, so the
+    two compose the same way they do in the UI: sample first, then take at most N each.
+
+    Raises _FormRenamed if the form filter matches nothing in a window that does hold
+    visits - the signature of an upstream form rename, which must not be mistaken for a
+    quiet week.
+    """
+    selection = dict(criteria)
+    selection["deliver_unit_types"] = list(photo_form_names)
+    # related_fields is meaningless to the selection layer and is dropped on the way to
+    # the backend anyway; leaving it in would only suggest it does something here.
+    selection.pop("related_fields", None)
+
+    _ids, visits = data_access.get_visit_ids_for_audit([opp_id], criteria=selection, return_visits=True)
+
+    if not visits:
+        # Distinguish "this form matched nothing" from "the window was quiet". Only the
+        # first is a fault, and it is invisible without asking the unfiltered question.
+        unfiltered = dict(selection)
+        unfiltered.pop("deliver_unit_types", None)
+        probe = data_access.get_visit_ids_for_audit([opp_id], criteria=unfiltered)
+        if probe:
+            raise _FormRenamed(
+                "no visits matched form %s though the window holds %d visit(s) - the form "
+                "was probably renamed upstream; set config.photo_form_names to its new name"
+                % (photo_form_names, len(probe))
+            )
+        return {}, []
+
+    per_flw = {}
+    for visit in visits:
+        username = visit.get("username")
+        if not username:
+            continue
+        per_flw.setdefault(username, []).append(visit)
+
+    flw_visit_ids = {}
+    for username, worker_visits in per_flw.items():
+        # Most recent first, so a cap keeps the freshest work rather than an arbitrary
+        # slice of whatever order the backend happened to return.
+        worker_visits.sort(key=lambda v: (v.get("visit_date") or ""), reverse=True)
+        chosen = [v["id"] for v in worker_visits[:cap] if v.get("id") is not None]
+        if chosen:
+            flw_visit_ids[username] = chosen
+
+    visit_ids = sorted({vid for ids in flw_visit_ids.values() for vid in ids})
+    return flw_visit_ids, visit_ids
 
 
 def run_default(*, definition, access_token, request=None, window=None, cadence=None, **_):
@@ -1894,11 +1984,17 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
     A per-opportunity failure is recorded and the loop continues - one
     unreachable opportunity must not cost the others their audits.
 
+    schedule_defaults.max_per_flw caps photos per field worker. It is applied here
+    rather than through AuditCriteria because no criteria field expresses "at most N
+    per worker WITHIN a date window" - count_per_flw belongs to last_n_per_flw, which
+    ignores the window. See _capped_flw_visit_ids.
+
     Returns {"run_id", "sessions_created", "status"}; status is "ready" if
     anything was created and "failed" if nothing was.
     """
     from datetime import date
 
+    from connect_labs.audit.data_access import AuditDataAccess
     from connect_labs.audit.tasks import run_audit_creation
     from connect_labs.workflow.audit_generation import resolve_window, window_preset_for_cadence
     from connect_labs.workflow.data_access import WorkflowDataAccess
@@ -1909,6 +2005,7 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
     agent_for_scale = cfg.get("agent_for_scale") or AGENT_FOR_SCALE
     image_path = cfg.get("weight_image_path") or WEIGHT_IMAGE_PATH
     field_path = cfg.get("weight_field_path") or WEIGHT_FIELD_PATH
+    photo_form_names = cfg.get("photo_form_names") or PHOTO_FORM_NAMES
 
     opp_ids = [int(o) for o in (defaults.get("opportunity_ids") or [])]
     if not opp_ids:
@@ -1931,6 +2028,12 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
 
     sample_percentage = defaults.get("sample_percentage", 100)
     agent_override = defaults.get("agent_override") or {}
+    # A ceiling on photos per field worker, the headless twin of the UI's "max per FLW".
+    # Absent or <= 0 means no cap, which is the behaviour this template shipped with.
+    try:
+        max_per_flw = int(defaults.get("max_per_flw") or 0)
+    except (TypeError, ValueError):
+        max_per_flw = 0
 
     owner_id = definition.opportunity_id or (definition.opportunity_ids or [None])[0]
     if not owner_id:
@@ -1954,6 +2057,9 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
                 "window_end": window_end,
                 "selected_opps": opp_ids,
                 "sample_percentage": sample_percentage,
+                # Same key the render code writes, so the run reads back into the UI's
+                # cap field rather than looking uncapped when reopened.
+                "max_per_flw": max_per_flw or None,
                 # Mirrors what the render code writes, so a scheduled run reads the
                 # same in the run-history table as a hand-triggered one.
                 "llo_summary": llo_summary,
@@ -1986,6 +2092,33 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
             field_path=field_path,
         )
         try:
+            extra_kwargs = {}
+            if max_per_flw > 0:
+                # Choose the visits here rather than letting the creation task select them,
+                # because a cap cannot be expressed in AuditCriteria: count_per_flw applies
+                # only to last_n_per_flw, which ignores the date window entirely.
+                data_access = AuditDataAccess(opportunity_id=opp_id, access_token=access_token)
+                try:
+                    flw_visit_ids, capped_visit_ids = _capped_flw_visit_ids(
+                        data_access=data_access,
+                        opp_id=opp_id,
+                        criteria=criteria,
+                        cap=max_per_flw,
+                        photo_form_names=photo_form_names,
+                    )
+                finally:
+                    data_access.close()
+                if not flw_visit_ids:
+                    empty.append(opp_id)
+                    continue
+                # run_audit_creation only honours flw_visit_ids alongside
+                # selected_flw_user_ids; without it the mapping is ignored and the run
+                # silently reverts to uncapped.
+                criteria["selected_flw_user_ids"] = sorted(flw_visit_ids)
+                extra_kwargs["flw_visit_ids"] = flw_visit_ids
+                # Passing the flat union too lets the task skip re-selecting visits.
+                extra_kwargs["visit_ids"] = capped_visit_ids
+
             eager = run_audit_creation.apply(
                 kwargs={
                     "access_token": access_token,
@@ -1994,6 +2127,7 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
                     "criteria": criteria,
                     "workflow_run_id": run.id,
                     "ai_agent_id": agent_id,
+                    **extra_kwargs,
                 }
             )
             if eager.successful() and isinstance(eager.result, dict):
@@ -2006,14 +2140,14 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
                 # record-creation API surfaced as {status: failed, errors: []} with nothing to act on.
                 if not created:
                     if result.get("success") is False or result.get("error"):
-                        errors.append("%s: %s" % (opp_id, result.get("error") or result))
+                        errors.append("{}: {}".format(opp_id, result.get("error") or result))
                     else:
                         empty.append(opp_id)
             else:
-                errors.append("%s: %s" % (opp_id, eager.result))
+                errors.append(f"{opp_id}: {eager.result}")
         except Exception as exc:  # noqa: BLE001 - one bad opportunity must not end the batch
             logger.exception("kmc_image_audit scheduled run failed for opportunity %s", opp_id)
-            errors.append("%s: %s" % (opp_id, exc))
+            errors.append(f"{opp_id}: {exc}")
 
     # An empty window is a legitimate outcome, not a failure: a weekly schedule over a quiet period
     # audits nothing and that is correct. Only report failure when something actually went wrong,
