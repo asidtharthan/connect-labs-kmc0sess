@@ -877,7 +877,11 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     // produced, with FLW and photo counts filled in. Same component, two truths, never mixed.
     const coverage = (phase === 'config')
         ? selected.map(id => ({ opp: id, llo: meta(id).llo || ('#' + id), flws: null, photos: null }))
-        : rollup.byOpp.map(o => ({ opp: o.opp, llo: o.llo, flws: o.sessions, photos: o.images }));
+        : rollup.byOpp.map(o => ({ opp: o.opp, llo: o.llo, flws: o.sessions, photos: o.images }))
+            // Selected but produced nothing: shown here for the same reason the table below
+            // shows them. A strip listing four LLOs above a table listing five is a header
+            // contradicting its own body.
+            .concat(emptyOpps.map(id => ({ opp: id, llo: meta(id).llo || ('#' + id), flws: 0, photos: 0 })));
     const winLabel = (startDate && endDate) ? (startDate + ' → ' + endDate) : 'no window set';
 
     return (
@@ -1004,8 +1008,12 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                         <Card label="FLW audits" value={num(rollup.flws)} sub={rollup.byOpp.length + ' opportunit' + (rollup.byOpp.length === 1 ? 'y' : 'ies')} tone="border-blue-400" />
                         <Card label="Weight photos" value={num(rollup.images)} sub="one per audited visit" tone="border-gray-300" />
-                        <Card label="AI reviewed" value={num(rollup.reviewed)}
-                            sub={rollup.notReviewed ? (rollup.notReviewed + ' never reviewed') : (pct(rollup.reviewed, rollup.images) + ' of photos')}
+                        <Card label="AI scored" value={num(rollup.reviewed)}
+                            sub={rollup.aiPending
+                                ? (rollup.aiPending + ' awaiting a verdict')
+                                : rollup.notReviewed
+                                    ? (rollup.notReviewed + ' never reviewed')
+                                    : (pct(rollup.reviewed, rollup.images) + ' of photos')}
                             tone={rollup.notReviewed ? 'border-red-500' : 'border-indigo-400'} />
                         <Card label="Match" value={num(rollup.match)} sub={pct(rollup.match, rollup.scored) + ' of scored'} tone="border-green-500" />
                         <Card label="No match" value={num(rollup.noMatch)} sub={rollup.noMatchPct + '% of scored'} tone="border-amber-500" />
