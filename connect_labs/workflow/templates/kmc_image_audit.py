@@ -183,9 +183,14 @@ RENDER_CODE = """function WorkflowUI({ definition, instance, actions, onUpdateSt
     const [endDate, setEndDate] = React.useState(runState.window_end || '');
     // Volume control. sample_percentage is the ONLY lever this backend honours for a
     // date_range audit: count_per_flw applies solely to last_n_per_flw, and there is no
-    // max_flws in AuditCriteria at all (passing one is silently ignored). Sampling is per
-    // FLW, so every worker keeps representation rather than the busiest ones crowding out
-    // the rest -- see filter_visits_for_audit.
+    // max_flws in AuditCriteria at all (passing one is silently ignored).
+    //
+    // It is a single random sample ACROSS THE OPPORTUNITY, not per worker: the backend
+    // does order_by('?') then one LIMIT, with no partition on username (contrast
+    // last_n_per_user right above it, which does partition) -- see
+    // backends/sql/cache.py filter_visits. So a low-volume worker can drop out of a run
+    // entirely, and which workers appear moves between runs on identical data. The
+    // per-worker cap below is what evens out contribution; sampling does not.
     const [samplePct, setSamplePct] = React.useState(runState.sample_percentage != null ? runState.sample_percentage : 100);
     // Hard cap on photos per field worker. sample_percentage is proportional, so a worker with 200
     // visits still contributes ~8x one with 25 — the busiest crowd out the rest and the volume of a
@@ -2019,12 +2024,14 @@ def _capped_flw_visit_ids(*, data_access, opp_id, criteria, cap, photo_form_name
     groups sessions by, and the flat union that lets it skip its own visit-fetch stage.
 
     The cap is applied to visits of the photo-bearing form only (see PHOTO_FORM_NAMES).
-    Sampling stays in the criteria and is applied by the backend before the cap, so the
-    two compose the same way they do in the UI: sample first, then take at most N each.
+    Sampling stays in the criteria and the backend applies it first, so the order is
+    sample then cap. Note the sample is one random draw across the whole opportunity, NOT
+    per worker, so it can drop a quiet worker before the cap ever sees them - the cap
+    bounds the busy, it cannot rescue the quiet.
 
-    Raises _FormRenamed if the form filter matches nothing in a window that does hold
-    visits - the signature of an upstream form rename, which must not be mistaken for a
-    quiet week.
+    Raises _FormRenamed only when the configured form appears nowhere in the opportunity.
+    A window with no photo visits is NOT that - registration-only days are ordinary here -
+    so it returns an empty selection instead and lets the run report itself empty.
     """
     selection = dict(criteria)
     selection["deliver_unit_types"] = list(photo_form_names)
@@ -2035,16 +2042,25 @@ def _capped_flw_visit_ids(*, data_access, opp_id, criteria, cap, photo_form_name
     _ids, visits = data_access.get_visit_ids_for_audit([opp_id], criteria=selection, return_visits=True)
 
     if not visits:
-        # Distinguish "this form matched nothing" from "the window was quiet". Only the
-        # first is a fault, and it is invisible without asking the unfiltered question.
-        unfiltered = dict(selection)
-        unfiltered.pop("deliver_unit_types", None)
-        probe = data_access.get_visit_ids_for_audit([opp_id], criteria=unfiltered)
-        if probe:
+        # Distinguish "the form no longer exists" from "no photo visits this window".
+        #
+        # Asking whether the window held OTHER visit types cannot tell those apart: a day
+        # of registrations only looks exactly like a rename, and registration-only days
+        # are common here - a third of these opportunities' visits are registrations. So
+        # the old probe cried wolf on ordinary quiet days and marked the schedule FAILED.
+        #
+        # What does settle it is whether the form appears in the opportunity AT ALL, which
+        # is a different question from whether it appears in this window.
+        try:
+            known_forms = data_access.get_deliver_unit_types(opp_id)
+        except Exception:  # noqa: BLE001 - a lookup failure must not become a false alarm
+            logger.warning("kmc_image_audit could not list form names for opportunity %s", opp_id)
+            known_forms = []
+        if known_forms and not set(photo_form_names) & set(known_forms):
             raise _FormRenamed(
-                "no visits matched form %s though the window holds %d visit(s) - the form "
-                "was probably renamed upstream; set config.photo_form_names to its new name"
-                % (photo_form_names, len(probe))
+                "form %s appears nowhere in opportunity %s (it has: %s) - the form was "
+                "probably renamed upstream; set config.photo_form_names to its new name"
+                % (photo_form_names, opp_id, sorted(known_forms))
             )
         return {}, []
 
@@ -2094,7 +2110,7 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
     """
     from datetime import date
 
-    from connect_labs.audit.data_access import AuditDataAccess
+    from connect_labs.audit.data_access import AuditDataAccess, create_mock_request
     from connect_labs.audit.tasks import run_audit_creation
     from connect_labs.workflow.audit_generation import resolve_window, window_preset_for_cadence
     from connect_labs.workflow.data_access import WorkflowDataAccess
@@ -2107,7 +2123,12 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
     field_path = cfg.get("weight_field_path") or WEIGHT_FIELD_PATH
     photo_form_names = cfg.get("photo_form_names") or PHOTO_FORM_NAMES
 
-    opp_ids = [int(o) for o in (defaults.get("opportunity_ids") or [])]
+    # Deduped and sorted. The dialog already dedupes, but config is hand-editable and a
+    # repeated id would audit that opportunity twice - the second pass resuming onto the
+    # first's checkpoint and re-reporting its sessions, so sessions_created double-counts.
+    raw_opp_ids = defaults.get("opportunity_ids")
+    raw_opp_ids = raw_opp_ids if isinstance(raw_opp_ids, list) else []
+    opp_ids = sorted({int(o) for o in raw_opp_ids if str(o).lstrip("-").isdigit()})
     if not opp_ids:
         # Loud rather than a silent no-op: a schedule that quietly audits nothing
         # every night is worse than one that visibly fails.
@@ -2169,6 +2190,11 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
                 # Same key the render code writes, so the run reads back into the UI's
                 # cap field rather than looking uncapped when reopened.
                 "max_per_flw": max_per_flw or None,
+                # Without these two the dashboard re-derives the agent from OPP_META and
+                # the window from a default preset, so a scheduled run is shown as having
+                # used a different classifier and a different period than it actually did.
+                "agent_override": agent_override,
+                "date_preset": "custom",
                 # Mirrors what the render code writes, so a scheduled run reads the
                 # same in the run-history table as a hand-triggered one.
                 "llo_summary": llo_summary,
@@ -2188,6 +2214,7 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
     errors = []
     empty = []  # opportunities whose window simply held no matching visits
     planned = []  # dry run only: what each opportunity WOULD have audited
+    empty_sessions = 0  # created but with no images - see the blank count below
     for opp_id in opp_ids:
         meta = opp_meta.get(str(opp_id)) or {}
         scale = meta.get("scale") or DIGITAL
@@ -2209,7 +2236,12 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
                 # Choose the visits here rather than letting the creation task select them,
                 # because a cap cannot be expressed in AuditCriteria: count_per_flw applies
                 # only to last_n_per_flw, which ignores the date window entirely.
-                data_access = AuditDataAccess(opportunity_id=opp_id, access_token=access_token)
+                # request=, NOT access_token= on its own. AuditDataAccess.pipeline raises
+                # "Request required for pipeline access" when self.request is None, and
+                # get_visit_ids_for_audit reaches that pipeline - so an access_token alone
+                # makes every capped or dry run die in selection. Every other headless
+                # caller builds the mock request for exactly this reason.
+                data_access = AuditDataAccess(opportunity_id=opp_id, request=create_mock_request(access_token, opp_id))
                 try:
                     flw_visit_ids, capped_visit_ids = _capped_flw_visit_ids(
                         data_access=data_access,
@@ -2270,8 +2302,26 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
             )
             if eager.successful() and isinstance(eager.result, dict):
                 result = eager.result
-                created = len(result.get("sessions") or [])
+                sessions = result.get("sessions") or []
+                created = len(sessions)
                 sessions_created += created
+
+                # Some sessions can come back with no images, and they are worth counting
+                # separately rather than reporting as ordinary audits.
+                #
+                # The cap selects on form name; whether a photo is actually present is
+                # only known later, at extraction. So a worker whose capped visits all
+                # turned out to have skipped the photo yields a session with 0 images -
+                # nothing for a reviewer to open. run_audit_creation creates it anyway on
+                # this path (the branch that groups from extracted images skips them, but
+                # the pre-grouped branch a cap uses does not), and changing that is a
+                # shared-behaviour question for its own PR - four existing tests encode
+                # the current behaviour. Reporting it is this template's business either
+                # way: silently counting them makes a run look more productive than it was.
+                blank = sum(1 for s in sessions if not s.get("images"))
+                if blank:
+                    empty_sessions += blank
+                    logger.info("kmc_image_audit opp %s: %d of %d sessions have no images", opp_id, blank, created)
                 # A task can succeed having created nothing - either the window held no matching
                 # visits, or the audit app declined. Distinguish them: an explicit failure inside a
                 # successful task must not be swallowed, which is how a live HTTP 500 from the
@@ -2309,6 +2359,10 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
         "errors": errors,
         "empty_opportunities": empty,
     }
+    if empty_sessions:
+        # Named rather than folded into sessions_created, so "20 sessions" cannot quietly
+        # mean "17 reviewable ones and 3 nobody can open".
+        outcome["sessions_without_images"] = empty_sessions
     if dry_run:
         outcome["dry_run"] = True
         outcome["planned"] = planned
@@ -2327,6 +2381,7 @@ def run_default(*, definition, access_token, request=None, window=None, cadence=
                     "run_status": status,
                     "run_errors": errors,
                     "empty_opportunities": empty,
+                    "sessions_without_images": empty_sessions,
                     "max_per_flw": max_per_flw or None,
                     "dry_run": dry_run,
                     "planned": planned,
@@ -2377,7 +2432,9 @@ TEMPLATE["schedule_options"] = [
         "key": "sample_percentage",
         "type": "int",
         "label": "Sample %",
-        "help": "Share of each worker's visits considered, applied before the cap.",
+        "help": "Random sample across the whole opportunity, applied before the cap. Not "
+        "per worker, so at low percentages a quiet worker can be missed entirely and which "
+        "workers appear varies between runs.",
         "min": 1,
         "max": 100,
     },

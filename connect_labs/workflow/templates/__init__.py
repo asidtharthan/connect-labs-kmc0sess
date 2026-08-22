@@ -203,16 +203,24 @@ def schedule_options_for_definition(definition) -> list[dict]:
     """
     if definition is None:
         return []
+    # Every read below treats config as UNTRUSTED. It is operator-editable JSON that this
+    # template's own docs tell people to hand-patch, and this function runs while building
+    # the workflow LIST page - so a scalar where a dict was expected would raise inside a
+    # comprehension, get swallowed by the page's blanket handler, and render zero
+    # workflows for everyone in the opportunity, including the page needed to fix it.
     data = getattr(definition, "data", None) or {}
-    config = data.get("config") or {}
-    defaults = config.get(SCHEDULE_DEFAULTS_CONFIG_KEY) or {}
+    config = data.get("config")
+    config = config if isinstance(config, dict) else {}
+    defaults = config.get(SCHEDULE_DEFAULTS_CONFIG_KEY)
+    defaults = defaults if isinstance(defaults, dict) else {}
 
     options = []
     for opt in template_schedule_options(getattr(definition, "template_type", None)):
         filled = dict(opt)
         filled["value"] = defaults.get(opt["key"])
         if opt["type"] == "multi_int":
-            raw = config.get(opt.get("choices_from_config") or "") or {}
+            raw = config.get(opt.get("choices_from_config") or "")
+            raw = raw if isinstance(raw, dict) else {}
             choices = []
             for value, label in raw.items():
                 try:
@@ -220,8 +228,11 @@ def schedule_options_for_definition(definition) -> list[dict]:
                 except (TypeError, ValueError):
                     continue
             filled["choices"] = sorted(choices, key=lambda c: c["value"])
-            # Selected set, as ints, so the template can test membership directly.
-            filled["selected"] = [int(v) for v in (filled["value"] or []) if str(v).lstrip("-").isdigit()]
+            # Selected set, as ints, so the template can test membership directly. A
+            # non-list value (a bare int, a string) is treated as nothing selected rather
+            # than iterated - iterating a string would silently select its digits.
+            saved = filled["value"] if isinstance(filled["value"], list) else []
+            filled["selected"] = [int(v) for v in saved if str(v).lstrip("-").isdigit()]
             # No choices means the config key this option reads is missing or unusable.
             # Left unflagged that renders a labelled control with nothing in it, which
             # posts an empty set, fails validation, and blocks the whole schedule from

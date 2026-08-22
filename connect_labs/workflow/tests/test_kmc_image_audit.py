@@ -85,6 +85,15 @@ def patched():
         wda_cls.return_value.create_run.return_value = SimpleNamespace(id=4242)
         task.apply.return_value = _EagerResult()
         ada_cls.return_value.get_visit_ids_for_audit.side_effect = _selection([])
+        # The form the cap selects on exists in this opportunity by default, so an empty
+        # window reads as a quiet window. Rename tests override this with a list that does
+        # NOT contain it. Left as a bare Mock, set() on it raises and the guard's own
+        # except swallows the error - which would make a rename test pass for the wrong
+        # reason.
+        ada_cls.return_value.get_deliver_unit_types.return_value = [
+            "Record Visit Details",
+            "Child Registration Form",
+        ]
         created["wda"] = wda_cls
         created["task"] = task
         created["ada"] = ada_cls
@@ -371,16 +380,44 @@ def test_cap_sends_selected_flw_user_ids_with_the_mapping(patched):
     assert set(kwargs["flw_visit_ids"]) == {"alice", "bob"}
 
 
-def test_renamed_photo_form_is_reported_not_passed_off_as_a_quiet_window(patched):
-    """Nothing matching the form while the window HOLDS visits is a fault. Reporting it
-    as "empty" would hide a schedule that silently audits nothing every night."""
-    patched["ada"].return_value.get_visit_ids_for_audit.side_effect = _selection([], unfiltered=[7, 8, 9])
+def test_a_form_missing_from_the_opportunity_is_reported_as_a_rename(patched):
+    """A schedule that silently audits nothing every night is the outcome to avoid, so a
+    form that no longer exists must be loud."""
+    patched["ada"].return_value.get_visit_ids_for_audit.side_effect = _selection([])
+    patched["ada"].return_value.get_deliver_unit_types.return_value = [
+        "Child Registration Form",
+        "Record Visit Details v2",  # renamed upstream
+    ]
     result = run_default(definition=_capped(), access_token="t", cadence="daily")
 
     assert result["status"] == "failed"
     assert result["empty_opportunities"] == []
     assert "photo_form_names" in result["errors"][0]
+    # The message names what the opportunity actually has, so the fix is obvious.
+    assert "Record Visit Details v2" in result["errors"][0]
     patched["task"].apply.assert_not_called()
+
+
+def test_a_window_with_no_photo_visits_is_empty_not_a_rename(patched):
+    """The regression this replaced: the old guard asked whether the window held ANY
+    visits, so a registrations-only day — ordinary here, a third of visits are
+    registrations — was reported as a renamed form and marked the schedule FAILED."""
+    patched["ada"].return_value.get_visit_ids_for_audit.side_effect = _selection([], unfiltered=[7, 8, 9])
+    result = run_default(definition=_capped(), access_token="t", cadence="daily")
+
+    assert result["status"] == "empty"
+    assert result["empty_opportunities"] == [DIGITAL_OPP]
+    assert result["errors"] == []
+
+
+def test_a_failed_form_name_lookup_does_not_raise_a_false_alarm(patched):
+    """Unable to tell the two apart, say nothing rather than cry wolf."""
+    patched["ada"].return_value.get_visit_ids_for_audit.side_effect = _selection([])
+    patched["ada"].return_value.get_deliver_unit_types.side_effect = RuntimeError("cache unavailable")
+    result = run_default(definition=_capped(), access_token="t", cadence="daily")
+
+    assert result["status"] == "empty"
+    assert result["errors"] == []
 
 
 def test_genuinely_quiet_window_with_a_cap_is_empty_not_a_failure(patched):
@@ -396,12 +433,17 @@ def test_genuinely_quiet_window_with_a_cap_is_empty_not_a_failure(patched):
 def test_one_opportunitys_rename_does_not_cost_the_others_their_audits(patched):
     def per_opp(opportunity_ids, criteria=None, return_visits=False, **kwargs):
         if opportunity_ids == [DIAL_OPP]:
-            return ([], []) if return_visits else [7]
+            return ([], []) if return_visits else []
         if return_visits:
             return [1], [_visit(1, "alice", "2026-08-01")]
         return []
 
+    def forms(opp_id=None):
+        # The form was renamed in the dial opportunity only.
+        return ["Something Else"] if opp_id == DIAL_OPP else ["Record Visit Details"]
+
     patched["ada"].return_value.get_visit_ids_for_audit.side_effect = per_opp
+    patched["ada"].return_value.get_deliver_unit_types.side_effect = forms
     definition = _capped(opportunity_ids=[DIAL_OPP, DIGITAL_OPP])
     result = run_default(definition=definition, access_token="t", cadence="daily")
 
@@ -618,12 +660,25 @@ def test_a_string_dry_run_errs_towards_creating_nothing(patched):
 
 def test_a_dry_run_that_cannot_even_select_is_a_failure(patched):
     """Cheapest possible warning that an armed run would fail the same way."""
-    patched["ada"].return_value.get_visit_ids_for_audit.side_effect = _selection([], unfiltered=[7, 8])
+    patched["ada"].return_value.get_visit_ids_for_audit.side_effect = _selection([])
+    patched["ada"].return_value.get_deliver_unit_types.return_value = ["Renamed Visit Form"]
     definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP], "dry_run": True})
     result = run_default(definition=definition, access_token="t", cadence="daily")
 
     assert result["status"] == "failed"
     assert result["errors"]
+
+
+def test_a_dry_run_over_a_quiet_window_reports_empty_not_failed(patched):
+    """A dry run finding nothing to audit is information, not a fault."""
+    patched["ada"].return_value.get_visit_ids_for_audit.side_effect = _selection([])
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP], "dry_run": True})
+    result = run_default(definition=definition, access_token="t", cadence="daily")
+
+    assert result["status"] == "dry_run"
+    assert result["errors"] == []
+    assert result["empty_opportunities"] == [DIGITAL_OPP]
+    assert result["planned"] == []
 
 
 def test_the_outcome_is_recorded_on_the_run(patched):
@@ -718,3 +773,136 @@ def test_an_option_whose_choices_cannot_be_resolved_is_flagged_not_silently_empt
     assert opps["unavailable"] is True
     # The key it wanted is reported, so the dialog can name it.
     assert opps["choices_from_config"] == "opp_names"
+
+
+# ── The selection client must be usable, not just constructible ───────────────
+#
+# Every test above patches AuditDataAccess itself, so the real constructor and the real
+# `pipeline` property never run. That hid a defect that made the whole cap non-functional:
+# built with access_token alone, `request` stays None and `AuditDataAccess.pipeline` raises
+# "Request required for pipeline access" — which get_visit_ids_for_audit goes straight
+# through. These tests deliberately do NOT mock the class.
+
+
+def test_run_default_builds_a_selection_client_whose_pipeline_is_reachable():
+    """The real constructor, the real property. Patching only the pipeline's collaborator
+    is what keeps this honest — anything more and the bug hides again."""
+    from connect_labs.audit.data_access import AuditDataAccess, create_mock_request
+
+    # This is precisely what run_default now does.
+    data_access = AuditDataAccess(opportunity_id=DIGITAL_OPP, request=create_mock_request("tok", DIGITAL_OPP))
+    try:
+        # The property that used to raise. Reaching it at all is the assertion.
+        assert data_access.pipeline is not None
+    finally:
+        data_access.close()
+
+
+def test_an_access_token_alone_is_not_enough():
+    """Pins WHY the mock request is there, so a future simplification cannot quietly
+    remove it and reintroduce a non-functional cap."""
+    from connect_labs.audit.data_access import AuditDataAccess
+
+    data_access = AuditDataAccess(opportunity_id=DIGITAL_OPP, access_token="tok")
+    try:
+        with pytest.raises(ValueError, match="Request required"):
+            data_access.pipeline
+    finally:
+        data_access.close()
+
+
+def test_the_capped_path_constructs_that_client_the_working_way(patched):
+    """Asserts the call run_default actually makes, so the fix cannot regress silently
+    even while AuditDataAccess stays mocked for the behavioural tests."""
+    patched["ada"].return_value.get_visit_ids_for_audit.side_effect = _selection([_visit(1, "alice", "2026-08-01")])
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP], "max_per_flw": 5})
+    run_default(definition=definition, access_token="t", cadence="daily")
+
+    kwargs = patched["ada"].call_args.kwargs
+    assert kwargs["opportunity_id"] == DIGITAL_OPP
+    assert kwargs.get("request") is not None, "no request means pipeline access raises"
+    assert "access_token" not in kwargs, "an access_token alone was the bug"
+    # And the request really carries the token, or every API call 401s.
+    assert kwargs["request"].session["labs_oauth"]["access_token"] == "t"
+
+
+# ── Findings from the adversarial audit ───────────────────────────────────────
+
+
+def test_duplicate_opportunity_ids_are_audited_once(patched):
+    """config is hand-editable, and a repeated id resumed onto the first pass's checkpoint
+    and re-reported its sessions, so sessions_created double-counted."""
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP, DIGITAL_OPP, DIAL_OPP]})
+    result = run_default(definition=definition, access_token="t", cadence="daily")
+
+    audited = [c.kwargs["kwargs"]["opportunities"][0]["id"] for c in patched["task"].apply.call_args_list]
+    assert sorted(audited) == [DIAL_OPP, DIGITAL_OPP]
+    assert result["sessions_created"] == 2
+
+
+@pytest.mark.parametrize("bad", ["1487", 1487, None, {"a": 1}])
+def test_a_non_list_opportunity_ids_does_not_crash_the_run(patched, bad):
+    """A string would otherwise be iterated character by character."""
+    definition = _definition(schedule_defaults={"opportunity_ids": bad})
+    result = run_default(definition=definition, access_token="t", cadence="daily")
+
+    assert result["status"] == "failed"
+    assert "opportunity_ids is empty" in result["error"]
+    patched["task"].apply.assert_not_called()
+
+
+def test_a_task_that_reports_failure_without_raising_is_recorded(patched):
+    """CELERY_TASK_EAGER_PROPAGATES is set only in config/settings/local.py, so in
+    production a failed task does NOT raise — apply() returns a result whose successful()
+    is False. The other failure tests use side_effect and so exercise the outer handler
+    instead, leaving this branch untested."""
+    patched["task"].apply.side_effect = [_EagerResult(ok=False), _EagerResult(sessions=2)]
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIAL_OPP, DIGITAL_OPP]})
+    result = run_default(definition=definition, access_token="t", cadence="daily")
+
+    assert patched["task"].apply.call_count == 2
+    assert result["sessions_created"] == 2
+    assert result["status"] == "ready"
+    assert any("boom" in e for e in result["errors"]), result["errors"]
+
+
+def test_the_run_records_the_agents_and_window_it_actually_used(patched):
+    """Omitted, the dashboard re-derives the agent from OPP_META and the window from a
+    default preset, so a scheduled run is shown having used a classifier and a period it
+    did not."""
+    override = {str(DIGITAL_OPP): "scale_dial_read"}
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP], "agent_override": override})
+    run_default(definition=definition, access_token="t", cadence="daily")
+
+    state = patched["wda"].return_value.create_run.call_args.kwargs["initial_state"]
+    assert state["agent_override"] == override
+    assert state["date_preset"] == "custom"
+    # And the window it recorded is the one it audited.
+    criteria = patched["task"].apply.call_args.kwargs["kwargs"]["criteria"]
+    assert state["window_start"] == criteria["start_date"]
+    assert state["window_end"] == criteria["end_date"]
+
+
+def test_sessions_with_no_images_are_counted_separately(patched):
+    """The cap selects on form name; whether a photo is really there is only known at
+    extraction. So a session can come back with nothing to review. Folding those into
+    sessions_created would make a run look more productive than it was."""
+    patched["task"].apply.return_value = _EagerResult(
+        payload={"sessions": [{"id": 1, "images": 4}, {"id": 2, "images": 0}, {"id": 3, "images": 0}]}
+    )
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP]})
+    result = run_default(definition=definition, access_token="t", cadence="daily")
+
+    assert result["sessions_created"] == 3
+    assert result["sessions_without_images"] == 2
+    state = patched["wda"].return_value.update_run_state.call_args.args[1]
+    assert state["sessions_without_images"] == 2
+
+
+def test_a_run_whose_sessions_all_have_images_reports_none_blank(patched):
+    patched["task"].apply.return_value = _EagerResult(payload={"sessions": [{"id": 1, "images": 2}]})
+    definition = _definition(schedule_defaults={"opportunity_ids": [DIGITAL_OPP]})
+    result = run_default(definition=definition, access_token="t", cadence="daily")
+
+    assert result["sessions_created"] == 1
+    assert "sessions_without_images" not in result

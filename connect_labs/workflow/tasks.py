@@ -879,6 +879,12 @@ def run_scheduled_workflow(schedule_id: int) -> dict:
                 errors.insert(0, str(result["error"]))
             if result.get("status") == "failed":
                 sched.last_status = WorkflowSchedule.STATUS_FAILED
+            elif result.get("status") == "dry_run":
+                # A dry run succeeds having created nothing, which is indistinguishable
+                # from a healthy run in a green OK pill. Saying so here is what stops a
+                # schedule left in dry-run mode looking like it is doing its job. (A
+                # distinct last_status would need a migration for one advisory state.)
+                errors.append("dry run - reported only, no audits created")
             if errors:
                 # Recorded even when the run overall succeeded: "created audits for 4 of
                 # 5 opportunities" is a success still worth acting on, and last_error is

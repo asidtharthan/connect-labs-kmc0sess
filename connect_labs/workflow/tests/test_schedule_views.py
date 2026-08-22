@@ -459,3 +459,104 @@ def test_marking_the_seed_safe_would_break_the_attribute():
     # The raw `"` closes x-data at the first JSON key, so the attribute is truncated and
     # `open: false` is never part of it.
     assert not values or "open: false" not in values[0]
+
+
+# ── Findings from the adversarial audit ───────────────────────────────────────
+
+
+def test_a_stored_out_of_range_value_does_not_block_saving_the_schedule():
+    """The dialog posts EVERY option, so an out-of-range value already in config — set by
+    hand, or stranded by a narrowed max — made cadence, hour and opportunities unsaveable
+    on a field the user never touched. Seeding a legal value means they are never posting
+    something they did not enter."""
+    from connect_labs.workflow.views import _schedule_seed_value
+
+    option = {"key": "max_per_flw", "type": "int", "min": 1, "max": 500, "value": 5000}
+    assert _schedule_seed_value(option) == 500
+
+    option["value"] = 0
+    assert _schedule_seed_value(option) == 1
+
+
+def test_the_seed_helper_itself_is_what_the_view_uses():
+    """Reimplementing it in the test let a change from "" to 0 for an unset int pass."""
+    from connect_labs.workflow.views import _schedule_seed_value
+
+    assert _schedule_seed_value({"key": "a", "type": "int", "min": 1, "max": 9, "value": None}) == ""
+    assert _schedule_seed_value({"key": "a", "type": "int", "min": 1, "max": 9, "value": "junk"}) == ""
+    assert _schedule_seed_value({"key": "b", "type": "bool", "value": None}) is False
+    assert _schedule_seed_value({"key": "c", "type": "multi_int", "selected": [2, 1]}) == [2, 1]
+    assert _schedule_seed_value({"key": "c", "type": "multi_int", "selected": None}) == []
+
+
+@pytest.mark.django_db
+def test_no_selectable_choices_rejects_every_value(client, logged_in):
+    """With the `unavailable` state this is now an EXPECTED condition, and the omission is
+    client-side only — so any id would otherwise persist and later be dereferenced with
+    the schedule owner's minted token."""
+    options = [{"key": "opportunity_ids", "type": "multi_int", "label": "Opportunities", "choices": []}]
+    resp, update = _post_defaults(client, {"opportunity_ids": [999]}, options=options)
+
+    assert resp.status_code == 400
+    assert "999" in resp.json()["error"]
+    update.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_an_upstream_write_failure_returns_json_not_an_html_500(client, logged_in):
+    """update_record RAISES rather than returning None, so without an except the caller
+    got Django's HTML error page into `await response.json()` — surfacing as
+    "Unexpected token '<'" instead of the intended message."""
+    from connect_labs.labs.integrations.connect.api_client import LabsAPIError
+
+    session = client.session
+    session["labs_oauth"] = {"access_token": "tok"}
+    session.save()
+    with (
+        mock.patch("connect_labs.workflow.views._resolve_schedule_scope", return_value=(1237, None)),
+        mock.patch("connect_labs.workflow.views.template_supports_default_run", return_value=True),
+        mock.patch("connect_labs.workflow.views.schedule_options_for_definition", return_value=SCHED_OPTS),
+        mock.patch("connect_labs.workflow.views.WorkflowDataAccess") as DA,
+    ):
+        definition = mock.Mock(id=42, template_type="kmc_image_audit")
+        definition.name = "KMC Image Audit"
+        DA.return_value.get_definition.return_value = definition
+        DA.return_value.update_schedule_defaults.side_effect = LabsAPIError("upstream 500")
+        resp = client.post(
+            reverse("labs:workflow:api_schedule_upsert", args=[42]),
+            data=json.dumps({"cadence": "daily", "hour": 6, "defaults": {"max_per_flw": 10}}),
+            content_type="application/json",
+        )
+
+    assert resp.status_code == 502
+    assert resp["Content-Type"].startswith("application/json")
+    assert "schedule settings" in resp.json()["error"]
+    assert not WorkflowSchedule.objects.filter(definition_id=42).exists()
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"schedule_defaults": "not-a-dict"},
+        {"schedule_defaults": 7},
+        {"schedule_defaults": {"opportunity_ids": "1487"}},
+        {"schedule_defaults": {"opportunity_ids": 1487}},
+        {"opp_names": "not-a-dict", "schedule_defaults": {}},
+        "config-itself-not-a-dict",
+    ],
+)
+def test_a_malformed_config_cannot_blank_the_workflow_list_page(config):
+    """This runs while building the LIST page, so an exception here is swallowed by the
+    page's blanket handler and renders ZERO workflows for everyone in the opportunity —
+    including the page needed to fix it. The docs invite hand-patching this key."""
+    from connect_labs.workflow.templates import schedule_options_for_definition
+
+    definition = SimpleNamespace(template_type="kmc_image_audit", data={"config": config})
+    options = schedule_options_for_definition(definition)
+
+    assert isinstance(options, list)
+    for opt in options:
+        if opt["type"] == "multi_int":
+            # Never the digits of a string, which is what iterating "1487" would give.
+            assert opt["selected"] == [] or all(isinstance(v, int) for v in opt["selected"])
+            assert isinstance(opt["choices"], list)

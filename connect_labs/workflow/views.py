@@ -178,7 +178,21 @@ def _schedule_seed_value(option):
         return option.get("selected") or []
     if option["type"] == "bool":
         return bool(option.get("value"))
-    return "" if option.get("value") is None else option["value"]
+
+    value = option.get("value")
+    if value is None:
+        return ""
+    # Clamp a stored int into the option's declared range before seeding.
+    #
+    # The dialog posts EVERY option, so an out-of-range value already in config (set by
+    # hand, or left behind by a narrowed max) would fail validation and make cadence,
+    # hour and opportunities unsaveable - on a field the user never touched. Seeding a
+    # legal value means they are never posting something they did not enter.
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return ""
+    return min(max(number, option["min"]), option["max"])
 
 
 class WorkflowTemplateListAPIView(LoginRequiredMixin, View):
@@ -3569,7 +3583,11 @@ def _clean_schedule_defaults(raw, options):
                 number = int(item)
             except (TypeError, ValueError):
                 return None, f"{opt['label']} must contain whole numbers"
-            if allowed and number not in allowed:
+            # No `allowed and ...` guard: an empty choice set means nothing is selectable,
+            # so every value must be rejected. Skipping the check there would let any id
+            # through - and it is now an EXPECTED state (see the unavailable flag), where
+            # the omission is only client-side and so not something to rely on.
+            if number not in allowed:
                 return None, f"{number} is not one of this workflow's {opt['label'].lower()}"
             if number not in chosen:
                 chosen.append(number)
@@ -3663,6 +3681,13 @@ def schedule_upsert_api(request, definition_id):
         if values:
             if da.update_schedule_defaults(definition_id, values) is None:
                 return JsonResponse({"error": "Could not save the schedule settings"}, status=502)
+    except LabsAPIError as exc:
+        # The upstream client RAISES on a failed write rather than returning None, so
+        # without this the None-check above is unreachable for real API failures and the
+        # caller gets Django's HTML 500 into `await response.json()` - surfacing to the
+        # user as "Unexpected token '<'" instead of the intended message.
+        logger.warning("Schedule upsert failed for definition %s: %s", definition_id, exc)
+        return JsonResponse({"error": "Could not save the schedule settings"}, status=502)
     finally:
         da.close()
 

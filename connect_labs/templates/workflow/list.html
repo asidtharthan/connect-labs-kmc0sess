@@ -682,11 +682,12 @@
                 // Template-declared run settings (see template_schedule_options), seeded
                 // from what is saved on the definition so the dialog opens showing the
                 // settings the schedule would actually run with.
-                // NOT |safe. This whole object literal lives inside the card's
-                // x-data="..." attribute, so raw double quotes from the JSON would close
-                // the attribute early and break the entire workflow list page. Django's
-                // autoescape turns them into &quot;, which the HTML parser decodes back
-                // to " before Alpine ever evaluates the expression.
+                // Rendered WITHOUT |safe on purpose. This object literal sits inside the
+                // card's x-data attribute, which is delimited by double quotes, so raw
+                // quotes out of the JSON would end the attribute early and break every
+                // workflow card on the page. Autoescape emits the quot entity instead,
+                // which the HTML parser turns back into a quote before Alpine evaluates.
+                // Keep this comment free of double quotes and entities, for that reason.
                 scheduleDefaults: {{ workflow.schedule_defaults_seed|default:"{}" }},
                 toggleScheduleChoice(key, value) {
                     const current = this.scheduleDefaults[key] || [];
