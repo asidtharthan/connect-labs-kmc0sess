@@ -108,6 +108,11 @@ UNCAPPED = 1_000_000
 
 AGENT_FOR_SCALE = {DIGITAL: "scale_validation", DIAL: "scale_dial_read"}
 
+# Display labels for the opportunities, keyed by id as a STRING because this lands in
+# JSON config. Matches the shape the schedule dialog reads via choices_from_config, and
+# the labels the live workflow already used ("NAMA (V0/V1)").
+OPP_NAMES = {str(opp_id): f"{meta['llo']} ({meta['version']})" for opp_id, meta in OPP_META.items()}
+
 DEFINITION = {
     "name": "KMC Image Audit",
     "description": (
@@ -128,6 +133,11 @@ DEFINITION = {
         "multi_opp": True,
         "showSummaryCards": True,
         "opp_meta": OPP_META,
+        # Derived from OPP_META rather than typed out, so the two cannot disagree. The
+        # live workflow 13234 has had this key by hand for a while; the TEMPLATE did not,
+        # which meant a workflow newly created from it offered no opportunities in the
+        # schedule dialog and so could never have a schedule saved at all.
+        "opp_names": OPP_NAMES,
         "weight_image_path": WEIGHT_IMAGE_PATH,
         "weight_field_path": WEIGHT_FIELD_PATH,
         # Overridable so a form rename upstream can be absorbed with a definition patch

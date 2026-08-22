@@ -222,6 +222,12 @@ def schedule_options_for_definition(definition) -> list[dict]:
             filled["choices"] = sorted(choices, key=lambda c: c["value"])
             # Selected set, as ints, so the template can test membership directly.
             filled["selected"] = [int(v) for v in (filled["value"] or []) if str(v).lstrip("-").isdigit()]
+            # No choices means the config key this option reads is missing or unusable.
+            # Left unflagged that renders a labelled control with nothing in it, which
+            # posts an empty set, fails validation, and blocks the whole schedule from
+            # being saved - a dead end with no explanation. Flagged, the dialog can say
+            # why and omit the key so the REST of the schedule still saves.
+            filled["unavailable"] = not filled["choices"]
         options.append(filled)
     return options
 

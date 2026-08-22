@@ -275,7 +275,11 @@ class WorkflowListView(LoginRequiredMixin, TemplateView):
             # rather than assembled in the template: every value is an int or list of
             # ints, and json.dumps gets the "no value set" cases right without relying on
             # Django filters to produce valid JS.
-            "schedule_defaults_seed": json.dumps({opt["key"]: _schedule_seed_value(opt) for opt in schedule_options}),
+            # Unavailable options are omitted, so an option whose choices could not be
+            # resolved is never posted and cannot block the rest of the schedule saving.
+            "schedule_defaults_seed": json.dumps(
+                {opt["key"]: _schedule_seed_value(opt) for opt in schedule_options if not opt.get("unavailable")}
+            ),
         }
 
     def get_context_data(self, **kwargs):

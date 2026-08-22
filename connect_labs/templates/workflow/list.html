@@ -1390,7 +1390,13 @@
                             {% else %}
                             <label class="block text-sm font-medium mb-1">{{ opt.label }}</label>
                             {% endif %}
-                            {% if opt.type == 'multi_int' %}
+                            {% if opt.unavailable %}
+                            <p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                                Not configurable here &mdash; this workflow's config has no
+                                <code>{{ opt.choices_from_config }}</code>. The rest of the schedule
+                                still saves; this setting keeps whatever it already has.
+                            </p>
+                            {% elif opt.type == 'multi_int' %}
                             <div class="space-y-1">
                                 {% for choice in opt.choices %}
                                 <label class="flex items-center gap-2 text-sm">

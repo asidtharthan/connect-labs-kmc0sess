@@ -652,3 +652,69 @@ def test_failing_to_record_the_outcome_does_not_fail_the_run(patched):
 
     assert result["status"] == "ready"
     assert result["sessions_created"] == 1
+
+
+# ── A workflow built from this template must be schedulable ───────────────────
+#
+# The opportunities option reads its choices from config.opp_names. The LIVE workflow had
+# that key by hand; the template did not, so a workflow newly created from the template
+# offered no opportunities, posted an empty set, and could never have a schedule saved at
+# all. The existing tests all passed because their fixtures injected opp_names.
+
+
+def test_the_template_config_carries_the_choices_its_own_option_reads():
+    """The bug this guards is exactly the gap between what the option asks for and what
+    the template ships."""
+    from connect_labs.workflow.templates import TEMPLATES, template_schedule_options
+
+    config = TEMPLATES[TEMPLATE_KEY]["definition"]["config"]
+    for opt in template_schedule_options(TEMPLATE_KEY):
+        key = opt.get("choices_from_config")
+        if not key:
+            continue
+        assert key in config, f"option {opt['key']} reads config.{key}, which the template does not ship"
+        assert config[key], f"config.{key} is empty, so the dialog would offer nothing"
+
+
+def test_a_fresh_workflow_from_the_template_can_have_a_schedule_saved():
+    """End to end on the template's OWN config, with nothing injected."""
+    from connect_labs.workflow.templates import TEMPLATES, schedule_options_for_definition
+
+    config = TEMPLATES[TEMPLATE_KEY]["definition"]["config"]
+    definition = SimpleNamespace(template_type=TEMPLATE_KEY, data={"config": config})
+
+    options = {o["key"]: o for o in schedule_options_for_definition(definition)}
+    opps = options["opportunity_ids"]
+    assert opps["choices"], "no opportunities offered — a schedule could never be saved"
+    assert opps["unavailable"] is False
+
+    # And a selection built from those choices survives validation.
+    from connect_labs.workflow.views import _clean_schedule_defaults
+
+    chosen = [opps["choices"][0]["value"]]
+    values, error = _clean_schedule_defaults({"opportunity_ids": chosen}, list(options.values()))
+    assert error is None, error
+    assert values["opportunity_ids"] == chosen
+
+
+def test_opportunity_labels_are_derived_from_opp_meta_so_they_cannot_disagree():
+    from connect_labs.workflow.templates.kmc_image_audit import OPP_META, OPP_NAMES
+
+    assert set(OPP_NAMES) == {str(o) for o in OPP_META}
+    for opp_id, meta in OPP_META.items():
+        assert OPP_NAMES[str(opp_id)] == f"{meta['llo']} ({meta['version']})"
+
+
+def test_an_option_whose_choices_cannot_be_resolved_is_flagged_not_silently_empty():
+    """Unflagged, the dialog renders a labelled control with nothing in it, posts an empty
+    set, fails validation, and blocks the WHOLE schedule from saving with no explanation."""
+    from connect_labs.workflow.templates import TEMPLATES, schedule_options_for_definition
+
+    config = {k: v for k, v in TEMPLATES[TEMPLATE_KEY]["definition"]["config"].items() if k != "opp_names"}
+    definition = SimpleNamespace(template_type=TEMPLATE_KEY, data={"config": config})
+
+    opps = {o["key"]: o for o in schedule_options_for_definition(definition)}["opportunity_ids"]
+    assert opps["choices"] == []
+    assert opps["unavailable"] is True
+    # The key it wanted is reported, so the dialog can name it.
+    assert opps["choices_from_config"] == "opp_names"
