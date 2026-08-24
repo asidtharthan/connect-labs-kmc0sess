@@ -349,7 +349,9 @@ check(
   const tsc = payload.topicStatusCohort || {};
   const codes = Object.keys(tsc);
   const compressed = codes.filter(function (c) {
-    return (tsc[c] || []).some(function (r) { return Array.isArray(r); });
+    return (tsc[c] || []).some(function (r) {
+      return Array.isArray(r);
+    });
   });
   check(
     'topicStatusCohort ships compressed',
@@ -361,26 +363,47 @@ check(
   let badShape = 0;
   codes.forEach(function (c) {
     (tsc[c] || []).forEach(function (r) {
-      if (!Array.isArray(r) || r.length !== 7 || typeof r[0] !== 'string') badShape++;
-      else if (r.slice(1).some(function (x) { return typeof x !== 'number' || x < 0; })) badShape++;
+      if (!Array.isArray(r) || r.length !== 7 || typeof r[0] !== 'string')
+        badShape++;
+      else if (
+        r.slice(1).some(function (x) {
+          return typeof x !== 'number' || x < 0;
+        })
+      )
+        badShape++;
     });
   });
-  check('every compressed row is [cohort, ...6 counts]', badShape === 0, `${badShape} malformed`);
+  check(
+    'every compressed row is [cohort, ...6 counts]',
+    badShape === 0,
+    `${badShape} malformed`,
+  );
   // and the decoded totals must equal topicStatus's applicable counts, topic by topic
-  const ORDER = ['completed', 'started-not-completed', 'available-missed-overdue',
-    'available-not-started', 'not-available-yet', 'not-triggered'];
+  const ORDER = [
+    'completed',
+    'started-not-completed',
+    'available-missed-overdue',
+    'available-not-started',
+    'not-available-yet',
+    'not-triggered',
+  ];
   const bad = [];
   (payload.topicStatus || []).forEach(function (t) {
     const rows = tsc[t.code] || [];
     ORDER.forEach(function (st, i) {
-      const sum = rows.reduce(function (a, r) { return a + (Array.isArray(r) ? r[i + 1] : r[st] || 0); }, 0);
-      if (rows.length && sum !== (t[st] || 0)) bad.push(`${t.code}/${st} ${sum} vs ${t[st]}`);
+      const sum = rows.reduce(function (a, r) {
+        return a + (Array.isArray(r) ? r[i + 1] : r[st] || 0);
+      }, 0);
+      if (rows.length && sum !== (t[st] || 0))
+        bad.push(`${t.code}/${st} ${sum} vs ${t[st]}`);
     });
   });
   check(
     'decoded per-cohort counts sum to topicStatus, state by state',
     bad.length === 0,
-    bad.length ? bad.slice(0, 3).join('; ') : `${codes.length} topics reconcile`,
+    bad.length
+      ? bad.slice(0, 3).join('; ')
+      : `${codes.length} topics reconcile`,
   );
 })();
 
