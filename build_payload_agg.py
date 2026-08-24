@@ -489,6 +489,25 @@ if connect_pending_sgs:
 # We use the pipeline's canonical started rows (one matched OCS session per interview slot) so the
 # starter counts tie out exactly with table1[sg].flws / connectFunnel[sg].started. Session DATE is the
 # OCS session start (created_at, UTC), joined via matched_session_id. Collapsed to one row per (flw,day).
+def _pcts_to_100(counts, base):
+    """Round a set of counts to whole percentages that sum to EXACTLY 100.
+
+    Rounding each share independently made the four outcome bars land on 99 or 101 at 36 of 156
+    week-points, while the legend promised they sum to 100. Largest-remainder (Hare quota) assigns the
+    leftover points to whichever shares were cut hardest, so the stack always closes.
+    """
+    if not base:
+        return [0] * len(counts)
+    exact = [100 * c / base for c in counts]
+    out = [int(x) for x in exact]
+    short = 100 - sum(out)
+    if short > 0:
+        order = sorted(range(len(counts)), key=lambda i: (exact[i] - out[i], counts[i]), reverse=True)
+        for i in order[:short]:
+            out[i] += 1
+    return out
+
+
 def _slot_deadline(n, start, cad, cohort, trig_iso):
     """When this interview stops being open FOR THIS WORKER.
 
@@ -676,10 +695,11 @@ def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date, deadlines=None
                 else:                   quiet += 1
         weeks.append(W.isoformat()); started_s.append(started)
         # outcome shares are of everyone who started; rhythm shares are of those with 2+ interviews
-        drop_p.append(round(100 * drop / started)); fin_p.append(round(100 * fin / started))
-        wait_p.append(round(100 * wait / started)); inprog_p.append(round(100 * inprog / started))
-        _rb = rbase or 1
-        steady_p.append(round(100 * steady / _rb)); incons_p.append(round(100 * incons / _rb))
+        # the four OUTCOME shares must close to 100 - the legend says so
+        _f4, _d4, _w4, _p4 = _pcts_to_100([fin, drop, wait, inprog], started)
+        fin_p.append(_f4); drop_p.append(_d4); wait_p.append(_w4); inprog_p.append(_p4)
+        _s2, _i2 = _pcts_to_100([steady, incons], rbase)
+        steady_p.append(_s2); incons_p.append(_i2)
         new_s.append(new); active_s.append(active); slow_s.append(slow); quiet_s.append(quiet)
         finst_s.append(fin); wait_s.append(wait); rbase_s.append(rbase)
         steady_s.append(steady); incons_s.append(incons)
@@ -766,8 +786,11 @@ def _pool_rhythm(target, parts):
                 ic[i] += part["incons"][j]
                 rb[i] += part["rhythm_base"][j]
     target["steady"], target["incons"], target["rhythm_base"] = st, ic, rb
-    target["steady_pct"] = [round(100 * a / (b or 1)) for a, b in zip(st, rb)]
-    target["incons_pct"] = [round(100 * a / (b or 1)) for a, b in zip(ic, rb)]
+    _sp, _ip = [], []
+    for a, b, base in zip(st, ic, rb):
+        _x, _y = _pcts_to_100([a, b], base)
+        _sp.append(_x); _ip.append(_y)
+    target["steady_pct"], target["incons_pct"] = _sp, _ip
     # A pooled base counts FLW-per-cohort enrolments, not unique FLWs, so it can legitimately exceed
     # this series' started count (an FLW in two cohorts has two rhythms). Flagged so the gates and the
     # render label it honestly instead of implying it is a share of people.
@@ -808,9 +831,14 @@ def _pool_outcome(target, parts):
     #   finished_pct  = person-level, "finished AT LEAST ONE of their schedules"
     #   enrol_*       = enrolment-level, the same question the per-design rows and the drop-off view ask
     target["enrol_base"] = acc["started"]
-    for key, src in (("enrol_finished_pct", "finished"), ("enrol_drop_pct", "dropped"),
-                     ("enrol_waiting_pct", "waiting"), ("enrol_inprog_pct", "inprog")):
-        target[key] = [round(100 * a / (b or 1)) for a, b in zip(acc[src], acc["started"])]
+    _keys = ("enrol_finished_pct", "enrol_drop_pct", "enrol_waiting_pct", "enrol_inprog_pct")
+    _srcs = ("finished", "dropped", "waiting", "inprog")
+    for k in _keys:
+        target[k] = []
+    for i in range(n):
+        _vals = _pcts_to_100([acc[sr][i] for sr in _srcs], acc["started"][i])
+        for k, v in zip(_keys, _vals):
+            target[k].append(v)
     target["enrol_finished"] = acc["finished"]
     target["outcome_pooled"] = True
     return target
@@ -926,6 +954,9 @@ for _c, _inf in sorted(bm.cohort_info.items()):
     _row = {"c": _c, "s": _tr.isoformat(), "e": _end.isoformat(), "n": _n,
             "f": _tally["finished"], "l": _tally["completed-late"], "d": _tally["dropped"],
             "w": _tally["waiting"], "z": _tally["never-began"],
+            # p = still in progress. Shipped explicitly so f+l+d+w+z+p == n for EVERY cohort; leaving
+            # it as an implied residual meant three cohorts had 7 workers in no bucket at all.
+            "p": _tally["in-progress"],
             "ts": _sent, "tc": _cdone}
     if tsl.GRACE_DAYS.get(_c, _cad) != _cad:
         _row["g"] = GRACE_DAYS[_c]
