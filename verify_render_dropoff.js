@@ -223,6 +223,20 @@ if (dropHtml) {
     'sort control offered on the design level too',
     /Design name/.test(dropHtml),
   );
+  // The KPI tiles must sit side by side. sm:grid-cols-5 is NOT in the Labs Tailwind build, so relying
+  // on it silently collapsed them into five full-width horizontal bands.
+  check(
+    'headline tiles are laid out side by side, not as full-width bands',
+    !/sm:grid-cols-5/.test(injected) && /flex flex-wrap gap-2/.test(dropHtml),
+  );
+  // The fixed-days explainer is reference material for a rule no longer in force: heading visible,
+  // table collapsed until clicked.
+  check(
+    'fixed-days explainer is collapsed by default but present',
+    /Click to see the per-design breakdown/.test(dropHtml) &&
+      /display:none/.test(dropHtml.replace(/\s/g, '')) &&
+      /exactly one interview/.test(dropHtml),
+  );
   check(
     'shows the fixed-days explainer table',
     /What a fixed number of days would have meant/i.test(dropHtml),

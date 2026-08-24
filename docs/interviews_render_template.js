@@ -59,6 +59,7 @@ function WorkflowUI(props) {
   var fvw = React.useState("retention"); var funView = fvw[0], setFunView = fvw[1];   // funnels tab: retention lines | cohort engagement (3-panel) | drop-off by cohort
   var cdl = React.useState("design"); var cdLevel = cdl[0], setCdLevel = cdl[1];       // drop-off view: by design | every cohort
   var cds = React.useState("drop"); var cdSort = cds[0], setCdSort = cds[1];           // drop-off view: sort by drop-off % | cohort id
+  var cdw = React.useState(false); var cdWhy = cdw[0], setCdWhy = cdw[1];               // drop-off view: the fixed-days explainer, collapsed by default
   var esg = React.useState("ALL"); var engSg = esg[0], setEngSg = esg[1];              // cohort-engagement: selected cohort (default ALL - meaningful first view)
   var ell = React.useState("all"); var engLlo = ell[0], setEngLlo = ell[1];            // cohort-engagement: LLO filter (all | COWACDI | EHA)
   var ewin = React.useState("active"); var engWin = ewin[0], setEngWin = ewin[1];      // cohort-engagement: active window | full timeline
@@ -1695,7 +1696,7 @@ function WorkflowUI(props) {
           </div>
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-5">
+        <div className="flex flex-wrap gap-2">
           {[["Completed", tot.done, "#5E35B1", tot.late ? tot.onTime.toLocaleString() + " on time, " + tot.late.toLocaleString() + " late" : "all on time"],
             ["Dropped off", tot.drop, "#C62828", "let a sent interview go undone"],
             ["Schedule not completed", tot.notSent, "#0277BD", "did all that was sent"],
@@ -1703,9 +1704,10 @@ function WorkflowUI(props) {
             ["Still in progress", tot.prog, "#607D8B", "cohort still running"]]
             .map(function (t, i) {
               return (
-                <div key={i} className="rounded border border-gray-200 p-2">
-                  <div className="text-xs text-gray-600">{t[0]}</div>
-                  <div className="text-lg font-semibold" style={{ color: t[2] }}>
+                <div key={i} className="rounded border border-gray-200 bg-white px-3 py-2"
+                     style={{ minWidth: "150px", flex: "1 1 150px", maxWidth: "260px" }}>
+                  <div className="text-xs font-medium text-gray-700">{t[0]}</div>
+                  <div className="text-lg font-bold" style={{ color: t[2] }}>
                     {t[1].toLocaleString()}
                     <span className="ml-1 text-xs font-normal text-gray-500">
                       {tot.n ? Math.round(100 * t[1] / tot.n) + "%" : ""}
@@ -1771,14 +1773,25 @@ function WorkflowUI(props) {
         </div>
 
         <div className="rounded border border-gray-200 p-3">
-          <div className="mb-2 text-xs font-semibold text-gray-700">
-            What a fixed number of days would have meant, per design
-          </div>
-          <div className="mb-2 text-xs text-gray-600">
-            The old rule called a worker dropped after 14 days of silence, the same 14 days in every
-            design. Read the last column to see why that is not one rule but eleven different ones.
-          </div>
-          <div className="overflow-x-auto">
+          {/* Collapsed by default: it explains a rule that is no longer in force, so it is reference
+              rather than a daily read. The heading and its one-line summary stay visible. */}
+          <button type="button" onClick={function () { setCdWhy(!cdWhy); }}
+                  className="flex w-full items-start gap-2 text-left">
+            <span className="mt-0.5 text-xs text-gray-500" style={{ width: "10px" }}>
+              {cdWhy ? "▾" : "▸"}
+            </span>
+            <span>
+              <span className="block text-xs font-semibold text-gray-700">
+                What a fixed number of days would have meant, per design
+              </span>
+              <span className="block text-xs text-gray-600">
+                The old rule called a worker dropped after 14 days of silence, the same 14 days in every
+                design - which was not one rule but {byDesign.length} different ones.
+                <span className="ml-1 text-gray-400">{cdWhy ? "Click to hide." : "Click to see the per-design breakdown."}</span>
+              </span>
+            </span>
+          </button>
+          <div className="overflow-x-auto" style={{ display: cdWhy ? "block" : "none" }}>
             <table className="min-w-full text-xs">
               <thead className="bg-gray-100 text-gray-700">
                 <tr>
