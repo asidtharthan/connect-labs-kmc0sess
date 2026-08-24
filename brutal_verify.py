@@ -138,6 +138,12 @@ for path in sorted(HQ.glob("*.jsonl")):
             trig_dates.append(recv)
             trig_forms.append((cid, cohort, niv, recv, sub.get("id")))
 
+first_trig_raw = {}
+for _cid, _c, _niv, _recv, _fid in trig_forms:
+    _d = _recv.date()
+    if _c not in first_trig_raw or _d < first_trig_raw[_c]:
+        first_trig_raw[_c] = _d
+
 cache = json.loads((ROOT / "_ocs_state_cache.json").read_text())
 ocs_created = [pdt(s.get("created_at")) for s in cache if s.get("created_at")]
 maxtrig = max(trig_dates).date() if trig_dates else None
@@ -373,11 +379,15 @@ def status_for(flw, cohort, sg, topic):
     m = mlook.get((flw, cohort, topic))
     if m and m["is_completed"] == "Y": return "completed"
     if m and m["is_started"] == "Y": return "started-not-completed"
-    td = train_date.get(cohort)
+    # A cohort's start is its earliest Connect invitation, else the earliest trigger form seen for it.
+    # Both derived HERE from raw sources, so this gate still owes the pipeline nothing - but it now uses
+    # the same fallback, instead of leaving 10 cohorts undated and disagreeing for that reason alone.
+    td = train_date.get(cohort) or first_trig_raw.get(cohort)
     cad = DESIGN[sg]["cadence"]
+    gr = None   # no cohort declares a grace override; guarded by a check below
     if m:
         # final interview included: its deadline is release + one gap, like every other interview
-        if td and TODAY >= td + timedelta(days=n * cad): return "available-missed-overdue"
+        if td and TODAY >= td + timedelta(days=(n - 1) * cad + (cad if gr is None else gr)): return "available-missed-overdue"
         return "available-not-started"
     if not td or not cad: return "available-not-started"   # schedule unknown -> not provably due
     if TODAY < td + timedelta(days=(n - 1) * cad): return "not-available-yet"
@@ -477,7 +487,7 @@ RD = json.loads(raw_json)
 # a payload with a missing key.
 ALLOWED_DROP_TOP = {"funnel", "granular_total"}
 ALLOWED_DROP_COHORT = {"connect"}
-ALLOWED_DROP_COHORT_IV = {"pct_completed_base", "started_di", "pct_started_di"}
+ALLOWED_DROP_COHORT_IV = {"pct_completed_base", "started_di", "pct_started_di", "name"}
 ADDED_KEYS = {"flwMatrixCohorts", "flwMatrixV2", "flwMatrixOrder", "flwMatrixOrderW"}
 
 # G1: top-level key set == dashboard keys - dropped - flwMatrix + the flwMatrix* encoding keys

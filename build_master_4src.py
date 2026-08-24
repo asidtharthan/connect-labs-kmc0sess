@@ -432,6 +432,32 @@ for _c in sorted(_cc_cohorts):
     cohort_info[_c] = {"subgroup": _sg, "training_date": None}
     _conn_pending.append(_c)
 CONNECT_PENDING_COHORTS = set(_conn_pending)  # cohorts with interview data but no Connect funnel yet
+
+# ---- ONE resolved start date per cohort, for every consumer ---------------------------------------
+# A cohort's start is its Connect invitation date, else the first interview trigger recorded for it.
+# The fallback matters because the Connect snapshot is missing invitation dates for newer cohorts
+# whenever the pull is stale (the documented 2026-08-04 case). Resolved HERE, once, because consumers
+# that each rolled their own fallback reached different answers about the same cohort: the FLW x Topic
+# matrix would call a slot "window still open" while the per-cohort drop-off view called it missed.
+# Sharing a function is not enough when the INPUTS differ, so the input is shared instead.
+_first_trig_by_cohort = {}
+for _lst in triggers_by_flw_iv.values():
+    for _tb in _lst:
+        _tc, _ro = _tb.get("cohort_id"), _tb.get("received_on")
+        if _tc and _ro and (_tc not in _first_trig_by_cohort or _ro < _first_trig_by_cohort[_tc]):
+            _first_trig_by_cohort[_tc] = _ro
+for _c, _inf in cohort_info.items():
+    _td = _inf.get("training_date")
+    if _td:
+        _inf["start_date"], _inf["start_src"] = _td, "invitation"
+    else:
+        _ft = _first_trig_by_cohort.get(_c)
+        _inf["start_date"] = _ft.date() if _ft else None
+        _inf["start_src"] = "first trigger" if _ft else None
+_n_fb = sum(1 for _i in cohort_info.values() if _i.get("start_src") == "first trigger")
+_n_none = sum(1 for _i in cohort_info.values() if not _i.get("start_date"))
+print(f"[1+] cohort start dates: {len(cohort_info) - _n_fb - _n_none} from invitation, {_n_fb} from "
+      f"first trigger, {_n_none} unknown")
 if _conn_pending:
     print(f"[1+] {len(_conn_pending)} cohort(s) in CommCare data but missing from the Connect snapshot "
           f"(Connect funnel PENDING until next successful Connect pull): {_conn_pending}")

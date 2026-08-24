@@ -271,16 +271,6 @@ for _sg, _until in LINE_DOTTED_UNTIL.items():
     if _sg in line_active:
         line_active[_sg] = TODAY <= _until
 
-# ---- per-cohort grace override -------------------------------------------------------------------
-# How long after an interview is released does an FLW have to do it before it counts as missed?
-# The DEFAULT is one gap (that cohort's own interview spacing), which is why nothing is listed here:
-# a 3-day-gap cohort gets 3 days and a 14-day-gap cohort gets 14, automatically, with no tuning.
-#
-# Add an entry only when a cohort's owners want a different allowance, e.g. {"1PC1": 28} to give PANEL
-# cohort 1PC1 28 days instead of its usual 4. Keyed by cohort id, so cohorts of the same design can
-# differ. Deliberately a config dict rather than a dashboard control: every cohort is finished, so a
-# toggle would move nothing today and would only teach people that the controls do not work.
-GRACE_DAYS = {}
 
 
 # ---- Tables 1-3 ----
@@ -366,9 +356,10 @@ def status_for(flw, cohort, topic):
         topic,
         bm.SUBGROUP_DESIGN[sg]["topics"],
         mlook.get((flw, cohort, topic)),
-        bm.cohort_info.get(cohort, {}).get("training_date"),
+        bm.cohort_info.get(cohort, {}).get("start_date"),   # one shared source, see build_master
         bm.SUBGROUP_DESIGN[sg]["cadence"],
         TODAY,
+        tsl.GRACE_DAYS.get(cohort),
     )
 
 
@@ -517,12 +508,14 @@ for r in bm.rows:
     _d = _sid2date.get(r.get("matched_session_id"))
     _rsg, _rflw = r["subgroup"], r["connect_id"]
     _rcad = bm.SUBGROUP_DESIGN[_rsg]["cadence"] if _rsg in bm.SUBGROUP_DESIGN else None
-    _rtrain = bm.cohort_info.get(r["cohort_id"], {}).get("training_date")
+    # start_date, not training_date - the same shared source the matrix and drop-off view use, so the
+    # engagement chart cannot judge a cohort against a different calendar than the other two views.
+    _rtrain = bm.cohort_info.get(r["cohort_id"], {}).get("start_date")
     if _rcad:
         _eng_flw_cad.setdefault(_rflw, _rcad)
         if _rtrain and r.get("interview_n"):
             _eng_deadlines[_rsg][_rflw].append((
-                tsl.deadline_for(int(r["interview_n"]), _rtrain, _rcad, GRACE_DAYS.get(r["cohort_id"])),
+                tsl.deadline_for(int(r["interview_n"]), _rtrain, _rcad, tsl.GRACE_DAYS.get(r["cohort_id"])),
                 _d if r.get("is_completed") == "Y" else None,
             ))
     if r.get("is_started") == "Y" and _d:
@@ -780,39 +773,37 @@ print(f"[eng] by-LLO splits for: {sorted(cohort_engagement_llo)}")
 # design. That scores a TRS cohort which closed on 15 April against the same calendar as one that
 # closed on 22 May, 37 days later. Here every cohort gets its own end date and is measured there, so
 # the numbers are comparable across designs and across start dates.
-def _cohort_start(c):
-    """A cohort's start date: its Connect invitation date, else the first interview trigger we saw.
-
-    The fallback matters. cohort_info's training_date comes from the Connect snapshot, which is missing
-    the newer cohorts (locally: all of PANEL, EXT, 2WT and ABT3 - 10 of 72) whenever the Connect pull is
-    stale, the documented 2026-08-04 case. Without a fallback those cohorts would silently vanish from
-    this chart, and they include PANEL. This is the same signal the dotted funnel line already falls
-    back to, so the two stay consistent.
-    """
-    td = bm.cohort_info.get(c, {}).get("training_date")
-    if td:
-        return td, "invitation"
-    ft = _cohort_first_trig.get(c)
-    return (ft.date(), "first trigger") if ft else (None, None)
-
-
-_coh_dl = defaultdict(lambda: defaultdict(list))    # cohort -> flw -> [(deadline, completed_or_None)]
+_coh_slot = {}                                      # (cohort, flw, interview_n) -> (deadline, done_or_None)
 _coh_done = defaultdict(lambda: defaultdict(dict))  # cohort -> flw -> {topic: completed date}
-_coh_seen = defaultdict(set)
 for r in bm.rows:
     _c, _f, _sg = r["cohort_id"], r["connect_id"], r["subgroup"]
-    if _sg not in bm.SUBGROUP_DESIGN:
+    if _sg not in bm.SUBGROUP_DESIGN or not r.get("interview_n"):
         continue
     _cad = bm.SUBGROUP_DESIGN[_sg]["cadence"]
-    _tr = _cohort_start(_c)[0]
+    _tr = bm.cohort_info.get(_c, {}).get("start_date")
     _d = _sid2date.get(r.get("matched_session_id"))
-    if r.get("is_started") == "Y" and _d:
-        _coh_seen[_c].add(_f)
-    if _tr and _cad and r.get("interview_n"):
-        _coh_dl[_c][_f].append((tsl.deadline_for(int(r["interview_n"]), _tr, _cad, GRACE_DAYS.get(_c)),
-                                _d if r.get("is_completed") == "Y" else None))
+    if _tr and _cad:
+        _k = (_c, _f, int(r["interview_n"]))
+        _done = _d if r.get("is_completed") == "Y" else None
+        _prev = _coh_slot.get(_k)
+        # Completed beats not-completed; between two completed rows keep the earlier date.
+        if _prev is None or (_done is not None and (_prev[1] is None or _done < _prev[1])):
+            _coh_slot[_k] = (tsl.deadline_for(int(r["interview_n"]), _tr, _cad, tsl.GRACE_DAYS.get(_c)),
+                             _done)
     if r.get("is_completed") == "Y" and _d:
         _coh_done[_c][_f][r["topic_code"]] = _d
+
+_coh_dl = defaultdict(lambda: defaultdict(list))
+for (_c, _f, _n), _v in _coh_slot.items():
+    _coh_dl[_c][_f].append(_v)
+
+# Same universe as the FLW x Topic matrix (claimed OR holding a master row) - see DEFECT 2. Counting a
+# different population here than the matrix counts would make the two views disagree on the size of the
+# cohort, which is worse than either number being slightly off.
+_coh_interviewed = tsl.interviewed_index(bm.rows)
+_coh_seen = {}
+for _c in bm.cohort_info:
+    _coh_seen[_c] = set(tsl.universe_for(_c, bm.cohort_flws, bm.cohort_flw_meta, _coh_interviewed))
 
 cohort_dropoff = []
 for _c, _inf in sorted(bm.cohort_info.items()):
@@ -821,16 +812,33 @@ for _c, _inf in sorted(bm.cohort_info.items()):
         continue
     _tops = bm.SUBGROUP_DESIGN[_sg]["topics"]
     _cad = bm.SUBGROUP_DESIGN[_sg]["cadence"]
-    _tr, _tr_src = _cohort_start(_c)
+    _inf_c = bm.cohort_info.get(_c, {})
+    _tr, _tr_src = _inf_c.get("start_date"), _inf_c.get("start_src")
     if not _tr or not _cad:
         continue                                     # no start date at all: cannot say when it ended
-    _end = tsl.cohort_end(_tops, _tr, _cad, GRACE_DAYS.get(_c))
+    _end = tsl.cohort_end(_tops, _tr, _cad, tsl.GRACE_DAYS.get(_c))
     _asof = min(_end, TODAY)                         # a cohort still running is scored as it stands
     _tally = defaultdict(int)
     for _f in sorted(_coh_seen.get(_c, ())):
         _dts = _coh_done.get(_c, {}).get(_f, {})
         _fdate = sorted(_dts.values())[len(_tops) - 1] if len(_dts) >= len(_tops) else None
-        _tally[tsl.progress_at(_coh_dl.get(_c, {}).get(_f, ()), _asof, _fdate)] += 1
+        _dl = _coh_dl.get(_c, {}).get(_f, ())
+        if not _dl:
+            _tally["never-began"] += 1   # claimed, but the bot never sent them anything
+            continue
+        # Someone who completed their whole design AFTER the window shut is not a drop-out - they
+        # finished, late. Measuring strictly at the window end swept 140 such workers into "dropped",
+        # which is what made completed look too low and dropped too high against every other view.
+        if _fdate is not None and _fdate > _asof:
+            _tally["completed-late"] += 1
+            continue
+        # Judge DROPPED on permanence, not on a snapshot date: did they leave an interview they were
+        # sent permanently undone? Evaluating at the window end instead called 34 workers dropped who
+        # did complete the interview, just after the window shut - and made this view disagree with the
+        # FLW x Topic matrix, which reads the same slot as completed. The window end still decides
+        # whether a COMPLETION was on time or late (above); it should not decide whether something
+        # eventually happened at all.
+        _tally[tsl.progress_at(_dl, TODAY, _fdate)] += 1
     _n = sum(_tally.values())
     if not _n:
         continue
@@ -839,18 +847,22 @@ for _c, _inf in sorted(bm.cohort_info.items()):
     # interviews/gap from subgroupDesign, percentages and in-progress from the counts, and "closed"
     # from `e` against today. `g` appears only when a cohort's grace differs from its gap, and `x`
     # only when the start date came from the trigger fallback rather than a Connect invitation.
+    # f = completed by the window end, l = completed after it, d = dropped, w = schedule never
+    # fully sent, z = nothing ever sent. Exhaustive, so f+l+d+w+z+in-progress == n.
     _row = {"c": _c, "s": _tr.isoformat(), "e": _end.isoformat(), "n": _n,
-            "f": _tally["finished"], "d": _tally["dropped"], "w": _tally["waiting"]}
-    if GRACE_DAYS.get(_c, _cad) != _cad:
+            "f": _tally["finished"], "l": _tally["completed-late"], "d": _tally["dropped"],
+            "w": _tally["waiting"], "z": _tally["never-began"]}
+    if tsl.GRACE_DAYS.get(_c, _cad) != _cad:
         _row["g"] = GRACE_DAYS[_c]
     if _tr_src != "invitation":
         _row["x"] = 1
     cohort_dropoff.append(_row)
 _cd_tot = sum(c["n"] for c in cohort_dropoff)
-_cd_f, _cd_d, _cd_w = (sum(c[k] for c in cohort_dropoff) for k in ("f", "d", "w"))
+_cd_f, _cd_l, _cd_d, _cd_w, _cd_z = (sum(c[k] for c in cohort_dropoff)
+                                     for k in ("f", "l", "d", "w", "z"))
 print(f"[eng] cohort_dropoff: {len(cohort_dropoff)} cohorts, {_cd_tot} FLW-cohort pairs, "
-      f"finished={_cd_f} dropped={_cd_d} waiting={_cd_w} "
-      f"in_progress={_cd_tot - _cd_f - _cd_d - _cd_w} "
+      f"on-time={_cd_f} late={_cd_l} dropped={_cd_d} schedule-not-completed={_cd_w} "
+      f"never-began={_cd_z} in_progress={_cd_tot - _cd_f - _cd_l - _cd_d - _cd_w - _cd_z} "
       f"(fallback start dates: {sum(1 for c in cohort_dropoff if c.get('x'))})")
 
 payload = {

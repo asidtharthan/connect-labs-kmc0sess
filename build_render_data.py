@@ -14,7 +14,7 @@ faithful, lossless-for-the-UI transform of it:
   1. DROP keys the render provably never reads (verified by grep against the template):
        * top-level  `funnel`, `granular_total`
        * `dropoff.cohorts[sg][].connect`
-       * `dropoff.cohorts[sg][].interviews[].pct_completed_base` / `started_di` / `pct_started_di`
+       * `dropoff.cohorts[sg][].interviews[].pct_completed_base` / `started_di` / `pct_started_di` / `name`
      (The SUBGROUP-level `connect` / `pct_completed_base` / `started_di` / `pct_started_di` ARE read
       — `retentionMatrix()`, `ivRow()`, the retention table — and are therefore KEPT.)
   2. RE-ENCODE `flwMatrix` (one row per claimed FLW×cohort, ~180 KB) into three compact keys.
@@ -50,7 +50,9 @@ RENDER_JSON = "render_data.json"
 # ---- the ONLY keys this transform is allowed to remove (brutal_verify re-asserts this exact set) ----
 DROP_TOP = ("funnel", "granular_total")
 DROP_COHORT = ("connect",)
-DROP_COHORT_IV = ("pct_completed_base", "started_di", "pct_started_di")
+# `name` goes too: the topic name is already in DATA.topicNames, so repeating it on every
+# cohort-interview row cost KB for nothing. The render resolves it from `topic` instead.
+DROP_COHORT_IV = ("pct_completed_base", "started_di", "pct_started_di", "name")
 
 _B36 = "0123456789abcdefghijklmnopqrstuvwxyz"
 

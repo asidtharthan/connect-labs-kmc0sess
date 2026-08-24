@@ -12,7 +12,13 @@ from datetime import date, timedelta
 
 from openpyxl import load_workbook
 
-import build_master_4src as bm  # the master under test
+import build_master_4src as bm
+
+# Config, not logic: the per-cohort grace override is DATA the definition is parameterised by, so
+# reading it here keeps the gate honest. What a gate must never import is the RULE it is checking,
+# which is why the state machine below is still a hand-written re-implementation.
+from topic_status_lib import GRACE_DAYS as tsl_grace
+  # the master under test
 
 TODAY = date.today()  # match the build's dynamic time-gating for the independent status recompute
 _CANON_TOPICS = ["A", "B", "C", "D", "E", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "8S", "8L", "10S", "10L", "11S", "11L", "13L", "99", "101", "F", "G"]
@@ -145,14 +151,17 @@ def status_for(flw, cohort, topic):
         return "completed"
     if m and m["is_started"] == "Y":
         return "started-not-completed"
-    td = bm.cohort_info.get(cohort, {}).get("training_date")
+    # start_date, not training_date: the resolved cohort start (invitation, else first trigger)
+    # that every view now shares. The RULE below stays an independent re-implementation.
+    td = bm.cohort_info.get(cohort, {}).get("start_date")
+    gr = tsl_grace.get(cohort)
     cad = bm.SUBGROUP_DESIGN[sg]["cadence"]
     if m:
         # No exemption for the FINAL interview. Its deadline is a property of that interview -
         # released, plus one gap to do it - so the last one has a deadline like every other. The old
         # `n < len(topics)` carve-out meant nobody could ever be recorded as skipping their last
         # interview, which is why a single-interview design showed an impossible 0% drop-off.
-        if td and TODAY >= td + timedelta(days=n * cad):
+        if td and TODAY >= td + timedelta(days=(n - 1) * cad + (cad if gr is None else gr)):
             return "available-missed-overdue"
         return "available-not-started"
     if not td or not cad:
@@ -206,9 +215,11 @@ def status_v2(flw, cohort, topic):
     m = mlook.get((flw, cohort, topic))
     completed = bool(m) and m["is_completed"] == "Y"
     started = bool(m) and m["is_started"] == "Y"
-    td = bm.cohort_info.get(cohort, {}).get("training_date")
+    td = bm.cohort_info.get(cohort, {}).get("start_date")
+    gr = tsl_grace.get(cohort)
     rel = (td + timedelta(days=(n - 1) * cad_)) if (cad_ := bm.SUBGROUP_DESIGN[sg]["cadence"]) and td else None
-    nrel = (td + timedelta(days=n * cad_)) if td and cad_ else None   # final interview included
+    # deadline = release + one gap (or the cohort's override); the final interview is included
+    nrel = (td + timedelta(days=(n - 1) * cad_ + (cad_ if gr is None else gr))) if td and cad_ else None
     avail = rel is not None and TODAY >= rel
     overdue = nrel is not None and TODAY >= nrel
     if completed:
