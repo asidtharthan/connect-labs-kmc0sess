@@ -407,6 +407,52 @@ check(
   );
 })();
 
+// Every worker must land in exactly one bucket. The in-progress residual used to be implied rather
+// than shipped, so three cohorts had 7 workers in no bucket and f+l+d+w+z did not reach n.
+(function () {
+  const bad = (payload.cohortDropoff || []).filter(function (r) {
+    return r.f + (r.l || 0) + r.d + r.w + (r.z || 0) + (r.p || 0) !== r.n;
+  });
+  check(
+    'every worker lands in exactly one drop-off bucket',
+    bad.length === 0,
+    bad.length
+      ? `${bad.length} cohorts short: ${bad
+          .slice(0, 3)
+          .map(function (r) {
+            return r.c;
+          })
+          .join(', ')}`
+      : `${(payload.cohortDropoff || []).length} cohorts balance`,
+  );
+})();
+// The engagement tiles must state the date they actually describe, not today, or a finished design
+// reads as current and appears to contradict the drop-off view.
+check(
+  'engagement tiles date themselves from the series, not from today',
+  /var tileWk = full\.weeks/.test(injected) &&
+    /as of " \+ fmtWk\(tileWk\)/.test(injected),
+);
+check(
+  'a stale-edge design warns that its figures are not current',
+  /not today/.test(injected) && /tileStale/.test(injected),
+);
+// Three nested worker populations must not all be called "unique FLWs".
+// "unique FLWs" is fine where it genuinely means unique people (the Connect funnel, the per-round
+// chart, the slots-vs-FLWs contrast). It was wrong on the two HEADLINES that showed different
+// populations under the same words: counts.flws (1,449 offered an interview) and the engagement tile
+// (1,441 who started one). Assert those two now name themselves.
+check(
+  'the page header names its population',
+  /FLWs offered an interview/.test(injected),
+);
+check('the started tile names its population', /FLWs who began/.test(injected));
+// A rate on a base of 1 is not reportable.
+check(
+  'tiny rhythm bases show a count, not a rate',
+  /base too small to report as a rate/.test(injected),
+);
+
 // ---------------------------------------------------------------- the docs tab must not drift
 // The Documentation tab compares what it documents against what the payload actually carries and
 // prints "In sync" only when every tab and every payload key is accounted for. Adding cohortDropoff

@@ -701,7 +701,7 @@ function WorkflowUI(props) {
     L.push("# Connect Interviews Dashboard - how it works");
     L.push("\n> Generated from the live dashboard on " + F.today + " (build " + F.built + ").");
     L.push("> Every figure is read from the published payload at generation time, not copied by hand.");
-    L.push("\n**Scale right now:** " + F.flws + " unique FLWs · " + F.cohorts + " cohorts · " + F.subgroups +
+    L.push("\n**Scale right now:** " + F.flws + " FLWs offered an interview · " + F.cohorts + " cohorts · " + F.subgroups +
       " subgroups · " + F.topics + " topics · " + F.rows + " FLW×interview rows · " +
       F.started + " interviews started · " + F.completed + " completed.");
     L.push("\n**Interview designs vary**, which is why nearly every rule is relative rather than absolute: " +
@@ -925,7 +925,7 @@ function WorkflowUI(props) {
             that no longer exists.
           </p>
           <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-gray-800">
-            <span><b>{Number(F.flws).toLocaleString()}</b> unique FLWs</span>
+            <span><b>{Number(F.flws).toLocaleString()}</b> FLWs offered an interview</span>
             <span><b>{F.cohorts}</b> cohorts</span>
             <span><b>{F.subgroups}</b> subgroups</span>
             <span><b>{F.topics}</b> topics</span>
@@ -1935,7 +1935,13 @@ function WorkflowUI(props) {
           // earlier week, so each tile states its own as-of date. Without that, the tile and the last
           // point of the chart read as two answers to one question: PANEL showed 12% here and 9% on
           // the chart, and on TRE the same pair is 92% vs 71% (Andrea, 2026-08-13).
-          var asOf = DATA.today ? " · as of " + fmtWk(DATA.today) : "";
+          // The date these tiles ACTUALLY describe is the last week in this design's series, which for a
+          // finished design is the last week it had any session - not today. Saying "as of today" over a
+          // figure from four weeks ago is what made the panel look like it disagreed with the drop-off
+          // view. If they differ, say both.
+          var tileWk = full.weeks && full.weeks.length ? full.weeks[nf] : DATA.today;
+          var asOf = tileWk ? " · as of " + fmtWk(tileWk) : "";
+          var tileStale = tileWk && DATA.today && tileWk < DATA.today;
           // Waiting and rhythm read the same index as the other tiles. Rhythm sits on its own base
           // (starters with 2+ interviews), so the tile states that base rather than implying it is a
           // share of everyone - and says "not measurable" when a design gives nobody a second
@@ -1944,7 +1950,8 @@ function WorkflowUI(props) {
           var rBase = full.rhythm_base ? full.rhythm_base[nf] : 0;
           var steadyNow = full.steady_pct ? full.steady_pct[nf] : null;
           var kpi = [
-            { label: "Started interviewing", val: started, sub: "unique FLWs" + asOf, color: "#1565C0" },
+            { label: "Started interviewing", val: started,
+              sub: "FLWs who began \u22651 interview" + asOf, color: "#1565C0" },
             // For ALL this is person-level and means "finished AT LEAST ONE of their schedules" - a
             // materially more generous question than the per-design rows ask, so it says so. The
             // enrolment-level figure (the same question the drop-off view asks) sits beside it.
@@ -1962,9 +1969,14 @@ function WorkflowUI(props) {
               val: (full.enrol_finished_pct ? full.enrol_finished_pct[nf] : "-") + "%",
               sub: "of " + (full.enrol_base[nf] || 0).toLocaleString()
                 + " enrolments - the per-design question" + asOf, color: "#4527A0" }] : []),
-            { label: "Steady rhythm", val: (rBase ? steadyNow + "%" : "not measurable"),
+            // A percentage on a base of 1 is not reportable: 2WT read "100% steady" off ONE worker
+            // against 514 starters, because a single-interview design gives almost nobody a gap to
+            // judge. Below 10 the count is shown instead of a share.
+            { label: "Steady rhythm",
+              val: (!rBase ? "not measurable" : rBase < 10 ? steadyNow + "% of " + rBase : steadyNow + "%"),
               sub: (rBase
-                ? "of " + rBase.toLocaleString() + (full.rhythm_pooled ? " enrolments" : "") + " with 2+ interviews"
+                ? (rBase < 10 ? "base too small to report as a rate" : "of " + rBase.toLocaleString()
+                   + (full.rhythm_pooled ? " enrolments" : "") + " with 2+ interviews")
                 : "needs 2+ interviews") + asOf, color: "#2E7D32" }
           ];
           // Windowed reading of the same two headline metrics, for the reconciliation note below.
@@ -1973,6 +1985,14 @@ function WorkflowUI(props) {
           var windowLags = engWin === "active" && hasTail && (dropWin !== drop || finPctWin !== finished);
           return (
             <React.Fragment>
+              {tileStale ? (
+                <div className="text-xs bg-amber-50 border border-amber-200 rounded px-3 py-2 text-gray-800">
+                  <b>These figures are as of {fmtWk(tileWk)}, not today.</b> This design&apos;s last
+                  recorded interview was that week, so the series ends there. <b>Drop-off by cohort</b>
+                  scores as of {fmtWk(DATA.today)}, which is why the two views can differ on who is
+                  still in progress.
+                </div>
+              ) : null}
               <div className="text-xs bg-indigo-50 border border-indigo-100 rounded px-3 py-2 text-gray-700">
                 {engSg === "ALL" ? (
                   <span><b>Program-wide roll-up.</b> <b>{started}</b> FLWs have started interviewing across all cohorts; <b>{finished}%</b> have <b>finished</b> their whole schedule and <b>{drop}%</b> dropped off, meaning an interview they were sent went past its deadline unfinished. For a further <b>{waitPctNow}%</b> the <b>schedule was not completed</b>: they did everything sent to them, but their plan was never fully sent. Cohorts run different-length schedules, so read this as the recruitment + completion picture; for one cohort's engagement detail, pick it above.</span>
@@ -2374,7 +2394,7 @@ function WorkflowUI(props) {
         <div className="flex flex-wrap gap-x-6 gap-y-1 mt-3 text-sm">
           <span><b>{c.cohorts}</b> cohorts</span>
           <span><b>{c.master_rows}</b> master rows</span>
-          <span><b>{c.flws}</b> unique FLWs</span>
+          <span title="FLWs the bot sent at least one interview. Distinct from the FLWs who then STARTED one - see Cohort engagement."><b>{c.flws}</b> FLWs offered an interview</span>
           <span><b>{c.started}</b> interviews started</span>
           <span><b>{c.completed}</b> completed</span>
         </div>

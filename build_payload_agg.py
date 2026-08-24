@@ -926,6 +926,9 @@ for _c, _inf in sorted(bm.cohort_info.items()):
     _row = {"c": _c, "s": _tr.isoformat(), "e": _end.isoformat(), "n": _n,
             "f": _tally["finished"], "l": _tally["completed-late"], "d": _tally["dropped"],
             "w": _tally["waiting"], "z": _tally["never-began"],
+            # p = still in progress. Shipped explicitly so f+l+d+w+z+p == n for EVERY cohort; leaving
+            # it as an implied residual meant three cohorts had 7 workers in no bucket at all.
+            "p": _tally["in-progress"],
             "ts": _sent, "tc": _cdone}
     if tsl.GRACE_DAYS.get(_c, _cad) != _cad:
         _row["g"] = GRACE_DAYS[_c]
