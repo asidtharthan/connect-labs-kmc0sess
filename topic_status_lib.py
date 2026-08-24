@@ -25,6 +25,17 @@ states go on the END. Display order is a separate concern (see BAR_ORDER in the 
 """
 from datetime import timedelta
 
+# ---- per-cohort grace override -------------------------------------------------------------------
+# How long after an interview is released does an FLW have to do it before it counts as missed?
+# The DEFAULT is one gap - that cohort's own interview spacing - which is why nothing is listed here:
+# a 3-day-gap cohort gets 3 days and a 14-day-gap cohort gets 14, automatically, with no tuning.
+#
+# Add an entry only when a cohort's owners want a different allowance, e.g. {"1PC1": 28} to give PANEL
+# cohort 1PC1 28 days instead of its usual 4. Keyed by cohort id, so cohorts of one design can differ.
+# Lives HERE rather than in one builder so that every consumer of the definition reads the same
+# overrides - a shared function with unshared inputs is not a shared definition.
+GRACE_DAYS = {}
+
 # index order == wire format. APPEND ONLY — never reorder.
 STATES = [
     "not-applicable",  # 0 topic isn't part of this cohort's design

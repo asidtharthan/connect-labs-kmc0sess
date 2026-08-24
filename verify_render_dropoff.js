@@ -198,8 +198,30 @@ if (dropHtml) {
     /one interview gap/i.test(dropHtml),
   );
   check(
-    'keeps Waiting separate from Dropped',
-    /Waiting/.test(dropHtml) && /Folding them into drop-off/i.test(dropHtml),
+    'keeps Schedule-not-completed separate from Dropped',
+    /Schedule not completed/.test(dropHtml) &&
+      /Not their doing, so kept out of drop-off/i.test(dropHtml),
+  );
+  check(
+    'defines every state in the view itself',
+    /What each column means/.test(dropHtml) &&
+      [
+        'Completed',
+        'Dropped off',
+        'Schedule not completed',
+        'Never began',
+        'Still in progress',
+      ].every(function (k) {
+        return dropHtml.indexOf(k) >= 0;
+      }),
+  );
+  check(
+    'splits completed into on time and late',
+    /of which late/.test(dropHtml),
+  );
+  check(
+    'sort control offered on the design level too',
+    /Design name/.test(dropHtml),
   );
   check(
     'shows the fixed-days explainer table',
@@ -251,8 +273,15 @@ if (dropHtml) {
 
 // ---------------------------------------------------------------- the waiting band on the old chart
 check(
-  'quality panel gained the Waiting series',
-  /Waiting: did everything sent, nothing more sent/.test(injected),
+  'quality panel names the Schedule-not-completed series',
+  /Schedule not completed: did all sent, nothing more sent/.test(injected),
+);
+check(
+  'no surface still calls this state Waiting',
+  (injected.match(/Waiting/g) || []).length <= 2,
+  `${
+    (injected.match(/Waiting/g) || []).length
+  } mentions (one historical note + one code comment ok)`,
 );
 check(
   'Dropped label no longer claims a 14-day silence rule',
@@ -328,8 +357,10 @@ check(
   !!docsTabs && /Drop-off by cohort/.test(docsTabs),
 );
 check(
-  'docs documents the Waiting bucket',
-  !!docsMetrics && /Waiting on the schedule/.test(docsMetrics),
+  'docs documents Schedule not completed and Completed late',
+  !!docsMetrics &&
+    /Schedule not completed/.test(docsMetrics) &&
+    /Completed late/.test(docsMetrics),
 );
 check(
   'docs no longer describes Dropped as 14 days of silence',
@@ -448,7 +479,8 @@ check(
 // live figure scaled from the local payload, not the local figure itself.
 const liveBytes = Buffer.byteLength(injected, 'utf8');
 const CAP = 512 * 1024;
-const LIVE_FACTOR = 1.09; // observed live/local payload ratio; raise if CI trips again
+const LIVE_FACTOR = 1.075; // MEASURED on the 2026-08-21 publish: 252.4 KB live / 234.9 local
+const MIN_HEADROOM = 4 * 1024; // fail before the wall, not at it - CI's own gate is the backstop
 const projected =
   Buffer.byteLength(src, 'utf8') +
   (liveBytes - Buffer.byteLength(src, 'utf8')) * LIVE_FACTOR;
@@ -460,8 +492,8 @@ check(
   )} KB`,
 );
 check(
-  'projected LIVE render fits the cap',
-  projected < CAP,
+  'projected LIVE render fits the cap with headroom to spare',
+  projected + MIN_HEADROOM < CAP,
   `~${Math.round(
     projected / 1024,
   )} KB projected at ${LIVE_FACTOR}x payload, headroom ~${Math.round(

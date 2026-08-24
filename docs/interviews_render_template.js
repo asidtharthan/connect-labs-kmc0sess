@@ -369,8 +369,8 @@ function WorkflowUI(props) {
           ["Connect funnel", "Invited → accepted → Learn completed → claimed → initiated. Everything before an interview exists."],
           ["Interview drop-off table", "Per interview slot: eligible, triggered, started, completed, with three percentage bases (see Indicators)."],
           ["Retention lines", "Completion by interview number, with a Denominator toggle and a de-impact toggle."],
-          ["Cohort Engagement (3 panels)", "Weekly recruitment, engagement quality (Finished / Steady / Inconsistent / Dropped / Waiting) and status-now (New / Active / Slow / Quiet / Finished)."],
-          ["Drop-off by cohort", "One row per cohort design or per individual cohort, each scored at ITS OWN end date rather than today or a date shared across the design. Includes a table showing what a fixed number of days would have meant in each design."]
+          ["Cohort Engagement (3 panels)", "Weekly recruitment, outcome (Completed / Dropped off / Schedule not completed / In progress) plus rhythm (Steady / Inconsistent), and status-now (New / Active / Slow / Quiet / Finished)."],
+          ["Drop-off by cohort", "One row per cohort design or per individual cohort, each scored at ITS OWN end date rather than today or a date shared across the design. Five mutually exclusive states, defined on the page itself, plus a table showing what a fixed number of days would have meant in each design. Sortable by drop-off or by name at either level."]
         ] },
       { id: "fullretention", name: "Full Retention Table", question: "Give me every cohort × interview number in one grid.",
         reads: ["dropoff", "cohortSG"],
@@ -426,15 +426,19 @@ function WorkflowUI(props) {
       { g: "Engagement", name: "Dropped off", where: "Funnels → Cohort Engagement; Funnels → Drop-off by cohort",
         how: "Has NOT finished the schedule AND an interview they were actually sent went past its deadline unfinished. The deadline is one interview gap after it was released - so 3 days in a 3-day design and 14 in a 14-day one. This is the same rule the FLW × Topic matrix uses to call a slot missed/overdue, so the two halves of the dashboard now agree.",
         base: "FLWs who started ≥ 1 interview",
-        gotcha: "Only interviews the bot ACTUALLY SENT can be missed. An FLW who completed everything sent to them but whose design never finished is counted as Waiting, not Dropped - blaming them for a schedule that stopped would be wrong. Recoverable on purpose: complete a late interview and the FLW leaves this bucket. Until 2026-08-21 this was a flat 14 days of silence for every cohort, which called an on-schedule worker in a 14-day design a drop-out while giving a 3-day design nearly five missed turns of slack." },
-      { g: "Engagement", name: "Waiting on the schedule", where: "Funnels → Cohort Engagement; Funnels → Drop-off by cohort",
-        how: "Completed every interview that was ever sent to them, but their design is not complete because nothing further was sent.",
+        gotcha: "Only interviews the bot ACTUALLY SENT can be missed. An FLW who completed everything sent to them but whose design never finished is counted as SCHEDULE NOT COMPLETED, not Dropped - blaming them for a schedule that stopped would be wrong. Recoverable on purpose: complete a late interview and the FLW leaves this bucket." },
+      { g: "Engagement", name: "Schedule not completed", where: "Funnels → Cohort Engagement; Funnels → Drop-off by cohort",
+        how: "Completed every interview that was ever SENT to them, but their design is not complete because nothing further was sent, and their cohort has since closed.",
         base: "FLWs who started ≥ 1 interview",
-        gotcha: "Introduced 2026-08-21. These FLWs were previously absorbed into Steady/Inconsistent, which reads as “on track” for people who in fact never finished. On the live data they were 491 FLW-cohort pairs, 15% of starters and 69% of TRE, so they are far too many to mislabel. They are NOT drop-outs and must not be added to a drop-off figure." },
+        gotcha: "Every FLW here sits in a CLOSED cohort with no interview merely “not due yet”, so nothing is still coming. NOT drop-outs (blaming them for a schedule that stopped would be wrong) and NOT finishers (some did 1 of 2 interviews, some 11 of 13). Never add this to a drop-off figure." },
+      { g: "Engagement", name: "Completed late", where: "Funnels → Drop-off by cohort",
+        how: "Completed every interview in their design, but the last one landed AFTER their cohort’s window had closed.",
+        base: "FLWs who started ≥ 1 interview",
+        gotcha: "Scoring strictly at the window end filed these as “dropped off”, which is wrong - they finished. Completed on time + Completed late is the total who finished." },
       { g: "Engagement", name: "Steady vs Inconsistent", where: "Funnels → Cohort Engagement",
-        how: "Steady = never a gap longer than the cohort’s gap threshold. Inconsistent = at least one longer gap. The threshold is twice that cohort’s interview cadence. This is a SEPARATE reading from the outcome (Finished / Dropped / Waiting / In progress), not one of its buckets - a finisher has a rhythm just as much as a dropout does, and the two pairs each sum to 100% on their own base. Measured on the largest gap BETWEEN interviews, not time since the last one.",
+        how: "Steady = never a gap longer than the cohort’s gap threshold. Inconsistent = at least one longer gap. The threshold is twice that cohort’s interview cadence. This is a SEPARATE reading from the outcome (Completed / Dropped off / Schedule not completed / In progress), not one of its buckets - a finisher has a rhythm just as much as a dropout does, and the two pairs each sum to 100% on their own base. Measured on the largest gap BETWEEN interviews, not time since the last one.",
         base: "Starters with 2+ interviews (rhythm_base). One interview gives no gap to judge, so a single-interview design reads “not measurable” rather than 0%",
-        gotcha: "Cadence-relative on purpose, so a 3-day and a 14-day cohort are judged fairly. It is therefore NOT a fixed number of days across subgroups. On the ALL COHORTS view each FLW is now judged against their OWN design’s cadence; until 2026-08-21 that view applied a single 8-day threshold, which was twice the modal 4-day cadence and therefore right for PANEL and wrong for the other ten designs. Also from 2026-08-21: rhythm was previously the LEFTOVER of the outcome stack, so it only described FLWs in none of the other buckets - once every cohort closed it emptied to 0% and the KPI tile lost the signal entirely. Reading an earlier week was rejected because the last non-zero week was 9 to 14 weeks in the past for most designs, which would have labelled a stale number as current." },
+        gotcha: "Cadence-relative on purpose, so a 3-day and a 14-day cohort are judged fairly. It is therefore NOT a fixed number of days across subgroups. On the ALL COHORTS view each FLW is judged against their OWN design’s cadence, and the figure is pooled from the per-design results so it cannot contradict them." },
       { g: "Engagement", name: "New / Active / Slow / Quiet", where: "Funnels → Cohort Engagement panel 3",
         how: "Status right now, in priority order: first-ever interview this week (New), last interview within ONE interview gap (Active), one to two gaps (Slow), more than two gaps (Quiet). Finished takes precedence over all four.",
         base: "FLWs who started ≥ 1 interview",
@@ -446,7 +450,7 @@ function WorkflowUI(props) {
       { g: "Slots", name: "The 7 slot states", where: "Overview, Breakdowns matrix",
         how: "Each FLW × topic cell is exactly one of: completed, started-not-completed, available-not-started, available-missed-overdue, not-available-yet, not-triggered, not-applicable. A slot is missed/overdue one interview gap after it was sent.",
         base: "Claimed slots",
-        gotcha: "“Not applicable” means the topic is not in that cohort’s design at all - it is not a failure and must not be added to a denominator. Since 2026-08-21 the FINAL interview of a design has a deadline like every other; it used to be permanently exempt, which meant nobody could be recorded as skipping their last interview and a single-interview design showed an impossible 0% drop-off." },
+        gotcha: "“Not applicable” means the topic is not in that cohort’s design at all - it is not a failure and must not be added to a denominator. The FINAL interview has a deadline like every other; it used to be exempt, so nobody could be recorded as skipping their last one." },
       { g: "FLW", name: "Per-cohort finish - so far", where: "FLW Retention",
         how: "For each FLW, schedules finished divided by every schedule they were enrolled in, then averaged across FLWs.",
         base: "All their enrolments",
@@ -458,7 +462,7 @@ function WorkflowUI(props) {
       { g: "FLW", name: "Recently active / came back / needs following up", where: "FLW Retention",
         how: "Recently active = last session within two interview gaps. Came back = a break of three or more gaps, then a return. Needs following up = last session between two and eight gaps ago, unfinished, and the programme did finish offering them a schedule.",
         base: "All FLWs (the follow-up pool also requires a fully-offered schedule)",
-        gotcha: "Gap multiples, not fixed days, since 2026-08-21 - they were 14 days, 21 days and 14-to-60 days for every design regardless of pace. A design with no cadence (a single-interview cohort) falls back to 7 days." },
+        gotcha: "Gap multiples, not fixed days, so they mean the same thing at any pace. A single-interview design falls back to 7 days." },
       { g: "FLW", name: "Finished ≥ 1 schedule", where: "FLW Retention",
         how: "Finished at least one of their cohorts.",
         base: "All FLWs",
@@ -1501,7 +1505,7 @@ function WorkflowUI(props) {
           // actually sent went past its deadline (released, plus one interview gap to do it) unfinished,
           // so it means the same thing in a 3-day-gap design and a 14-day-gap one.
           { label: "Dropped off: let a due interview pass", data: ce.drop_pct, borderColor: "#C62828", backgroundColor: "#C62828" },
-          { label: "Waiting: did everything sent, nothing more sent", data: ce.waiting_pct, borderColor: "#0277BD", backgroundColor: "#0277BD" },
+          { label: "Schedule not completed: did all sent, nothing more sent", data: ce.waiting_pct, borderColor: "#0277BD", backgroundColor: "#0277BD" },
           { label: "Still in progress", data: ce.inprog_pct, borderColor: "#607D8B", backgroundColor: "#607D8B" },
           // ---- RHYTHM: a SEPARATE reading over starters with 2+ interviews. These two sum to 100 on
           // their own base, which is why they are dashed - they are not part of the stack above. They
@@ -1555,16 +1559,20 @@ function WorkflowUI(props) {
       var sg = CSGm[r.c] || "?";
       var des = SD[sg] || {};
       var ivs = (des.topics || []).length;
-      var prog = r.n - r.f - r.d - r.w;                     // in-progress = the residual
+      // f = completed by the window end, l = completed after it, d = dropped, w = schedule never
+      // fully sent, z = nothing ever sent. In-progress is the residual.
+      var late = r.l || 0, never = r.z || 0;
+      var prog = r.n - r.f - late - r.d - r.w - never;
+      var pc = function (v) { return r.n ? Math.round(1000 * v / r.n) / 10 : null; };
       return {
         cohort: r.c, sg: sg, ivs: ivs, gap: des.cadence || null,
         grace: r.g != null ? r.g : (des.cadence || null),
         graceOverridden: r.g != null, startEstimated: !!r.x,
         start: r.s, end: r.e, closed: r.e <= (DATA.today || ""),
-        n: r.n, fin: r.f, drop: r.d, wait: r.w, prog: prog,
-        dropPct: r.n ? Math.round(1000 * r.d / r.n) / 10 : null,
-        finPct: r.n ? Math.round(1000 * r.f / r.n) / 10 : null,
-        waitPct: r.n ? Math.round(1000 * r.w / r.n) / 10 : null
+        n: r.n, onTime: r.f, late: late, done: r.f + late,
+        drop: r.d, notSent: r.w, never: never, prog: prog,
+        donePct: pc(r.f + late), onTimePct: pc(r.f), latePct: pc(late),
+        dropPct: pc(r.d), notSentPct: pc(r.w), neverPct: pc(never)
       };
     });
   }
@@ -1573,20 +1581,21 @@ function WorkflowUI(props) {
   function cohortDropByDesign(rows) {
     var by = {};
     rows.forEach(function (r) {
-      var a = by[r.sg] || (by[r.sg] = { sg: r.sg, ivs: r.ivs, gap: r.gap, cohorts: 0, n: 0, fin: 0, drop: 0, wait: 0, prog: 0, ends: [] });
-      a.cohorts++; a.n += r.n; a.fin += r.fin; a.drop += r.drop; a.wait += r.wait; a.prog += r.prog;
+      var a = by[r.sg] || (by[r.sg] = { sg: r.sg, ivs: r.ivs, gap: r.gap, cohorts: 0, n: 0,
+        onTime: 0, late: 0, done: 0, drop: 0, notSent: 0, never: 0, prog: 0, ends: [] });
+      a.cohorts++; a.n += r.n; a.onTime += r.onTime; a.late += r.late; a.done += r.done;
+      a.drop += r.drop; a.notSent += r.notSent; a.never += r.never; a.prog += r.prog;
       a.ends.push(r.end);
     });
     return Object.keys(by).map(function (k) {
-      var a = by[k];
+      var a = by[k], pc = function (v) { return a.n ? Math.round(1000 * v / a.n) / 10 : null; };
       a.ends.sort();
       a.endFirst = a.ends[0]; a.endLast = a.ends[a.ends.length - 1];
       a.spread = Math.round((new Date(a.endLast) - new Date(a.endFirst)) / 86400000);
-      a.dropPct = a.n ? Math.round(1000 * a.drop / a.n) / 10 : null;
-      a.finPct = a.n ? Math.round(1000 * a.fin / a.n) / 10 : null;
-      a.waitPct = a.n ? Math.round(1000 * a.wait / a.n) / 10 : null;
+      a.donePct = pc(a.done); a.onTimePct = pc(a.onTime); a.latePct = pc(a.late);
+      a.dropPct = pc(a.drop); a.notSentPct = pc(a.notSent); a.neverPct = pc(a.never);
       return a;
-    }).sort(function (x, y) { return (y.dropPct || 0) - (x.dropPct || 0); });
+    });
   }
 
   function renderCohortDropoff() {
@@ -1596,21 +1605,34 @@ function WorkflowUI(props) {
     }
     var byDesign = cohortDropByDesign(rows);
     var tot = rows.reduce(function (a, r) {
-      a.n += r.n; a.fin += r.fin; a.drop += r.drop; a.wait += r.wait; a.prog += r.prog; return a;
-    }, { n: 0, fin: 0, drop: 0, wait: 0, prog: 0 });
-    var sorted = (cdSort === "cohort"
-      ? rows.slice().sort(function (x, y) { return x.cohort < y.cohort ? -1 : 1; })
-      : rows.slice().sort(function (x, y) { return (y.dropPct || 0) - (x.dropPct || 0); }));
-    var shown = cdLevel === "design" ? byDesign : sorted;
+      a.n += r.n; a.onTime += r.onTime; a.late += r.late; a.done += r.done;
+      a.drop += r.drop; a.notSent += r.notSent; a.never += r.never; a.prog += r.prog; return a;
+    }, { n: 0, onTime: 0, late: 0, done: 0, drop: 0, notSent: 0, never: 0, prog: 0 });
+    // Sorting applies to BOTH levels. By id sorts designs alphabetically and cohorts by cohort id.
+    function sortRows(list, isDesign) {
+      var out = list.slice();
+      if (cdSort === "cohort") {
+        out.sort(function (x, y) {
+          var a = isDesign ? x.sg : x.cohort, b = isDesign ? y.sg : y.cohort;
+          return a < b ? -1 : a > b ? 1 : 0;
+        });
+      } else {
+        out.sort(function (x, y) { return (y.dropPct || 0) - (x.dropPct || 0); });
+      }
+      return out;
+    }
+    var shown = cdLevel === "design" ? sortRows(byDesign, true) : sortRows(rows, false);
     var estimated = rows.filter(function (r) { return r.startEstimated; }).length;
+    var openN = rows.filter(function (r) { return !r.closed; }).length;
     var overridden = rows.filter(function (r) { return r.graceOverridden; });
 
     function pctCell(v) { return v == null ? "-" : v + "%"; }
     function bar(r) {
-      var seg = [["#5E35B1", r.finPct, "Completed all"], ["#C62828", r.dropPct, "Dropped off"],
-                 ["#0277BD", r.waitPct, "Waiting"]];
+      var seg = [["#5E35B1", r.onTimePct, "Completed on time"], ["#7E57C2", r.latePct, "Completed late"],
+                 ["#C62828", r.dropPct, "Dropped off"], ["#0277BD", r.notSentPct, "Schedule not completed"],
+                 ["#9E9E9E", r.neverPct, "Never began"]];
       return (
-        <div className="flex h-4 w-full overflow-hidden rounded" title={"Completed " + pctCell(r.finPct) + " / Dropped " + pctCell(r.dropPct) + " / Waiting " + pctCell(r.waitPct)}>
+        <div className="flex h-4 w-full overflow-hidden rounded" title={seg.map(function (t) { return t[2] + " " + pctCell(t[1]); }).join(" / ")}>
           {seg.map(function (t, i) {
             return t[1] ? <div key={i} style={{ width: t[1] + "%", background: t[0] }} /> : null;
           })}
@@ -1624,44 +1646,61 @@ function WorkflowUI(props) {
           <span className="text-xs font-semibold text-gray-700">Show:</span>
           {subBtn(cdLevel, "design", setCdLevel, "By cohort design (" + byDesign.length + ")")}
           {subBtn(cdLevel, "cohort", setCdLevel, "Every cohort (" + rows.length + ")")}
-          {cdLevel === "cohort" && (
-            <React.Fragment>
-              <span className="ml-2 text-xs font-medium text-gray-600">Sort:</span>
-              {subBtn(cdSort, "drop", setCdSort, "Highest drop-off")}
-              {subBtn(cdSort, "cohort", setCdSort, "Cohort id")}
-            </React.Fragment>
-          )}
+          <span className="ml-2 text-xs font-medium text-gray-600">Sort:</span>
+          {subBtn(cdSort, "drop", setCdSort, "Highest drop-off")}
+          {subBtn(cdSort, "cohort", setCdSort, cdLevel === "design" ? "Design name" : "Cohort id")}
         </div>
 
         <div className="rounded border border-gray-200 bg-gray-50 p-3 text-xs leading-relaxed text-gray-700">
           <b>What this shows.</b> Every cohort measured at <b>its own end date</b> - the day its last
-          interview stopped being open - rather than today or a date shared across its design. A worker
-          counts as <b>dropped off</b> when an interview they were actually sent went past its deadline
-          unfinished. The deadline is <b>one interview gap</b> after it was sent, so it is 3 days in a
-          3-day design and 14 in a 14-day one, and means the same thing in both.
+          interview stopped being open - rather than today or a date shared across its whole design.
+          A worker&apos;s <b>deadline for one interview is one interview gap after it was sent</b>, so it is
+          3 days in a 3-day design and 14 in a 14-day one, and means the same thing in both.
           <div className="mt-2">
-            <b>Why there is no day-count control.</b> All {rows.length} cohorts have finished. Once a
-            cohort is over, "did they complete it?" needs no waiting period, so changing the number
-            would not move any figure on this chart. It only matters while a cohort is still running.
+            <b>Why there is no day-count control.</b> {rows.length - openN} of {rows.length} cohorts have
+            finished. Once a cohort is over, &quot;did they complete it?&quot; needs no waiting period, so
+            changing the number would not move these figures. It only matters while a cohort is running.
             {overridden.length
               ? <span> {overridden.length} cohort(s) run a non-default deadline: {overridden.map(function (r) { return r.cohort + " (" + r.grace + "d)"; }).join(", ")}.</span>
               : <span> No cohort currently overrides the default.</span>}
-          </div>
-          <div className="mt-2">
-            <b>Waiting</b> is counted separately from dropped: those workers completed everything that
-            was ever sent to them, but their design never finished because nothing further was sent.
-            Folding them into drop-off would blame them for a schedule that stopped.
             {estimated
-              ? <span className="block mt-2"><b>Note.</b> {estimated} cohort(s) have no Connect invitation
-                date, so their start is taken from the first interview trigger we recorded. Marked with
-                * below.</span>
+              ? <span> {estimated} cohort(s) have no Connect invitation date, so their start comes from
+                the first interview trigger recorded; marked * below.</span>
               : null}
           </div>
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-4">
-          {[["Completed all interviews", tot.fin, "#5E35B1"], ["Dropped off", tot.drop, "#C62828"],
-            ["Waiting on the schedule", tot.wait, "#0277BD"], ["Still in progress", tot.prog, "#607D8B"]]
+        {/* Every state spelled out, in the view. Five states, mutually exclusive, and they sum to the
+            worker count - so nobody has to guess what "dropped" or "not completed" means here. */}
+        <div className="rounded border border-gray-200 p-3">
+          <div className="mb-2 text-xs font-semibold text-gray-700">What each column means</div>
+          <div className="grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
+            {[["Completed", "#5E35B1", "Did every interview in their plan. Split into on time (by their cohort's end) and late (after it) - both are completions."],
+              ["Dropped off", "#C62828", "An interview WAS sent to them, its deadline passed, and they never completed it. This is the only state that means someone stopped."],
+              ["Schedule not completed", "#0277BD", "They completed everything that was ever sent to them, but their plan was never fully sent, and the cohort has since closed. Nothing is still coming. Not their doing, so kept out of drop-off."],
+              ["Never began", "#9E9E9E", "Claimed the opportunity but the bot never sent them a single interview."],
+              ["Still in progress", "#607D8B", "Their cohort is still running and they have a live interview in hand. Outcome not decided yet."]]
+              .map(function (t, i) {
+                return (
+                  <div key={i} className="flex gap-2">
+                    <span className="mt-1 inline-block h-2 w-2 flex-none rounded-full" style={{ background: t[1] }} />
+                    <span className="text-gray-700"><b>{t[0]}.</b> {t[2]}</span>
+                  </div>
+                );
+              })}
+          </div>
+          <div className="mt-2 text-xs text-gray-500">
+            One row per worker per cohort, so somebody enrolled in two cohorts appears twice - once for
+            each. That is why these totals are larger than the unique-worker counts elsewhere.
+          </div>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-5">
+          {[["Completed", tot.done, "#5E35B1", tot.late ? tot.onTime.toLocaleString() + " on time, " + tot.late.toLocaleString() + " late" : "all on time"],
+            ["Dropped off", tot.drop, "#C62828", "let a sent interview go undone"],
+            ["Schedule not completed", tot.notSent, "#0277BD", "did all that was sent"],
+            ["Never began", tot.never, "#9E9E9E", "nothing ever sent"],
+            ["Still in progress", tot.prog, "#607D8B", "cohort still running"]]
             .map(function (t, i) {
               return (
                 <div key={i} className="rounded border border-gray-200 p-2">
@@ -1672,6 +1711,7 @@ function WorkflowUI(props) {
                       {tot.n ? Math.round(100 * t[1] / tot.n) + "%" : ""}
                     </span>
                   </div>
+                  <div className="text-gray-400" style={{ fontSize: "10px" }}>{t[3]}</div>
                 </div>
               );
             })}
@@ -1690,8 +1730,10 @@ function WorkflowUI(props) {
                 <th className="px-2 py-1 text-left">{cdLevel === "design" ? "Spread" : "Its own end"}</th>
                 <th className="px-2 py-1 text-right">Workers</th>
                 <th className="px-2 py-1 text-right">Completed</th>
-                <th className="px-2 py-1 text-right">Dropped</th>
-                <th className="px-2 py-1 text-right">Waiting</th>
+                <th className="px-2 py-1 text-right">of which late</th>
+                <th className="px-2 py-1 text-right">Dropped off</th>
+                <th className="px-2 py-1 text-right">Schedule not completed</th>
+                <th className="px-2 py-1 text-right">Never began</th>
                 <th className="px-2 py-1 text-left" style={{ minWidth: 140 }}>Split</th>
               </tr>
             </thead>
@@ -1715,9 +1757,11 @@ function WorkflowUI(props) {
                       {isD ? (r.spread ? r.spread + " days" : "same day") : r.end}
                     </td>
                     <td className="px-2 py-1 text-right">{r.n.toLocaleString()}</td>
-                    <td className="px-2 py-1 text-right">{pctCell(r.finPct)}</td>
+                    <td className="px-2 py-1 text-right">{pctCell(r.donePct)}</td>
+                    <td className="px-2 py-1 text-right text-gray-500">{r.late ? pctCell(r.latePct) : "-"}</td>
                     <td className="px-2 py-1 text-right font-semibold" style={{ color: "#C62828" }}>{pctCell(r.dropPct)}</td>
-                    <td className="px-2 py-1 text-right" style={{ color: "#0277BD" }}>{pctCell(r.waitPct)}</td>
+                    <td className="px-2 py-1 text-right" style={{ color: "#0277BD" }}>{pctCell(r.notSentPct)}</td>
+                    <td className="px-2 py-1 text-right text-gray-500">{r.never ? pctCell(r.neverPct) : "-"}</td>
                     <td className="px-2 py-1">{bar(r)}</td>
                   </tr>
                 );
@@ -1855,7 +1899,7 @@ function WorkflowUI(props) {
             { label: "Finished", val: finished + "%", sub: "completed all interviews" + asOf, color: "#5E35B1" },
             { label: "Active now", val: activeNow, sub: "interviewed within one gap" + asOf, color: "#2E7D32" },
             { label: "Dropped off", val: drop + "%", sub: "let a due interview pass" + asOf, color: "#C62828" },
-            { label: "Waiting", val: (waitPctNow == null ? "-" : waitPctNow + "%"),
+            { label: "Schedule not completed", val: (waitPctNow == null ? "-" : waitPctNow + "%"),
               sub: "did all sent, nothing more sent" + asOf, color: "#0277BD" },
             { label: "Steady rhythm", val: (rBase ? steadyNow + "%" : "not measurable"),
               sub: (rBase
@@ -1870,9 +1914,9 @@ function WorkflowUI(props) {
             <React.Fragment>
               <div className="text-xs bg-indigo-50 border border-indigo-100 rounded px-3 py-2 text-gray-700">
                 {engSg === "ALL" ? (
-                  <span><b>Program-wide roll-up.</b> <b>{started}</b> FLWs have started interviewing across all cohorts; <b>{finished}%</b> have <b>finished</b> their whole schedule and <b>{drop}%</b> dropped off, meaning an interview they were sent went past its deadline unfinished. A further <b>{waitPctNow}%</b> are <b>waiting</b>: they did everything sent to them, but their schedule sent no more. Cohorts run different-length schedules, so read this as the recruitment + completion picture; for one cohort's engagement detail, pick it above.</span>
+                  <span><b>Program-wide roll-up.</b> <b>{started}</b> FLWs have started interviewing across all cohorts; <b>{finished}%</b> have <b>finished</b> their whole schedule and <b>{drop}%</b> dropped off, meaning an interview they were sent went past its deadline unfinished. For a further <b>{waitPctNow}%</b> the <b>schedule was not completed</b>: they did everything sent to them, but their plan was never fully sent. Cohorts run different-length schedules, so read this as the recruitment + completion picture; for one cohort's engagement detail, pick it above.</span>
                 ) : (
-                  <span><b>Read this as recruitment + engagement, not attrition.</b> Of <b>{started}</b> FLWs who started interviewing in {scope}, <b>{finished}%</b> <b>finished</b> all their interviews and <b>{activeNow}</b> are active right now. <b>{drop}%</b> dropped off, meaning an interview they were sent went past its deadline (one interview gap after it was sent) unfinished, and <b>{waitPctNow}%</b> are <b>waiting</b> because they did everything sent and nothing more was sent. A dip in the retention curve is mostly <i>finishers</i>, <i>later starts</i> and <i>slower cadence</i> - not people quitting.{engWin === "active" && hasTail ? <span> <b>The tiles above are as of {fmtWk(DATA.today)}; the charts below stop at ~{endTxt}</b> (the active window).{windowLags ? <span> So the charts end on <b>{finPctWin}% finished / {dropWin}% dropped</b> while the current figures are <b>{finished}% / {drop}%</b> - the gap is activity in the trimmed weeks, not two different measures.</span> : null} Switch to Full timeline for the complete series.</span> : null}</span>
+                  <span><b>Read this as recruitment + engagement, not attrition.</b> Of <b>{started}</b> FLWs who started interviewing in {scope}, <b>{finished}%</b> <b>finished</b> all their interviews and <b>{activeNow}</b> are active right now. <b>{drop}%</b> dropped off, meaning an interview they were sent went past its deadline (one interview gap after it was sent) unfinished, and for <b>{waitPctNow}%</b> the <b>schedule was not completed</b> - they did everything sent and nothing more was sent. A dip in the retention curve is mostly <i>finishers</i>, <i>later starts</i> and <i>slower cadence</i> - not people quitting.{engWin === "active" && hasTail ? <span> <b>The tiles above are as of {fmtWk(DATA.today)}; the charts below stop at ~{endTxt}</b> (the active window).{windowLags ? <span> So the charts end on <b>{finPctWin}% finished / {dropWin}% dropped</b> while the current figures are <b>{finished}% / {drop}%</b> - the gap is activity in the trimmed weeks, not two different measures.</span> : null} Switch to Full timeline for the complete series.</span> : null}</span>
                 )}
               </div>
               <div className="flex flex-wrap gap-2 px-1">
@@ -1891,7 +1935,7 @@ function WorkflowUI(props) {
               <div style={{ height: "300px" }}><canvas ref={eng3Ref}></canvas></div>
               <Legend title="How to read these three panels">
                 <div><b>Panel 1 - recruitment:</b> cumulative FLWs who have started interviewing (appeared in the interview data). Not invited counts.</div>
-                <div><b>Panel 2 - two separate readings.</b> The <b>solid</b> lines are the <b>outcome</b> and cover every starter: <b>Finished</b> (completed all their interviews), <b>Dropped off</b> (an interview they were sent went past its deadline - one gap after it was sent - unfinished), <b>Waiting</b> (did everything sent to them, but nothing more was sent, so their schedule stopped rather than they did), and <b>Still in progress</b>. Those four sum to 100%. The <b>dashed</b> lines are <b>rhythm</b> and answer a different question - of the starters with two or more interviews, how many kept a steady pace (never a gap &gt; {ce.gap_thresh} days). Those two sum to 100% on their own base, so they are not part of the stack above. <b>Rhythm is a one-way ratchet</b> - a single long gap moves an FLW to Inconsistent permanently. Rhythm uses the largest gap between interviews, not time since the last one, so a finisher does not drift into Inconsistent as the calendar moves.{ce.rhythm_pooled ? <span> On <b>All cohorts</b> the rhythm figure is <b>pooled from the individual designs</b> rather than recomputed on a merged history, so it can never disagree with them; its base counts <b>enrolments</b> (an FLW in two cohorts has two rhythms), which is why it can exceed the unique-FLW count above.</span> : null}</div>
+                <div><b>Panel 2 - two separate readings.</b> The <b>solid</b> lines are the <b>outcome</b> and cover every starter: <b>Finished</b> (completed all their interviews), <b>Dropped off</b> (an interview they were sent went past its deadline - one gap after it was sent - unfinished), <b>Schedule not completed</b> (they did everything sent to them, but their plan was never fully sent, so the schedule stopped rather than they did), and <b>Still in progress</b>. Those four sum to 100%. The <b>dashed</b> lines are <b>rhythm</b> and answer a different question - of the starters with two or more interviews, how many kept a steady pace (never a gap &gt; {ce.gap_thresh} days). Those two sum to 100% on their own base, so they are not part of the stack above. <b>Rhythm is a one-way ratchet</b> - a single long gap moves an FLW to Inconsistent permanently. Rhythm uses the largest gap between interviews, not time since the last one, so a finisher does not drift into Inconsistent as the calendar moves.{ce.rhythm_pooled ? <span> On <b>All cohorts</b> the rhythm figure is <b>pooled from the individual designs</b> rather than recomputed on a merged history, so it can never disagree with them; its base counts <b>enrolments</b> (an FLW in two cohorts has two rhythms), which is why it can exceed the unique-FLW count above.</span> : null}</div>
                 <div><b>Panel 3 - status now:</b> where every starter stands at each week's end - Finished, Active (≤7d), Started-this-week, Slow (8-14d), Quiet (14+d). Totals equal Panel 1 by construction.</div>
                 <div className="text-gray-400">x-axis is the week-ending date. <b>Active window</b> trims the trailing weeks once fewer than the cutoff ({engThr}%) of the cohort's FLWs are newly starting/finishing per week - so a completed cohort isn't shown as a long inactive tail; <b>Full timeline</b> shows the whole period, Apr through today, unannotated - tick “mark active-window end” if you want the boundary drawn. For <b>ALL cohorts</b> the active window runs as long as ANY cohort is still active, so it reaches close to today while individual finished cohorts trim earlier. {engSg === "ALL" ? ce.gap_thresh + "-day gap threshold (program-wide default - cohorts here have mixed cadences)" : ce.gap_thresh + " = 2× the " + engSg + " interview cadence"}; the 14-day dropout window is cadence-independent.</div>
               </Legend>
@@ -2761,7 +2805,7 @@ function WorkflowUI(props) {
                                           return (
                                             <tr key={co.cohort + "-" + iv.n} className="bg-white hover:bg-gray-50">
                                               <td className={td + " text-gray-500"}>Int {iv.n}</td>
-                                              <td className={td}>{iv.name}</td>
+                                              <td className={td}>{iv.name || TOPIC_NAMES[iv.topic] || iv.topic}</td>
                                               <td className={td + " text-right"}>{iv.eligible}</td>
                                               <td className={td + " text-right"}>{iv.triggered}</td>
                                               <td className={td + " text-right text-gray-500"}>{iv.pct_trig}%</td>

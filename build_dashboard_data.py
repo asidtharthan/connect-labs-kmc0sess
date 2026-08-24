@@ -113,7 +113,9 @@ gcols = [
     "matched_session_id",
 ]
 rows_sorted = sorted(bm.rows, key=lambda r: (r["cohort_id"], r["connect_id"], int(r["interview_n"])))
-GRANULAR_N = 30
+# Kept small deliberately: this is an ILLUSTRATIVE sample of 10,000+ rows, and the build warns to
+# reduce it when the render nears the 512 KB cap. The full data lives in the tables and exports.
+GRANULAR_N = 12
 granular = []
 for r in rows_sorted[:GRANULAR_N]:
     granular.append(
@@ -156,14 +158,18 @@ for _r in bm.rows:
 
 
 def _status_idx(flw, cohort, sg, topic, topics):
-    # shared with build_payload_agg via topic_status_lib so the matrix and the topic bars can't diverge
+    # Shares the FUNCTION and the INPUTS with build_payload_agg. Sharing only the function was not
+    # enough: this passed `training_date` while the drop-off view fell back to the first trigger, so on
+    # a stale Connect snapshot the matrix called a slot "window still open" while the drop-off view
+    # called it missed, and 27 cohorts disagreed. `start_date` and GRACE_DAYS now have one home each.
     return _tsl.status_idx(
         topic,
         topics,
         _mlook.get((flw, cohort, topic)),
-        bm.cohort_info.get(cohort, {}).get("training_date"),
+        bm.cohort_info.get(cohort, {}).get("start_date"),
         bm.SUBGROUP_DESIGN[sg]["cadence"],
         _TODAY,
+        _tsl.GRACE_DAYS.get(cohort),
     )
 
 
