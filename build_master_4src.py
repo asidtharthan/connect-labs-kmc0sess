@@ -213,6 +213,20 @@ def _derive_subgroup_design():
         cad = (offs[1] - offs[0]) if len(offs) > 1 else design.get(sg, {}).get("cadence", 7)
         design[sg] = {"topics": [s["topic"] for s in seq], "cadence": cad}
         seen[sg] = True
+    # A subgroup that has LIVE COHORTS but no CCHQ schedule silently falls back to the guess above, and
+    # the guesses drift: PANEL's fallback still lists 11 topics while its real schedule has 13. Silently
+    # redefining a design changes both the denominator and every deadline, so say so loudly instead.
+    _live = {cohort_to_sg(c) for c in cohort_schedule if not is_test_cohort(c)}
+    _fellback = sorted(sg for sg in design if sg not in seen and sg in _live)
+    if _fellback:
+        print(f"[1!] WARNING: no CCHQ schedule for {_fellback} - using the FALLBACK design, which may be "
+              f"stale. Check pull_hq_interview_schedule.py ran.")
+    for _sg, _v in design.items():
+        _fb = _FALLBACK_DESIGN.get(_sg)
+        if _sg in seen and _fb and len(_fb["topics"]) != len(_v["topics"]):
+            print(f"[1!] NOTE: {_sg} fallback lists {len(_fb['topics'])} interviews but the live CCHQ "
+                  f"schedule has {len(_v['topics'])}. The live one is in use; the fallback is stale and "
+                  f"would silently redefine the design if the schedule pull ever failed.")
     return design
 
 
