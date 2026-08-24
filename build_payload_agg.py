@@ -489,6 +489,28 @@ if connect_pending_sgs:
 # We use the pipeline's canonical started rows (one matched OCS session per interview slot) so the
 # starter counts tie out exactly with table1[sg].flws / connectFunnel[sg].started. Session DATE is the
 # OCS session start (created_at, UTC), joined via matched_session_id. Collapsed to one row per (flw,day).
+def _slot_deadline(n, start, cad, cohort, trig_iso):
+    """When this interview stops being open FOR THIS WORKER.
+
+    The design deadline is start + (n-1)*gap + grace. But 22.1% of sent slots were triggered AFTER
+    their own design deadline had already passed (ABT1-A 52.9%, worst case 98 days late), so scoring
+    against the design alone blames the FLW for a window the pipeline had already closed before sending.
+    A worker cannot be late for something that had not arrived, so the deadline is whichever is LATER:
+    the design's, or one gap after it actually reached them.
+
+    Measured effect on the counts: none - those slots were never completed at any later date either.
+    This is an attribution fix, not a numbers fix, and it protects future cohorts where a late trigger
+    might still be completed in time.
+    """
+    dl = tsl.deadline_for(n, start, cad, tsl.GRACE_DAYS.get(cohort))
+    td = bm.parse_dt(trig_iso) if trig_iso else None
+    if td:
+        from_trigger = td.date() + timedelta(days=tsl.GRACE_DAYS.get(cohort) or cad)
+        if from_trigger > dl:
+            return from_trigger
+    return dl
+
+
 _sid2date = {e["sid"]: e["first"].date() for _lst in bm.ocs_by_key.values() for e in _lst}
 _eng_flw_dates = defaultdict(lambda: defaultdict(set))     # sg -> flw -> {started session dates}
 _eng_comp_topic_dt = defaultdict(lambda: defaultdict(dict))  # sg -> flw -> {topic: earliest completed date}
@@ -515,7 +537,8 @@ for r in bm.rows:
         _eng_flw_cad.setdefault(_rflw, _rcad)
         if _rtrain and r.get("interview_n"):
             _eng_deadlines[_rsg][_rflw].append((
-                tsl.deadline_for(int(r["interview_n"]), _rtrain, _rcad, tsl.GRACE_DAYS.get(r["cohort_id"])),
+                _slot_deadline(int(r["interview_n"]), _rtrain, _rcad, r["cohort_id"],
+                               r.get("trigger_received_on")),
                 _d if r.get("is_completed") == "Y" else None,
             ))
     if r.get("is_started") == "Y" and _d:
@@ -614,7 +637,7 @@ def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date, deadlines=None
     weeks, started_s = [], []
     steady_p, incons_p, drop_p, fin_p, wait_p, inprog_p = [], [], [], [], [], []
     new_s, active_s, slow_s, quiet_s, finst_s, wait_s, rbase_s = [], [], [], [], [], [], []
-    steady_s, incons_s = [], []
+    steady_s, incons_s, drop_s, inprog_s = [], [], [], []
     prevW = None
     for W in Ws:
         started = steady = incons = drop = new = active = slow = quiet = fin = wait = 0
@@ -660,6 +683,7 @@ def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date, deadlines=None
         new_s.append(new); active_s.append(active); slow_s.append(slow); quiet_s.append(quiet)
         finst_s.append(fin); wait_s.append(wait); rbase_s.append(rbase)
         steady_s.append(steady); incons_s.append(incons)
+        drop_s.append(drop); inprog_s.append(inprog)
         prevW = W
     ended = end_date is not None and TODAY > end_date
     return {"weeks": weeks, "started": started_s,
@@ -667,7 +691,7 @@ def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date, deadlines=None
             "finished_pct": fin_p, "drop_pct": drop_p, "waiting_pct": wait_p, "inprog_pct": inprog_p,
             # rhythm: sums to 100 across starters with 2+ interviews (rhythm_base)
             "steady_pct": steady_p, "incons_pct": incons_p, "rhythm_base": rbase_s,
-            "steady": steady_s, "incons": incons_s,
+            "steady": steady_s, "incons": incons_s, "dropped": drop_s, "inprog": inprog_s,
             "finished": finst_s, "new": new_s, "active": active_s, "slow": slow_s, "quiet": quiet_s,
             "waiting": wait_s,
             "gap_thresh": gap_thresh, "total_started": started_s[-1],
@@ -751,17 +775,60 @@ def _pool_rhythm(target, parts):
     return target
 
 
+def _pool_outcome(target, parts):
+    """Rebuild a pooled series' OUTCOME from its parts, for the same reason the rhythm is pooled.
+
+    ALL marked a worker "finished" if they finished ANY ONE of their cohorts (the min finish date across
+    subgroups), which is a materially more generous question than the one the label asks. Pooling the
+    per-design counts answers the design-level question at program scale instead, and makes ALL
+    arithmetically incapable of disagreeing with the rows beneath it.
+
+    The base becomes ENROLMENTS (a worker in three cohorts contributes three), which is why
+    `outcome_base` ships alongside and the render labels it rather than implying a headcount.
+    """
+    weeks = target["weeks"]
+    n = len(weeks)
+    acc = {k: [0] * n for k in ("started", "finished", "dropped", "waiting", "inprog")}
+    for part in parts:
+        pw = part["weeks"]
+        j = 0
+        for i, w in enumerate(weeks):
+            while j + 1 < len(pw) and pw[j + 1] <= w:
+                j += 1
+            if pw[j] <= w:
+                acc["started"][i] += part["started"][j]
+                acc["finished"][i] += part["finished"][j]
+                acc["dropped"][i] += part["dropped"][j]
+                acc["waiting"][i] += part["waiting"][j]
+                acc["inprog"][i] += part["inprog"][j]
+    # ADDITIVE, deliberately. Overwriting finished_pct/finished would break Panel 3's identity
+    # (finished + new + active + slow + quiet == started, which is person-level here) and would turn
+    # the long-scrutinised "1,441 unique FLWs" headline into an enrolment count. Both readings now ship
+    # side by side and the page states which is which:
+    #   finished_pct  = person-level, "finished AT LEAST ONE of their schedules"
+    #   enrol_*       = enrolment-level, the same question the per-design rows and the drop-off view ask
+    target["enrol_base"] = acc["started"]
+    for key, src in (("enrol_finished_pct", "finished"), ("enrol_drop_pct", "dropped"),
+                     ("enrol_waiting_pct", "waiting"), ("enrol_inprog_pct", "inprog")):
+        target[key] = [round(100 * a / (b or 1)) for a, b in zip(acc[src], acc["started"])]
+    target["enrol_finished"] = acc["finished"]
+    target["outcome_pooled"] = True
+    return target
+
+
 if _ce_all:
-    _ce_all = _pool_rhythm(_ce_all, [cohort_engagement[_s] for _s in SG_PRESENT
-                                     if _s in cohort_engagement])
+    _all_parts = [cohort_engagement[_s] for _s in SG_PRESENT if _s in cohort_engagement]
+    _ce_all = _pool_rhythm(_ce_all, _all_parts)
+    _ce_all = _pool_outcome(_ce_all, _all_parts)
     cohort_engagement["ALL"] = _ce_all
     _all_llo = {}
     for _llo in ("COWACDI", "EHA"):
         _fdl, _fnl = _eng_filter_llo(_eng_all_dates, _eng_all_finished, _llo)
         _cl = _eng_compute(_fdl, _fnl, 8, None, _eng_all_deadlines, _eng_flw_cad, _eng_flw_gap)
         if _cl:
-            _all_llo[_llo] = _pool_rhythm(_cl, [cohort_engagement_llo[_s][_llo] for _s in SG_PRESENT
-                                                if _llo in cohort_engagement_llo.get(_s, {})])
+            _llo_parts = [cohort_engagement_llo[_s][_llo] for _s in SG_PRESENT
+                          if _llo in cohort_engagement_llo.get(_s, {})]
+            _all_llo[_llo] = _pool_outcome(_pool_rhythm(_cl, _llo_parts), _llo_parts)
     if _all_llo:
         cohort_engagement_llo["ALL"] = _all_llo
 print(f"[eng] cohort_engagement: "
@@ -788,8 +855,8 @@ for r in bm.rows:
         _prev = _coh_slot.get(_k)
         # Completed beats not-completed; between two completed rows keep the earlier date.
         if _prev is None or (_done is not None and (_prev[1] is None or _done < _prev[1])):
-            _coh_slot[_k] = (tsl.deadline_for(int(r["interview_n"]), _tr, _cad, tsl.GRACE_DAYS.get(_c)),
-                             _done)
+            _coh_slot[_k] = (_slot_deadline(int(r["interview_n"]), _tr, _cad, _c,
+                                            r.get("trigger_received_on")), _done)
     if r.get("is_completed") == "Y" and _d:
         _coh_done[_c][_f][r["topic_code"]] = _d
 
@@ -819,6 +886,13 @@ for _c, _inf in sorted(bm.cohort_info.items()):
     _end = tsl.cohort_end(_tops, _tr, _cad, tsl.GRACE_DAYS.get(_c))
     _asof = min(_end, TODAY)                         # a cohort still running is scored as it stands
     _tally = defaultdict(int)
+    # Slot-level companion to the worker-level headline. "46% of workers dropped off" and "92% of every
+    # interview we sent got completed" are both true of PANEL, and quoting only the first reads as a
+    # collapse when the reality is a lot of near-finishers hitting one wall.
+    _sent = _cdone = 0
+    for _f2, _lst in _coh_dl.get(_c, {}).items():
+        _sent += len(_lst)
+        _cdone += sum(1 for _d0, _d1 in _lst if _d1 is not None)
     for _f in sorted(_coh_seen.get(_c, ())):
         _dts = _coh_done.get(_c, {}).get(_f, {})
         _fdate = sorted(_dts.values())[len(_tops) - 1] if len(_dts) >= len(_tops) else None
@@ -851,7 +925,8 @@ for _c, _inf in sorted(bm.cohort_info.items()):
     # fully sent, z = nothing ever sent. Exhaustive, so f+l+d+w+z+in-progress == n.
     _row = {"c": _c, "s": _tr.isoformat(), "e": _end.isoformat(), "n": _n,
             "f": _tally["finished"], "l": _tally["completed-late"], "d": _tally["dropped"],
-            "w": _tally["waiting"], "z": _tally["never-began"]}
+            "w": _tally["waiting"], "z": _tally["never-began"],
+            "ts": _sent, "tc": _cdone}
     if tsl.GRACE_DAYS.get(_c, _cad) != _cad:
         _row["g"] = GRACE_DAYS[_c]
     if _tr_src != "invitation":

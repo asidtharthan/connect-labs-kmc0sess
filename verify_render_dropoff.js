@@ -206,7 +206,7 @@ if (dropHtml) {
     'defines every state in the view itself',
     /What each column means/.test(dropHtml) &&
       [
-        'Completed',
+        'Finished the design',
         'Dropped off',
         'Schedule not completed',
         'Never began',
@@ -290,6 +290,16 @@ check(
   'quality panel names the Schedule-not-completed series',
   /Schedule not completed: did all sent, nothing more sent/.test(injected),
 );
+// One concept, one word. The engagement panel says "Finished"; the drop-off view must not invent a
+// second word for the same thing (it said "Completed", which also means interview-level elsewhere).
+check(
+  'drop-off view uses the engagement panel vocabulary',
+  /Finished the design/.test(injected),
+);
+check(
+  'no stale flat-day bands in the panel-3 legend',
+  !/Slow \(8-14d\)/.test(injected) && !/cadence-independent/.test(injected),
+);
 check(
   'no surface still calls this state Waiting',
   (injected.match(/Waiting/g) || []).length <= 2,
@@ -332,6 +342,70 @@ check(
     ? `missing: ${notSliced.join(', ')}`
     : `${mustSlice.length} arrays`,
 );
+
+// topicStatusCohort ships compressed as fixed-order arrays. A wire format the render decodes must be
+// proven to round-trip, or a reordered state silently mislabels every per-cohort drilldown.
+(function () {
+  const tsc = payload.topicStatusCohort || {};
+  const codes = Object.keys(tsc);
+  const compressed = codes.filter(function (c) {
+    return (tsc[c] || []).some(function (r) {
+      return Array.isArray(r);
+    });
+  });
+  check(
+    'topicStatusCohort ships compressed',
+    compressed.length === codes.length,
+    `${compressed.length}/${codes.length} topics`,
+  );
+  // every row must have 1 cohort id + 6 counts, and the counts must sum to the topic's applicable
+  // total for that cohort as reported by topicStatus
+  let badShape = 0;
+  codes.forEach(function (c) {
+    (tsc[c] || []).forEach(function (r) {
+      if (!Array.isArray(r) || r.length !== 7 || typeof r[0] !== 'string')
+        badShape++;
+      else if (
+        r.slice(1).some(function (x) {
+          return typeof x !== 'number' || x < 0;
+        })
+      )
+        badShape++;
+    });
+  });
+  check(
+    'every compressed row is [cohort, ...6 counts]',
+    badShape === 0,
+    `${badShape} malformed`,
+  );
+  // and the decoded totals must equal topicStatus's applicable counts, topic by topic
+  const ORDER = [
+    'completed',
+    'started-not-completed',
+    'available-missed-overdue',
+    'available-not-started',
+    'not-available-yet',
+    'not-triggered',
+  ];
+  const bad = [];
+  (payload.topicStatus || []).forEach(function (t) {
+    const rows = tsc[t.code] || [];
+    ORDER.forEach(function (st, i) {
+      const sum = rows.reduce(function (a, r) {
+        return a + (Array.isArray(r) ? r[i + 1] : r[st] || 0);
+      }, 0);
+      if (rows.length && sum !== (t[st] || 0))
+        bad.push(`${t.code}/${st} ${sum} vs ${t[st]}`);
+    });
+  });
+  check(
+    'decoded per-cohort counts sum to topicStatus, state by state',
+    bad.length === 0,
+    bad.length
+      ? bad.slice(0, 3).join('; ')
+      : `${codes.length} topics reconcile`,
+  );
+})();
 
 // ---------------------------------------------------------------- the docs tab must not drift
 // The Documentation tab compares what it documents against what the payload actually carries and

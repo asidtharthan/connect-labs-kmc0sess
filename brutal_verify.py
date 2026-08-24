@@ -154,6 +154,35 @@ print(f"  latest trigger_bot form: {maxtrig}   latest OCS session: {maxocs}   co
 freshchk("data.today == today", DD.get("today") == str(TODAY), f"{DD.get('today')} == {TODAY}")
 freshchk("built_at date == today", (DD.get("built_at") or "").startswith(str(TODAY)), DD.get("built_at"))
 freshchk("latest trigger form within 2 days of today", maxtrig and (TODAY - maxtrig).days <= 2, f"latest={maxtrig}")
+# PER DOMAIN, not just the global max. A single max() across all 12 CommCare domains passes when 11 are
+# current and one is weeks behind - which silently DEFLATES drop-off, because an interview the pull
+# never saw is one nobody can be recorded as skipping. Found 2026-08-24: a local tree 8 weeks stale on
+# the two PANEL domains read PANEL at 22.4% against 46.3% live, and every gate passed.
+_dom_latest = {}
+for _cid, _c, _niv, _recv, _fid in trig_forms:
+    _dm = _cohort_domain.get(_c) if "_cohort_domain" in dir() else None
+    _k = _dm or _c
+    _d = _recv.date()
+    if _k not in _dom_latest or _d > _dom_latest[_k]:
+        _dom_latest[_k] = _d
+_stale_files = []
+for _p in sorted((ROOT / "hq_pull_full").glob("*__trigger_bot.jsonl")):
+    _age = (TODAY - datetime.fromtimestamp(_p.stat().st_mtime).date()).days
+    _newest = None
+    for _line in _p.open(encoding="utf-8"):
+        try:
+            _sub = json.loads(_line)
+        except Exception:
+            continue
+        _r = pdt(_sub.get("received_on"))
+        if _r and (_newest is None or _r.date() > _newest):
+            _newest = _r.date()
+    _lag = (TODAY - _newest).days if _newest else None
+    if _age > 2:
+        _stale_files.append(f"{_p.name.split('__')[0]} file {_age}d old, newest form "
+                            f"{_newest} ({_lag}d)")
+freshchk("EVERY HQ domain pull is within 2 days (not just the global max)", not _stale_files,
+         "; ".join(_stale_files[:4]) if _stale_files else f"{len(list((ROOT / 'hq_pull_full').glob('*__trigger_bot.jsonl')))} domains current")
 freshchk("latest OCS session within 2 days of today", maxocs and (TODAY - maxocs).days <= 2, f"latest={maxocs}")
 freshchk("connect snapshot within 2 days of today", (TODAY - snap_mtime).days <= 2, f"mtime={snap_mtime}")
 
@@ -498,8 +527,35 @@ chk("render_data top-level keys == dashboard keys − allowlist + flwMatrix enco
 
 # G2: every RETAINED top-level key is byte-identical (same JSON serialisation) to its counterpart
 _j = lambda o: json.dumps(o, separators=(",", ":"), sort_keys=False)
-diff_top = [k for k in DD if k not in ALLOWED_DROP_TOP | {"flwMatrix", "dropoff"} and _j(DD[k]) != _j(RD.get(k))]
+# topicStatusCohort joins flwMatrix as a TRANSFORMED key rather than a merely-pruned one: the render
+# payload ships each row as a fixed-order array because seven long state names x 220 rows cost ~30 KB.
+# A transform is only allowed if it round-trips, which is asserted immediately below - a waiver without
+# that proof would let a reordered state silently mislabel every per-cohort drilldown.
+_TRANSFORMED_TOP = {"flwMatrix", "dropoff", "topicStatusCohort"}
+diff_top = [k for k in DD if k not in ALLOWED_DROP_TOP | _TRANSFORMED_TOP and _j(DD[k]) != _j(RD.get(k))]
 chk("retained top-level keys byte-identical to dashboard_data.json", not diff_top, f"differing: {diff_top}")
+
+# G2b: the topicStatusCohort transform must invert EXACTLY back to the verbose form
+_TSC_ORDER = ["completed", "started-not-completed", "available-missed-overdue",
+              "available-not-started", "not-available-yet", "not-triggered"]
+_tsc_bad, _tsc_rows = [], 0
+for _tc, _rows in DD["topicStatusCohort"].items():
+    _rr = RD["topicStatusCohort"].get(_tc)
+    if _rr is None or len(_rr) != len(_rows):
+        _tsc_bad.append(f"{_tc}: row count {len(_rr) if _rr is not None else 'missing'} vs {len(_rows)}")
+        continue
+    for _a, _b in zip(_rows, _rr):
+        _tsc_rows += 1
+        if not isinstance(_b, list) or len(_b) != 1 + len(_TSC_ORDER) or _b[0] != _a["cohort"]:
+            _tsc_bad.append(f"{_tc}/{_a['cohort']}: bad shape")
+            continue
+        for _i, _st in enumerate(_TSC_ORDER):
+            if _b[_i + 1] != _a.get(_st, 0):
+                _tsc_bad.append(f"{_tc}/{_a['cohort']}/{_st}: {_b[_i + 1]} vs {_a.get(_st, 0)}")
+        if sum(_b[1:]) != _a["total"]:
+            _tsc_bad.append(f"{_tc}/{_a['cohort']}: total {sum(_b[1:])} vs {_a['total']}")
+chk("topicStatusCohort compression inverts exactly (every row, every state)", not _tsc_bad,
+    "; ".join(_tsc_bad[:3]) if _tsc_bad else f"{_tsc_rows} rows round-trip")
 
 # G3: dropoff — subgroups untouched; cohorts identical modulo exactly the allowlist
 chk("dropoff.subgroups byte-identical (subgroup-level connect/di/base ARE read by the render)",

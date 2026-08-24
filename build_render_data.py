@@ -54,6 +54,10 @@ DROP_COHORT = ("connect",)
 # cohort-interview row cost KB for nothing. The render resolves it from `topic` instead.
 DROP_COHORT_IV = ("pct_completed_base", "started_di", "pct_started_di", "name")
 
+# Wire order for the compressed topicStatusCohort rows. APPEND ONLY, same discipline as flwMatrix.
+_STATE_ORDER = ["completed", "started-not-completed", "available-missed-overdue",
+                "available-not-started", "not-available-yet", "not-triggered"]
+
 _B36 = "0123456789abcdefghijklmnopqrstuvwxyz"
 
 # Separators used by the flwMatrix encoding. Both are asserted absent from every FLW id and cohort id
@@ -171,6 +175,16 @@ def prune(dd):
             out["flwMatrixV2"] = v2
             out["flwMatrixOrder"] = order_s
             out["flwMatrixOrderW"] = w
+            continue
+        if k == "topicStatusCohort":
+            # 220 rows x seven long state names ("available-missed-overdue" and friends) cost ~30 of
+            # this key's 36 KB. Ship the counts as an ARRAY in topic_status_lib.STATES order instead -
+            # the same append-only index the flwMatrix already uses - and let the render name them.
+            # dashboard_data.json keeps the verbose form, so the audit gates are untouched.
+            out[k] = {
+                tc: [[row["cohort"]] + [row.get(st, 0) for st in _STATE_ORDER] for row in rows]
+                for tc, rows in v.items()
+            }
             continue
         if k == "dropoff":
             # Only the per-COHORT branch is pruned; `subgroups` (and any future sibling key) passes
