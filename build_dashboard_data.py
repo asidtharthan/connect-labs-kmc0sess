@@ -115,7 +115,7 @@ gcols = [
 rows_sorted = sorted(bm.rows, key=lambda r: (r["cohort_id"], r["connect_id"], int(r["interview_n"])))
 # Kept small deliberately: this is an ILLUSTRATIVE sample of 10,000+ rows, and the build warns to
 # reduce it when the render nears the 512 KB cap. The full data lives in the tables and exports.
-GRANULAR_N = 12
+GRANULAR_N = 60
 granular = []
 for r in rows_sorted[:GRANULAR_N]:
     granular.append(

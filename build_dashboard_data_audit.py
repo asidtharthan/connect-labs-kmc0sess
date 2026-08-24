@@ -378,13 +378,15 @@ def _eng_consistent(label, c, expect_started=None):
         #   rhythm:  steady / inconsistent, over starters with 2+ interviews (rhythm_base)
         # Rhythm used to be the residual of the outcome stack, so it emptied to 0 once every cohort
         # closed. Checking them as one sum would hide exactly that failure.
+        # EXACTLY 100 now, not 99-101: largest-remainder rounding closes the stack, and the legend
+        # promises it closes. A tolerance here would let the promise quietly break again.
         _o = (c["finished_pct"][i] + c["drop_pct"][i] + c["waiting_pct"][i] + c["inprog_pct"][i])
-        if not (99 <= _o <= 101):
-            _eng_bad.append(f"{label}[{i}]: outcome % sum != 100 ({_o})")
+        if _o != (100 if c["started"][i] else 0):
+            _eng_bad.append(f"{label}[{i}]: outcome % sum {_o}, expected {100 if c['started'][i] else 0}")
         _r = c["steady_pct"][i] + c["incons_pct"][i]
         _rb = c["rhythm_base"][i]
-        if _rb and not (99 <= _r <= 101):
-            _eng_bad.append(f"{label}[{i}]: rhythm % sum != 100 ({_r}) on base {_rb}")
+        if _rb and _r != 100:
+            _eng_bad.append(f"{label}[{i}]: rhythm % sum {_r}, expected 100 on base {_rb}")
         if not _rb and _r:
             _eng_bad.append(f"{label}[{i}]: rhythm % non-zero ({_r}) with an empty base")
         # A POOLED rhythm base counts enrolments (FLW x cohort), so it may exceed the unique-FLW

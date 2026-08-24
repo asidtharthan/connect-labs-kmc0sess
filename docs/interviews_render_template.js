@@ -416,7 +416,7 @@ function WorkflowUI(props) {
         base: "Fixed base = initiated", gotcha: "Falls steeply for long schedules simply because later interviews have not been offered yet." },
       { g: "Retention", name: "Retention line - Reached previous interview", where: "Funnels → Retention lines (Denominator toggle)",
         how: "Started at N divided by started at N−1, any status.",
-        base: "Moving base = the previous step", gotcha: "Answers “of those who got here, how many continued”. Same numerator as the other view - only the denominator changes." },
+        base: "Moving base = the previous step", gotcha: "Answers “of those who got here, how many continued”. NOT the same numerator as the other view: it counts FLWs who started interview N *and also* started N-1, so it is smaller than the raw Started figure in the drop-off table (319 interviews smaller across the programme; ABT1-B Int4 137 vs 177). Using raw Started would push several last slots past 100%." },
       { g: "Retention", name: "De-impact", where: "Funnels → de-impact toggle",
         how: "Removes FLWs affected by a known upstream scheduling artefact where a final interview could fire back-to-back with the one before it.",
         base: "-", gotcha: "A correction for a bug in the interview app, not a data cleanup. Root cause is upstream; the toggle only shows what the number would be without it." },
@@ -683,7 +683,14 @@ function WorkflowUI(props) {
       today: DATA.today || "", built: DATA.built_at || "",
       flws: c.flws, cohorts: c.cohorts, rows: c.master_rows, started: c.started, completed: c.completed,
       subgroups: sgs.length, sgList: sgs,
-      topics: Object.keys(DATA.topicNames || {}).length,
+      // Topics actually USED by a live design, not every name in the lookup. topicNames still
+      // carries retired entries that appear in no cohort's schedule, so counting the lookup
+      // reported 30 while every chart on the page showed 28.
+      topics: (function () {
+        var used = {};
+        Object.keys(SD).forEach(function (g) { (SD[g].topics || []).forEach(function (t) { used[t] = 1; }); });
+        return Object.keys(used).length;
+      })(),
       minLen: lens.length ? Math.min.apply(null, lens) : 0,
       maxLen: lens.length ? Math.max.apply(null, lens) : 0,
       minCad: cads.length ? Math.min.apply(null, cads) : 0,
@@ -2888,7 +2895,11 @@ function WorkflowUI(props) {
                                       {co.cohort} - {co.interviews.length} interview{co.interviews.length === 1 ? "" : "s"}
                                       {/* de-impact is only computed at subgroup level, so these rows stay RAW.
                                           Say so, otherwise the parent row's Started looks like it disagrees with
-                                          the sum of its own children (e.g. ABT1-B Int 4: 131 vs 171). */}
+                                          the sum of its own children (e.g. ABT1-B Int 4: 137 vs 177).
+                                            Separately, the ELIGIBLE column also sums higher than its
+                                            parent wherever an FLW is claimed in two cohorts of the same
+                                            design (TRS: children 1,305 vs parent 1,298) - the subgroup
+                                            base counts each person once, the cohort bases cannot. */}
                                       {deImpact ? <span className="ml-2 text-amber-700 font-normal">· raw (de-impact applies to the subgroup row above, not per-cohort)</span> : null}
                                     </div>
                                     <table className="min-w-full border border-gray-200 rounded-md overflow-hidden">
@@ -3103,7 +3114,7 @@ function WorkflowUI(props) {
 
             {bdSub === "ab" && (
               <div className="overflow-x-auto">
-                <p className="text-xs text-gray-400 px-1 py-1">A/B experimental arms ({(DATA.table3 || []).filter(function (r) { return r.key !== "Overall"; }).map(function (r) { return r.key; }).join(", ")}; Overall = their sum). % Completed = completed ÷ started.</p>
+                <p className="text-xs text-gray-400 px-1 py-1">A/B experimental arms ({(DATA.table3 || []).filter(function (r) { return r.key !== "Overall"; }).map(function (r) { return r.key; }).join(", ")}; Overall = their sum for INTERVIEWS, but not for FLWs - anyone in two arms is counted once in Overall and twice across the rows). % Completed = completed ÷ started.</p>
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50"><tr>
                     <th className={th + " text-left"}>Arm</th><th className={th + " text-right"}>FLWs Started</th>
