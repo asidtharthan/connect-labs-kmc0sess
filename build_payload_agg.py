@@ -540,7 +540,11 @@ _eng_flw_llo = {}                                          # flw -> LLO (COWACDI
 # who did everything that was sent to them is never blamed for interviews the bot never sent (the
 # `not-triggered` distinction the 2026-08-07 audit introduced for the matrix).
 _eng_deadlines = defaultdict(lambda: defaultdict(list))
-_eng_flw_cad = {}                                          # flw -> their own cohort's gap, for the ALL view
+_eng_flw_cad = {}                                          # flw -> a gap, first-wins; ALL view only
+# Per-SUBGROUP cadence. The global map above is first-wins, so TRS (earliest, 1,298 FLWs) claimed most
+# shared workers and PANEL's Active/Slow/Quiet bands were computed on a 7-day gap instead of its real 4
+# for 99% of its FLWs. A subgroup's own series must use its own cadence.
+_eng_sg_cad = defaultdict(dict)
 _cohort_llo = getattr(bm, "cohort_llo", {})
 for r in bm.rows:
     _llo = _cohort_llo.get(r["cohort_id"])
@@ -553,7 +557,8 @@ for r in bm.rows:
     # engagement chart cannot judge a cohort against a different calendar than the other two views.
     _rtrain = bm.cohort_info.get(r["cohort_id"], {}).get("start_date")
     if _rcad:
-        _eng_flw_cad.setdefault(_rflw, _rcad)
+        _eng_flw_cad.setdefault(_rflw, _rcad)          # first-wins, used ONLY by the pooled ALL view
+        _eng_sg_cad[_rsg][_rflw] = _rcad               # per-subgroup: always that subgroup's own cadence
         if _rtrain and r.get("interview_n"):
             _eng_deadlines[_rsg][_rflw].append((
                 _slot_deadline(int(r["interview_n"]), _rtrain, _rcad, r["cohort_id"],
@@ -725,13 +730,13 @@ for _sg in SG_PRESENT:
     _gt, _end = 2 * bm.SUBGROUP_DESIGN[_sg]["cadence"], _eng_end.get(_sg)
     _fd, _fn = _eng_flw_dates.get(_sg, {}), _eng_finished_dates(_sg, _dlen)
     _dl = _eng_deadlines.get(_sg, {})
-    _ce = _eng_compute(_fd, _fn, _gt, _end, _dl, _eng_flw_cad)
+    _ce = _eng_compute(_fd, _fn, _gt, _end, _dl, _eng_sg_cad.get(_sg, {}))
     if _ce:
         cohort_engagement[_sg] = _ce
     _llo_out = {}
     for _llo in ("COWACDI", "EHA"):
         _fdl, _fnl = _eng_filter_llo(_fd, _fn, _llo)
-        _cl = _eng_compute(_fdl, _fnl, _gt, _end, _dl, _eng_flw_cad)
+        _cl = _eng_compute(_fdl, _fnl, _gt, _end, _dl, _eng_sg_cad.get(_sg, {}))
         if _cl:
             _llo_out[_llo] = _cl
     if _llo_out:
@@ -870,6 +875,7 @@ print(f"[eng] by-LLO splits for: {sorted(cohort_engagement_llo)}")
 # the numbers are comparable across designs and across start dates.
 _coh_slot = {}                                      # (cohort, flw, interview_n) -> (deadline, done_or_None)
 _coh_done = defaultdict(lambda: defaultdict(dict))  # cohort -> flw -> {topic: completed date}
+_coh_dates = defaultdict(lambda: defaultdict(set))  # cohort -> flw -> {session dates}
 for r in bm.rows:
     _c, _f, _sg = r["cohort_id"], r["connect_id"], r["subgroup"]
     if _sg not in bm.SUBGROUP_DESIGN or not r.get("interview_n"):
@@ -887,10 +893,14 @@ for r in bm.rows:
                                             r.get("trigger_received_on")), _done)
     if r.get("is_completed") == "Y" and _d:
         _coh_done[_c][_f][r["topic_code"]] = _d
+    if r.get("is_started") == "Y" and _d:
+        _coh_dates[_c][_f].add(_d)   # for option A, which is a pure silence rule
 
 _coh_dl = defaultdict(lambda: defaultdict(list))
+_coh_seq = defaultdict(lambda: defaultdict(list))   # cohort -> flw -> [(interview_n, completed?)]
 for (_c, _f, _n), _v in _coh_slot.items():
     _coh_dl[_c][_f].append(_v)
+    _coh_seq[_c][_f].append((_n, _v[1] is not None))
 
 # Same universe as the FLW x Topic matrix (claimed OR holding a master row) - see DEFECT 2. Counting a
 # different population here than the matrix counts would make the two views disagree on the size of the
@@ -899,6 +909,15 @@ _coh_interviewed = tsl.interviewed_index(bm.rows)
 _coh_seen = {}
 for _c in bm.cohort_info:
     _coh_seen[_c] = set(tsl.universe_for(_c, bm.cohort_flws, bm.cohort_flw_meta, _coh_interviewed))
+
+# The date option A is evaluated at, per cohort: its own last observed session. The old rule's weekly
+# grid ended there, so evaluating at TODAY instead would mark every worker in a long-closed cohort as
+# silent and report ~90% rather than the number people remember.
+_cohort_last_session = {}
+for _c2, _fm in _coh_dates.items():
+    _all = [d for ds in _fm.values() for d in ds]
+    if _all:
+        _cohort_last_session[_c2] = max(_all)
 
 cohort_dropoff = []
 for _c, _inf in sorted(bm.cohort_info.items()):
@@ -913,6 +932,7 @@ for _c, _inf in sorted(bm.cohort_info.items()):
         continue                                     # no start date at all: cannot say when it ended
     _end = tsl.cohort_end(_tops, _tr, _cad, tsl.GRACE_DAYS.get(_c))
     _asof = min(_end, TODAY)                         # a cohort still running is scored as it stands
+    _closed = _end <= TODAY
     _tally = defaultdict(int)
     # Slot-level companion to the worker-level headline. "46% of workers dropped off" and "92% of every
     # interview we sent got completed" are both true of PANEL, and quoting only the first reads as a
@@ -928,6 +948,30 @@ for _c, _inf in sorted(bm.cohort_info.items()):
         if not _dl:
             _tally["never-began"] += 1   # claimed, but the bot never sent them anything
             continue
+
+        # ---- the three readings of "dropped off", all on the same worker
+        _seq = sorted(_coh_seq.get(_c, {}).get(_f, ()))
+        _undone = [_n for _n, _done in _seq if not _done]
+        _last_done = max([_n for _n, _done in _seq if _done], default=-1)
+        _finished_all = _fdate is not None
+        if _undone and not _finished_all:
+            _tally["B"] += 1                                   # B: left anything undone
+            # C: did they carry on afterwards? A gap BEFORE their last completed interview is a skip,
+            # not a departure. Only an unfinished tail means they actually stopped.
+            if any(_n > _last_done for _n in _undone):
+                # ...unless the cohort is still running, in which case the tail may yet be done
+                if _closed:
+                    _tally["C"] += 1
+                else:
+                    _tally["C_open"] += 1
+            else:
+                _tally["skipped"] += 1                         # skipped one, came back
+        # A: the pre-21-Aug rule - not finished, and silent for more than 14 days as of the cohort's
+        # own last observed session (the old weekly grid froze there rather than running to today).
+        _ds = _coh_dates.get(_c, {}).get(_f)
+        if _ds and _cohort_last_session.get(_c) and not _finished_all:
+            if (_cohort_last_session[_c] - max(_ds)).days > 14:
+                _tally["A"] += 1
         # Someone who completed their whole design AFTER the window shut is not a drop-out - they
         # finished, late. Measuring strictly at the window end swept 140 such workers into "dropped",
         # which is what made completed look too low and dropped too high against every other view.
@@ -940,8 +984,16 @@ for _c, _inf in sorted(bm.cohort_info.items()):
         # FLW x Topic matrix, which reads the same slot as completed. The window end still decides
         # whether a COMPLETION was on time or late (above); it should not decide whether something
         # eventually happened at all.
-        _tally[tsl.progress_at(_dl, TODAY, _fdate)] += 1
-    _n = sum(_tally.values())
+        _st = tsl.progress_at(_dl, TODAY, _fdate)
+        if _st == "in-progress" and _closed:
+            # The cohort is over. A deadline still in the future means we sent that interview after the
+            # window shut; the worker is not "in progress", they have something outstanding.
+            _st = "dropped"
+        _tally[_st] += 1
+    # The PARTITION keys only. dA/dB/dC/skipped/C_open are alternative READINGS of the same workers,
+    # not extra people - summing them would count someone up to three times.
+    _PART = ("finished", "completed-late", "dropped", "waiting", "never-began", "in-progress")
+    _n = sum(_tally[k] for k in _PART)
     if not _n:
         continue
     # Compact on purpose: 72 rows x verbose keys came to 18.7 KB against 34 KB of render headroom.
@@ -951,8 +1003,11 @@ for _c, _inf in sorted(bm.cohort_info.items()):
     # only when the start date came from the trigger fallback rather than a Connect invitation.
     # f = completed by the window end, l = completed after it, d = dropped, w = schedule never
     # fully sent, z = nothing ever sent. Exhaustive, so f+l+d+w+z+in-progress == n.
+    # dA / dB / dC = the three readings. sk = skipped one and came back (B minus C). The render
+    # switches which of the three it calls "Dropped off"; everything else is shared.
     _row = {"c": _c, "s": _tr.isoformat(), "e": _end.isoformat(), "n": _n,
             "f": _tally["finished"], "l": _tally["completed-late"], "d": _tally["dropped"],
+            "dA": _tally["A"], "dB": _tally["B"], "dC": _tally["C"], "sk": _tally["skipped"],
             "w": _tally["waiting"], "z": _tally["never-began"],
             # p = still in progress. Shipped explicitly so f+l+d+w+z+p == n for EVERY cohort; leaving
             # it as an implied residual meant three cohorts had 7 workers in no bucket at all.
@@ -966,6 +1021,9 @@ for _c, _inf in sorted(bm.cohort_info.items()):
 _cd_tot = sum(c["n"] for c in cohort_dropoff)
 _cd_f, _cd_l, _cd_d, _cd_w, _cd_z = (sum(c[k] for c in cohort_dropoff)
                                      for k in ("f", "l", "d", "w", "z"))
+_cd_A, _cd_B, _cd_C, _cd_sk = (sum(c[k] for c in cohort_dropoff) for k in ("dA", "dB", "dC", "sk"))
+print(f"[eng] dropped, three readings: A(silent 14d)={_cd_A}  B(missed any)={_cd_B}  "
+      f"C(stopped, never returned)={_cd_C}  skipped-but-returned={_cd_sk}")
 print(f"[eng] cohort_dropoff: {len(cohort_dropoff)} cohorts, {_cd_tot} FLW-cohort pairs, "
       f"on-time={_cd_f} late={_cd_l} dropped={_cd_d} schedule-not-completed={_cd_w} "
       f"never-began={_cd_z} in_progress={_cd_tot - _cd_f - _cd_l - _cd_d - _cd_w - _cd_z} "
