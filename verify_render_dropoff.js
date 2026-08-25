@@ -12,6 +12,8 @@
  * Usage: node verify_render_dropoff.js
  */
 const fs = require('fs');
+const os = require('os');
+const cp = require('child_process');
 const path = require('path');
 const babel = require('@babel/core');
 const React = require('react');
@@ -35,7 +37,22 @@ function check(name, ok, detail) {
 }
 
 // ---------------------------------------------------------------- build the component
-const src = fs.readFileSync(TEMPLATE, 'utf8');
+// What ships is the COMMENT-STRIPPED template (see strip_render_comments.js), so that is what gets
+// mounted and measured here. Asserting on the source while publishing the reprint would leave the
+// reprint itself untested - exactly the gap that matters.
+const rawSrc = fs.readFileSync(TEMPLATE, 'utf8');
+let src = rawSrc;
+try {
+  const stripped = path.join(os.tmpdir(), 'verify_render_stripped.js');
+  cp.execFileSync(
+    'node',
+    [path.join(__dirname, 'strip_render_comments.js'), TEMPLATE, stripped],
+    { stdio: 'pipe' },
+  );
+  src = fs.readFileSync(stripped, 'utf8');
+} catch (e) {
+  console.log('  NOTE  comment strip unavailable, verifying the commented source instead');
+}
 const data = fs.readFileSync(DATA, 'utf8');
 check(
   'render_data.json parses',
@@ -554,19 +571,34 @@ Object.keys(CEp).forEach(function (sg) {
     n = (c.weeks || []).length;
   if (!n) return;
   const last = n - 1;
-  const o =
-    c.finished_pct[last] +
-    c.drop_pct[last] +
-    c.waiting_pct[last] +
-    c.inprog_pct[last];
-  if (o < 99 || o > 101) badOutcome.push(sg + '=' + o);
+  // The payload no longer ships outcome percentages - the page derives them from the counts, for
+  // whichever of the three readings is selected. So check what the page will actually compute, and
+  // check it for ALL THREE readings: each one has to close to 100 on its own.
+  [
+    ['B', 'dropped', 'waiting'],
+    ['C', 'dropC', 'waitC'],
+    ['A', 'dropA', 'waitA'],
+  ].forEach(function (m) {
+    const st = c.started[last];
+    if (!st) return;
+    const dv = (c[m[1]] || [])[last],
+      wv = (c[m[2]] || [])[last];
+    if (dv == null || wv == null) {
+      badOutcome.push(sg + ':' + m[0] + '=missing');
+      return;
+    }
+    const ip = st - c.finished[last] - dv - wv;
+    if (ip < 0) badOutcome.push(sg + ':' + m[0] + '=negative in-progress ' + ip);
+    const o = Math.round((100 * (c.finished[last] + dv + wv + ip)) / st);
+    if (o < 99 || o > 101) badOutcome.push(sg + ':' + m[0] + '=' + o);
+  });
   const r = c.steady_pct[last] + c.incons_pct[last],
     rb = c.rhythm_base[last];
   if (rb && (r < 99 || r > 101)) badRhythm.push(sg + '=' + r);
   if (rb && r === 0) flatRhythm.push(sg);
 });
 check(
-  'outcome shares sum to 100 at the final week',
+  'outcome closes to 100 at the final week under ALL THREE readings',
   badOutcome.length === 0,
   badOutcome.length
     ? badOutcome.join(', ')
@@ -671,6 +703,23 @@ check(
   );
 })();
 
+// C is a strict subset of B: someone who came back after a gap cannot count as having stopped.
+// A is a different rule entirely and may exceed either, so only C vs B is asserted.
+(function () {
+  const bad = [];
+  Object.keys(CEp).forEach(function (sg) {
+    const c = CEp[sg];
+    (c.weeks || []).forEach(function (_w, i) {
+      if ((c.dropC || [])[i] > (c.dropped || [])[i]) bad.push(sg + '@' + i);
+    });
+  });
+  check(
+    'weekly "stopped and never came back" never exceeds "missed any interview"',
+    bad.length === 0,
+    bad.length ? bad.slice(0, 4).join(', ') : 'C <= B at every week in every series',
+  );
+})();
+
 // ---------------------------------------------------------------- size guard
 // The Labs render_code limit is a hard 512 KB and brutal_verify enforces it in CI. This local check
 // UNDER-reports: a local build runs off cached pulls, so its payload is smaller than the live one. On
@@ -701,6 +750,7 @@ check(
 );
 
 // ---------------------------------------------------------------- no em/en dashes (house style)
+// Checked on the SOURCE: that is the file people edit and the one the rule is about.
 const dashes = (injected.match(/[–—]/g) || []).length;
 check(
   'no em/en dashes in the template',

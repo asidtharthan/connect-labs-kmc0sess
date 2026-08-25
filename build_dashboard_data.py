@@ -197,8 +197,10 @@ for _cohort, _info in bm.cohort_info.items():
 # and `ended` / `end_date`, which no longer have a single reader anywhere in the template.
 # `dropped`/`inprog` counts exist only so _pool_outcome can sum the parts; the render reads the
 # percentages and enrol_base. Same reasoning as steady/incons.
-_ENG_DROP = ("steady", "incons", "waiting", "ended", "end_date", "dropped", "inprog",
-             "enrol_finished")
+# `dropped` and `waiting` are now the render's SOURCE for the default reading - the outcome
+# percentages are no longer shipped, so stripping the counts would leave the page with nothing to
+# draw. `inprog` stays dropped because it is the exact residual started-finished-dropped-waiting.
+_ENG_DROP = ("steady", "incons", "ended", "end_date", "inprog", "enrol_finished")
 
 
 def _eng_trim(series_map):
