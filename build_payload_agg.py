@@ -981,6 +981,20 @@ for _c, _inf in sorted(bm.cohort_info.items()):
         continue
     _asof = min(_end, TODAY)                         # a cohort still running is scored as it stands
     _closed = _end <= TODAY
+    # The date the three readings are evaluated at. NOT today: a slot sent after the cohort closed can
+    # have a deadline in the future, so scoring at today would make an ended cohort accumulate
+    # drop-outs as the calendar advances. Anchored to the cohort's own last activity, it tracks a
+    # cohort that is genuinely still going and freezes the moment it stops. Same anchor reading A uses.
+    # Scored at TODAY, deliberately. A deadline that has passed is real information, and anchoring
+    # earlier invented "still in progress" workers in cohorts that finished in May - their interview
+    # was triggered after the cohort went quiet and never touched, which is abandonment, not progress.
+    # At TODAY both cases come out right: that May slot is overdue, while a PANEL slot due on the 29th
+    # is genuinely still in hand.
+    #
+    # This does mean a cohort's numbers can move as a future deadline arrives. That is a deadline
+    # passing, not silence accumulating, and gate G in audit_e2e distinguishes the two: it requires
+    # invariance only of cohorts where EVERY deadline has already passed.
+    _asof_read = TODAY
     _tally = defaultdict(int)
     # Slot-level companion to the worker-level headline. "46% of workers dropped off" and "92% of every
     # interview we sent got completed" are both true of PANEL, and quoting only the first reads as a
@@ -1003,10 +1017,10 @@ for _c, _inf in sorted(bm.cohort_info.items()):
         # 3-tuple input, so the two views cannot drift apart again.
         _finished_all = _fdate is not None
         if not _finished_all:
-            _b = tsl.progress_at_reading(_dl, TODAY, _fdate, "B")
+            _b = tsl.progress_at_reading(_dl, _asof_read, _fdate, "B")
             if _b == "dropped":
                 _tally["B"] += 1
-                _c_state = tsl.progress_at_reading(_dl, TODAY, _fdate, "C")
+                _c_state = tsl.progress_at_reading(_dl, _asof_read, _fdate, "C")
                 if _c_state == "dropped":
                     # ...unless the cohort is still running, in which case the tail may yet be done
                     if _closed:
@@ -1033,11 +1047,16 @@ for _c, _inf in sorted(bm.cohort_info.items()):
         # FLW x Topic matrix, which reads the same slot as completed. The window end still decides
         # whether a COMPLETION was on time or late (above); it should not decide whether something
         # eventually happened at all.
-        _st = tsl.progress_at(_dl, TODAY, _fdate)
-        if _st == "in-progress" and _closed:
-            # The cohort is over. A deadline still in the future means we sent that interview after the
-            # window shut; the worker is not "in progress", they have something outstanding.
-            _st = "dropped"
+        # Same anchor and same rule as the three readings above, so `d` and `dB` cannot disagree - the
+        # render derives "still in progress" from `d` while displaying `dB`, so a gap between them
+        # makes the row incoherent.
+        #
+        # The old code converted in-progress to dropped once the cohort's end date had passed, on the
+        # premise that a future deadline meant the interview was sent after the window shut. That
+        # premise is wrong whenever a cohort is past its nominal end but still triggering interviews,
+        # which is the normal state here: it is what made PANEL workers who had started an interview
+        # the previous day read as "stopped and never came back".
+        _st = tsl.progress_at(_dl, _asof_read, _fdate)
         _tally[_st] += 1
     # The PARTITION keys only. dA/dB/dC/skipped/C_open are alternative READINGS of the same workers,
     # not extra people - summing them would count someone up to three times.
@@ -1057,8 +1076,11 @@ for _c, _inf in sorted(bm.cohort_info.items()):
     # nb = the workers the bot actually ASKED (n minus never-began). Every rate except "never began"
     # is divided by this: someone who was never sent an interview cannot have stopped, so leaving them
     # in the denominator only deflates the rate against a population that can never be in the numerator.
+    _all_due = all(_t[0] <= TODAY for _fl in _coh_dl.get(_c, {}).values() for _t in _fl)
     _row = {"c": _c, "s": _tr.isoformat(), "e": _end.isoformat(), "n": _n,
             "nb": _n - _tally["never-began"],
+            # every deadline in this cohort has already passed -> nothing here can change again
+            "settled": bool(_all_due),
             "f": _tally["finished"], "l": _tally["completed-late"], "d": _tally["dropped"],
             "dA": _tally["A"], "dB": _tally["B"], "dC": _tally["C"], "sk": _tally["skipped"],
             "w": _tally["waiting"], "z": _tally["never-began"],
