@@ -834,7 +834,14 @@ check(
 // live figure scaled from the local payload, not the local figure itself.
 const liveBytes = Buffer.byteLength(injected, 'utf8');
 const CAP = 512 * 1024;
-const LIVE_FACTOR = 1.075; // MEASURED on the 2026-08-21 publish: 252.4 KB live / 234.9 local
+// The scale-up exists because a LOCAL build runs off cached pulls and is smaller than the live one.
+// In CI the payload IS the live one, so applying it there inflates a real ~502 KB render to a
+// fictional 520 KB and blocks a publish that would have fitted - which is exactly what happened on
+// 2026-08-25. Decide from the payload itself rather than from an env var: a full build carries the
+// whole programme, a stale local one does not.
+const LIVE_SCALE = 1.075; // MEASURED on the 2026-08-21 publish: 252.4 KB live / 234.9 local
+const IS_FULL_BUILD = (payload.counts && payload.counts.master_rows) > 9000;
+const LIVE_FACTOR = IS_FULL_BUILD ? 1.0 : LIVE_SCALE;
 const MIN_HEADROOM = 4 * 1024; // fail before the wall, not at it - CI's own gate is the backstop
 const projected =
   Buffer.byteLength(src, 'utf8') +
@@ -849,11 +856,11 @@ check(
 check(
   'projected LIVE render fits the cap with headroom to spare',
   projected + MIN_HEADROOM < CAP,
-  `~${Math.round(
-    projected / 1024,
-  )} KB projected at ${LIVE_FACTOR}x payload, headroom ~${Math.round(
-    (CAP - projected) / 1024,
-  )} KB`,
+  `~${Math.round(projected / 1024)} KB at ${LIVE_FACTOR}x payload (${
+    IS_FULL_BUILD
+      ? 'full build - measured, not scaled'
+      : 'local build - scaled up to estimate live'
+  }), headroom ~${Math.round((CAP - projected) / 1024)} KB`,
 );
 
 // ---------------------------------------------------------------- no em/en dashes (house style)
