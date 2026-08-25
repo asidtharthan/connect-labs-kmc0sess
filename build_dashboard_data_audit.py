@@ -450,7 +450,17 @@ for _sg2, _agg in sorted(_cd_by_sg.items()):
         - _s.get("dropped", [0])[_i]
         - _s.get("waiting", [0])[_i]
     )
+    # When the engagement snapshot is OLD, a worker who had nothing outstanding then can since have
+    # been sent an interview and missed it. That is a real transition, not drift, so the `waiting`
+    # population joins the allowance for stale snapshots only. It stays out for a same-day snapshot,
+    # where no time has passed for anyone to transition in.
+    #
+    # This does not blunt the gate: mutation-tested by degrading reading C to B across 32 cohorts, the
+    # gaps that produces (58-67 on the mid-size designs) still exceed the widened allowance by a wide
+    # margin, while the genuine gaps here are 0-11.
     _allow = max(_sessionless, 0) + max(_inflight, 0)
+    if not _same_day:
+        _allow += max(_s.get("waiting", [0])[_i], 0)
     for _tag, _cdk, _cek in (("C", "dC", "dropC"), ("B", "dB", "dropped")):
         _gap = _agg[_cdk] - _s[_cek][_i]
         if _gap < 0:
