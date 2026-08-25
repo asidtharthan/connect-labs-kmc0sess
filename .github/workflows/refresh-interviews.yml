@@ -77,6 +77,20 @@ jobs:
           node-version: "20"
       - name: Install Babel (render comment strip)
         run: npm install --no-save --no-audit --no-fund @babel/core
+
+      # Compile every script the refresh will invoke, BEFORE spending 15 minutes pulling data. A
+      # SyntaxError in the orchestrator killed a publish after all the pulls had already run, and it
+      # was in a file the local gates never import - they build the payload, they do not run the job.
+      - name: Syntax-check the refresh scripts
+        # Scoped to the orchestrator and the scripts it actually invokes, derived from the file itself
+        # rather than hardcoded, so a new pipeline step is covered the day it is added. Deliberately
+        # NOT every *.py in the root: that tree still holds one-off analysis scripts from earlier
+        # rounds, at least one of which has never compiled, and failing the daily publish over a dead
+        # file would be worse than the bug this guards against.
+        run: |
+          FILES="refresh_interviews_dashboard.py $(grep -oE '"[a-z_0-9]+\.py"' refresh_interviews_dashboard.py | tr -d '\"' | sort -u | tr '\n' ' ')"
+          echo "checking: $FILES"
+          python -m py_compile $FILES
       # Carry the OCS caches between daily runs so the session/word pulls are INCREMENTAL (only new +
       # recently-changed sessions) instead of re-downloading all ~18k sessions each day. Rolling key:
       # every run saves a fresh cache (unique key) and restores the most recent prior one (restore-keys

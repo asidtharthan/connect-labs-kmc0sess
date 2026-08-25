@@ -358,8 +358,7 @@ def main():
         # the per-session detail calls that the rate-limit concern was about.
         run("2t. pull OCS review tags (full scan)", [PY, "pull_ocs_tags.py"])
     else:
-        print("
-=== 2t. pull review tags: skipped (using existing _ocs_tags_cache.json) ===",
+        print("\n=== 2t. pull review tags: skipped (using existing _ocs_tags_cache.json) ===",
               flush=True)
     if args.pull_words:
         run("2b. pull OCS message word counts (incremental)", [PY, "pull_ocs_words.py", *ocs_full])
