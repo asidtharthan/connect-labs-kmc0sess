@@ -115,7 +115,11 @@ gcols = [
 rows_sorted = sorted(bm.rows, key=lambda r: (r["cohort_id"], r["connect_id"], int(r["interview_n"])))
 # Kept small deliberately: this is an ILLUSTRATIVE sample of 10,000+ rows, and the build warns to
 # reduce it when the render nears the 512 KB cap. The full data lives in the tables and exports.
-GRANULAR_N = 60
+# Lowered from 60 on 2026-08-25: the Asked column and the new payload fields pushed the projected LIVE
+# render 8 KB OVER the 512 KB cap and the render gate refused to publish. This sample is illustrative -
+# the full data is in the tables and the CSV export - so it is the right thing to trade for headroom,
+# which is what the build's own warning has always said.
+GRANULAR_N = 30
 granular = []
 for r in rows_sorted[:GRANULAR_N]:
     granular.append(

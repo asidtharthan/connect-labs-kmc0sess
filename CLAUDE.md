@@ -171,3 +171,36 @@ A local MCP server (`tools/commcare_mcp/`) gives Claude access to CommCare appli
 - **[docs/LABS_ARCHITECTURE.md](docs/LABS_ARCHITECTURE.md)** — Architecture diagrams, data flow, cross-app dependency matrix, decision tree
 - **[pr_guidelines.md](pr_guidelines.md)** — Pull request best practices
 - **[docs/plans/](docs/plans/)** — Design documents and implementation plans for features built in this environment
+
+## Interviews dashboard: run preflight before you push
+
+`python preflight.py` reproduces the CI publish job locally and is the difference between anticipating
+a failure and discovering it. On 2026-08-25 the job failed seven times in one day; every failure was
+reproducible on a developer machine in under two minutes.
+
+```bash
+python preflight.py          # compile, fixtures, rebuild, 4 gates, CI simulation, formatters
+python preflight.py --fast   # gates only, against the existing build
+```
+
+Five traps it exists to catch:
+
+- **The local build is stale** (~6,200 master rows vs ~10,500 live). Never quote a locally-built number
+  to anyone; pull the published payload instead (`_pull_full_live.py`).
+- **Build order matters.** `build_payload_agg.py` runs BEFORE `build_dashboard_data.py`; the second does
+  not re-run the first, so the wrong order produces phantom "payload != recompute" failures.
+- **Files not in git change the check COUNT in CI** - `master_v7_2026-06-10.csv`, the GiveWell workbook,
+  `_interview_schedule.json`, `_untrained_flw.json`, `connect_user_data_snapshot.csv`, `hq_pull_full/`.
+  Sections that need them skip on the runner, so a gate tuned to the local count blocks every run.
+- **Two prettiers disagree** about YAML quote style. CI runs the pinned pre-commit hook; `npx prettier`
+  wants the opposite. Only the pinned one counts.
+- **No gate imports the orchestrator** - it is what runs them - so a SyntaxError in
+  `refresh_interviews_dashboard.py` reaches CI unless something compiles it first.
+
+Two local-only failures are expected and classified by preflight rather than chased: `brutal_verify`
+fails ~39 checks here (stale Connect snapshot, partial HQ tree, no run history), and four pre-commit
+hooks cannot execute under Windows Application Control (WinError 4551).
+
+**When you add a gate, mutate the payload and prove it fails.** Four suites once stayed green through
+five deliberate breakages, including a verbatim re-introduction of the bug one of them was written to
+catch.
