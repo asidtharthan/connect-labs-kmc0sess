@@ -52,7 +52,8 @@ DROP_TOP = ("funnel", "granular_total")
 DROP_COHORT = ("connect",)
 # `name` goes too: the topic name is already in DATA.topicNames, so repeating it on every
 # cohort-interview row cost KB for nothing. The render resolves it from `topic` instead.
-DROP_COHORT_IV = ("pct_completed_base", "started_di", "pct_started_di", "name")
+DROP_COHORT_IV = ("pct_completed_base", "started_di", "pct_started_di", "name",
+                  "completed_di", "pct_completed_di")
 
 # Wire order for the compressed topicStatusCohort rows. APPEND ONLY, same discipline as flwMatrix.
 _STATE_ORDER = ["completed", "started-not-completed", "available-missed-overdue",

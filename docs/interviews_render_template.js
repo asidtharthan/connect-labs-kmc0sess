@@ -1696,7 +1696,11 @@ function WorkflowUI(props) {
       var dropped = cdMode === "A" ? (r.dA || 0) : cdMode === "B" ? (r.dB || 0) : (r.dC || 0);
       var skipped = cdMode === "C" ? (r.sk || 0) : 0;
       var prog = r.n - r.f - late - r.d - r.w - never;
-      var pc = function (v) { return r.n ? Math.round(1000 * v / r.n) / 10 : null; };
+      // Rates are of the workers the bot actually ASKED (nb), not everyone enrolled. Never began is
+      // the exception - it is genuinely a share of everyone enrolled, so it keeps the full base.
+      var askedBase = r.nb != null ? r.nb : r.n;
+      var pc = function (v) { return askedBase ? Math.round(1000 * v / askedBase) / 10 : null; };
+      var pcAll = function (v) { return r.n ? Math.round(1000 * v / r.n) / 10 : null; };
       return {
         cohort: r.c, sg: sg, ivs: ivs, gap: des.cadence || null,
         grace: r.g != null ? r.g : (des.cadence || null),
@@ -1709,7 +1713,8 @@ function WorkflowUI(props) {
         donePct: pc(r.f + late), onTimePct: pc(r.f),
         // "of which late" is a share of the FINISHERS, not of all workers - the header says "of which".
         latePct: (r.f + late) ? Math.round(1000 * late / (r.f + late)) / 10 : null,
-        dropPct: pc(dropped), skippedPct: pc(skipped), notSentPct: pc(r.w), neverPct: pc(never)
+        asked: askedBase,
+        dropPct: pc(dropped), skippedPct: pc(skipped), notSentPct: pc(r.w), neverPct: pcAll(never)
       };
     });
   }
@@ -1720,10 +1725,10 @@ function WorkflowUI(props) {
     rows.forEach(function (r) {
       var a = by[r.sg] || (by[r.sg] = { sg: r.sg, ivs: r.ivs, gap: r.gap, cohorts: 0, n: 0,
         onTime: 0, late: 0, done: 0, drop: 0, skipped: 0, notSent: 0, never: 0, prog: 0,
-        sent: 0, sentDone: 0, ends: [] });
+        asked: 0, sent: 0, sentDone: 0, ends: [] });
       a.cohorts++; a.n += r.n; a.onTime += r.onTime; a.late += r.late; a.done += r.done;
       a.drop += r.drop; a.skipped += r.skipped; a.notSent += r.notSent; a.never += r.never;
-      a.prog += r.prog; a.sent += r.sent; a.sentDone += r.sentDone;
+      a.prog += r.prog; a.sent += r.sent; a.sentDone += r.sentDone; a.asked += r.asked;
       a.ends.push(r.end);
     });
     return Object.keys(by).map(function (k) {
@@ -1731,10 +1736,13 @@ function WorkflowUI(props) {
       a.ends.sort();
       a.endFirst = a.ends[0]; a.endLast = a.ends[a.ends.length - 1];
       a.spread = Math.round((new Date(a.endLast) - new Date(a.endFirst)) / 86400000);
-      a.donePct = pc(a.done); a.onTimePct = pc(a.onTime);
+      // Every rate here is of the workers the bot ASKED, so the row's shares are commensurable with
+      // each other. Never began is the one exception, below - it is a share of everyone enrolled.
+      var apc = function (v) { return a.asked ? Math.round(1000 * v / a.asked) / 10 : null; };
+      a.donePct = apc(a.done); a.onTimePct = apc(a.onTime);
       a.latePct = a.done ? Math.round(1000 * a.late / a.done) / 10 : null;
-      a.dropPct = pc(a.drop); a.skippedPct = pc(a.skipped);
-      a.notSentPct = pc(a.notSent); a.neverPct = pc(a.never);
+      a.dropPct = apc(a.drop); a.skippedPct = apc(a.skipped); a.notSentPct = apc(a.notSent);
+      a.neverPct = a.n ? Math.round(1000 * a.never / a.n) / 10 : null;
       a.sentDonePct = a.sent ? Math.round(1000 * a.sentDone / a.sent) / 10 : null;
       return a;
     });
@@ -1907,10 +1915,14 @@ function WorkflowUI(props) {
               coverage measure rather than retention: someone who completed 12 of 13 and skipped one
               counts here. Long schedules score worse simply because they offer more chances to miss one.</span>
             ) : (
-              <span><b>The method used before 21 August: no interview for more than 14 days.</b> The same
-              14 days for every design, regardless of whether interviews are 3 or 14 days apart, and it
-              ignores whether anything was actually missed. Shown for continuity - note it climbs on its
-              own as time passes, so it is not comparable between dates.</span>
+              <span><b>The method used before 21 August: no interview for more than 14 days.</b>{" "}
+              <b style={{ color: "#b45309" }}>This measures silence, not leaving.</b> Most of the workers
+              it counts did not stop: they either completed every interview they were sent and then went
+              quiet because nothing more arrived, or skipped one and came straight back. It also cannot
+              see workers who never replied even once, because it needs a session to measure silence
+              from. Same 14 days for every design whether interviews are 3 or 14 days apart, and it
+              climbs on its own as time passes. Use it only to compare with figures published before
+              21 August.</span>
             )}
           </div>
         </div>
@@ -2165,7 +2177,7 @@ function WorkflowUI(props) {
               ? "Missed an interview and completed nothing after it. What people usually mean by dropping off."
               : engMode === "B"
                 ? "Missed any interview at all, even if they carried on afterwards. A coverage measure: longer schedules offer more chances to slip."
-                : "Not finished and no session for 14 days, the same 14 for every design. Kept for reference; it is blind to how fast a cohort runs."}
+                : "Not finished and no session for 14 days, the same 14 for every design. \u26a0 This measures SILENCE, not leaving: most of the workers it counts finished everything they were sent and went quiet because nothing more arrived. Kept only for comparing with figures published before 21 Aug."}
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2 px-1">
@@ -2380,6 +2392,13 @@ function WorkflowUI(props) {
     var stVal = di ? iv.started_di : iv.started;
     var pstVal = di ? iv.pct_started_di : iv.pct_started;
     var changed = di && iv.started_di !== iv.started;
+    // Completed must be de-impacted by the SAME people as Started, or the row contradicts itself.
+    // Seven rows used to read more completions than starts - TRE's last interview showed 9 started,
+    // 18 completed, 100%.
+    var cDi = di && iv.completed_di != null;
+    var cmVal = cDi ? iv.completed_di : iv.completed;
+    var pcmVal = cDi ? iv.pct_completed_di : iv.pct_completed;
+    var cChanged = cDi && iv.completed_di !== iv.completed;
     return (
       <tr key={key} className="hover:bg-gray-50">
         <td className={td + " " + indent + " text-gray-500"}>{label}</td>
@@ -2389,8 +2408,8 @@ function WorkflowUI(props) {
         <td className={td + " text-right text-gray-500"}>{iv.pct_trig}%</td>
         <td className={td + " text-right" + (changed ? " text-amber-700 font-medium" : "")} title={changed ? "de-impacted (raw " + iv.started + ")" : ""}>{stVal}</td>
         <td className={td + " text-right text-green-700 font-semibold"}>{pstVal}%</td>
-        <td className={td + " text-right"}>{iv.completed}</td>
-        <td className={td + " text-right text-green-700 font-semibold"}>{iv.pct_completed == null ? "-" : iv.pct_completed + "%"}</td>
+        <td className={td + " text-right" + (cChanged ? " text-amber-700 font-medium" : "")} title={cChanged ? "de-impacted (raw " + iv.completed + ")" : ""}>{cmVal}</td>
+        <td className={td + " text-right text-green-700 font-semibold"}>{pcmVal == null ? "-" : pcmVal + "%"}</td>
       </tr>
     );
   }
