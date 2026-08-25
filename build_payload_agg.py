@@ -570,6 +570,8 @@ _eng_flw_llo = {}                                          # flw -> LLO (COWACDI
 # who did everything that was sent to them is never blamed for interviews the bot never sent (the
 # `not-triggered` distinction the 2026-08-07 audit introduced for the matrix).
 _eng_deadlines = defaultdict(lambda: defaultdict(list))
+# sg -> flw -> {(cohort, interview_n): (deadline, done, n)} - the collapsed form, flattened below
+_eng_dl_by_key = defaultdict(lambda: defaultdict(dict))
 _eng_flw_cad = {}                                          # flw -> a gap, first-wins; ALL view only
 # Per-SUBGROUP cadence. The global map above is first-wins, so TRS (earliest, 1,298 FLWs) claimed most
 # shared workers and PANEL's Active/Slow/Quiet bands were computed on a 7-day gap instead of its real 4
@@ -590,12 +592,21 @@ for r in bm.rows:
         _eng_flw_cad.setdefault(_rflw, _rcad)          # first-wins, used ONLY by the pooled ALL view
         _eng_sg_cad[_rsg][_rflw] = _rcad               # per-subgroup: always that subgroup's own cadence
         if _rtrain and r.get("interview_n"):
-            _eng_deadlines[_rsg][_rflw].append((
-                _slot_deadline(int(r["interview_n"]), _rtrain, _rcad, r["cohort_id"],
-                               r.get("trigger_received_on")),
-                _d if r.get("is_completed") == "Y" else None,
-                int(r["interview_n"]),      # reading C needs the slot number: a gap BEFORE their last
-            ))                              # completed interview is a skip, a gap after it is a stop
+            # Keyed by (cohort, interview) and collapsed, NOT appended. A duplicate bot trigger
+            # produces two rows for one interview; appending both left a worker carrying an unfinished
+            # tuple for an interview they had completed, so the engagement chart reported MORE
+            # drop-outs than the drop-off view despite seeing fewer workers. Same collapse rule
+            # _coh_slot uses: completed beats not-completed, earliest completion wins.
+            _ek = (r["cohort_id"], int(r["interview_n"]))
+            _edone = _d if r.get("is_completed") == "Y" else None
+            _eprev = _eng_dl_by_key[_rsg][_rflw].get(_ek)
+            if _eprev is None or (_edone is not None and (_eprev[1] is None or _edone < _eprev[1])):
+                _eng_dl_by_key[_rsg][_rflw][_ek] = (
+                    _slot_deadline(int(r["interview_n"]), _rtrain, _rcad, r["cohort_id"],
+                                   r.get("trigger_received_on")),
+                    _edone,
+                    int(r["interview_n"]),   # reading C needs the slot number: a gap BEFORE their last
+                )                            # completed interview is a skip, a gap after it is a stop
     if r.get("is_started") == "Y" and _d:
         _eng_flw_dates[r["subgroup"]][r["connect_id"]].add(_d)
     if r.get("is_completed") == "Y" and _d:
@@ -625,6 +636,11 @@ def _eng_finished_dates(sg, design_len):
 
 # Per-subgroup scheduled rollout-end (same signals as the dotted funnel line) so we can mark a cohort
 # "ended" — a started FLW who never finished but whose cohort's window has closed isn't a live dropout.
+# Flatten the collapsed map into the list shape the series builder expects.
+for _fsg, _fm in _eng_dl_by_key.items():
+    for _fflw, _fslots in _fm.items():
+        _eng_deadlines[_fsg][_fflw] = list(_fslots.values())
+
 _eng_end = {}
 for _c, _ee in COHORT_END.items():          # the same map the funnel line and the drop-off view use
     _esg = bm.cohort_to_sg(_c)
