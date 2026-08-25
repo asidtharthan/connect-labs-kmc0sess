@@ -528,7 +528,10 @@ if not os.environ.get("AUDIT_SKIP_CLOCK"):
         def _is_open(path):
             if path in _today_only:
                 return True
-            if any("." + o + "." in path or path.endswith("." + o) for o in _open):
+            # Match on PATH SEGMENTS, not substrings: ".line_status.NPS[0]" has NPS followed by a
+            # bracket, so looking for ".NPS." or a trailing ".NPS" missed it. Segment matching also
+            # stops a cohort whose name merely CONTAINS an open cohort's name from being exempted.
+            if set(re.split(r"[.\[\]]+", path)) & _open:
                 return True
             # Positional paths like .funnel[50].status carry no name, so resolve the row and read it.
             _m = re.match(r"^\.([A-Za-z_]+)\[(\d+)\]", path)
