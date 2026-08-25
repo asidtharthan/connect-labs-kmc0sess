@@ -34,6 +34,9 @@ import httpx
 BASE = os.environ.get("OCS_BASE_URL", "https://www.openchatstudio.com")
 EXP = os.environ.get("OCS_EXPERIMENT", "cc01d032-5931-4bdd-a4b2-6f05f4f72f88")
 CACHE = Path("_ocs_tags_cache.json")
+# Written from the SAME scan. Shape matches what build_master_4src reads and what pull_ocs_state used
+# to produce: {sid, pid, interview, interview_status, created_at, updated_at}.
+STATE_CACHE = Path("_ocs_state_cache.json")
 PAGE = 200
 RETRY_STATUS = {429, 500, 502, 503, 504}
 
@@ -79,10 +82,43 @@ def fetch_all(key):
     return out
 
 
+def _state_row(s):
+    st = s.get("state") if isinstance(s.get("state"), dict) else {}
+    p = s.get("participant") or {}
+    return {
+        "sid": s.get("id"),
+        "pid": p.get("identifier") if isinstance(p, dict) else None,
+        "interview": (st or {}).get("interview"),
+        "interview_status": (st or {}).get("interview_status"),
+        "created_at": s.get("created_at"),
+        "updated_at": s.get("updated_at"),
+    }
+
+
 def main():
     rows = fetch_all(ocs_key())
     tags = {s["id"]: s["tags"] for s in rows if s.get("id") and s.get("tags")}
     CACHE.write_text(json.dumps(tags, separators=(",", ":")))
+
+    # The state cache, from the same scan. A FULL snapshot rather than a 30-day incremental merge, so
+    # a status that changes long after the session was created is picked up. Refuse to shrink the
+    # cache: a truncated scan must not quietly delete history.
+    state = [_state_row(s) for s in rows if s.get("id")]
+    prev = 0
+    if STATE_CACHE.exists():
+        try:
+            prev = len(json.loads(STATE_CACHE.read_text()))
+        except (ValueError, OSError):
+            prev = 0
+    if prev and len(state) < prev * 0.95:
+        print(
+            f"[ocs-tags] ABORT: state scan returned {len(state):,} sessions against {prev:,} cached "
+            f"(-{100 * (1 - len(state) / prev):.1f}%). Refusing to overwrite with a short scan.",
+            flush=True,
+        )
+        sys.exit(1)
+    STATE_CACHE.write_text(json.dumps(state, separators=(",", ":")))
+    print(f"[ocs-tags] state cache: {len(state):,} sessions (was {prev:,}) -> {STATE_CACHE}", flush=True)
     n_verdict = sum(1 for t in tags.values() if set(t) & set(VERDICTS))
     print(
         f"[ocs-tags] {len(rows):,} sessions scanned, {len(tags):,} carry tags, "

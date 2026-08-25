@@ -1855,9 +1855,10 @@ function WorkflowUI(props) {
     var tot = rows.reduce(function (a, r) {
       a.n += r.n; a.onTime += r.onTime; a.late += r.late; a.done += r.done;
       a.drop += r.drop; a.skipped += r.skipped; a.notSent += r.notSent; a.never += r.never;
-      a.prog += r.prog; a.sent += r.sent; a.sentDone += r.sentDone; return a;
+      a.prog += r.prog; a.sent += r.sent; a.sentDone += r.sentDone;
+      a.asked += r.asked; return a;                 // tiles must divide by the same base as the table
     }, { n: 0, onTime: 0, late: 0, done: 0, drop: 0, skipped: 0, notSent: 0, never: 0, prog: 0,
-         sent: 0, sentDone: 0 });
+         asked: 0, sent: 0, sentDone: 0 });
     // Sorting applies to BOTH levels. By id sorts designs alphabetically and cohorts by cohort id.
     function sortRows(list, isDesign) {
       var out = list.slice();
@@ -1878,14 +1879,25 @@ function WorkflowUI(props) {
 
     function pctCell(v) { return v == null ? "-" : v + "%"; }
     function bar(r) {
-      // Segment widths must all be shares of the SAME base (all workers), so they sum to 100. latePct
-      // is deliberately a share of finishers for the column, so recompute the segment here.
-      var lateOfAll = r.n ? Math.round(1000 * r.late / r.n) / 10 : 0;
-      var progOfAll = r.n ? Math.round(1000 * r.prog / r.n) / 10 : 0;
+      // Every segment must share ONE base or the bar does not sum to 100. When the row percentages
+      // moved to the asked base and these three did not, 38 of 73 bars overflowed - the worst to
+      // 124.6% - and because the segments are flex children the browser just squeezed them, scaling
+      // every segment by a wrong factor while the tooltip listed figures that did not add up.
+      // Never-began is included here over the SAME asked base purely so the bar closes; the column
+      // keeps its share-of-everyone reading, which is the honest one for that number.
+      // The bar shows the composition of the workers the bot ASKED, which is exactly the population
+      // every percentage in the row divides by - so the segments match the columns and sum to 100 by
+      // construction (finished + late + dropped + skipped + not-completed + in-progress == asked).
+      // Never began is deliberately NOT a segment: those workers are not in this base, and dividing
+      // them by it was what made 38 of 73 bars overflow, the worst to 124.6%.
+      var barBase = r.asked || r.n;
+      var ofAsked = function (v) { return barBase ? Math.round(1000 * v / barBase) / 10 : 0; };
+      var lateOfAll = ofAsked(r.late);
+      var progOfAll = ofAsked(r.prog);
       var seg = [["#5E35B1", r.onTimePct, "Finished on time"], ["#7E57C2", lateOfAll, "Finished late"],
                  ["#C62828", r.dropPct, "Dropped off"], ["#F9A825", r.skippedPct, "Skipped but returned"],
                  ["#0277BD", r.notSentPct, "Schedule not completed"],
-                 ["#607D8B", progOfAll, "Still in progress"], ["#9E9E9E", r.neverPct, "Never began"]];
+                 ["#607D8B", progOfAll, "Still in progress"]];
       return (
         <div className="flex h-4 w-full overflow-hidden rounded" title={seg.map(function (t) { return t[2] + " " + pctCell(t[1]); }).join(" / ")}>
           {seg.map(function (t, i) {
@@ -1971,7 +1983,7 @@ function WorkflowUI(props) {
                 : "Only shown under “Stopped and never came back”; the other readings fold these people into Dropped off."],
               ["Schedule not completed", "#0277BD", "They completed everything that was ever sent to them, but their plan was never fully sent, and the cohort has since closed. Nothing is still coming. Not their doing, so kept out of drop-off."],
               ["Never began", "#9E9E9E", "Claimed the opportunity but the bot never sent them a single interview."],
-              ["Still in progress", "#607D8B", "Their cohort is still running and they have a live interview in hand. Outcome not decided yet."]]
+              ["Still in progress", "#607D8B", "They have an interview in hand whose deadline has not arrived yet, so the outcome is not decided. This can happen in a cohort past its nominal end date: interviews are sometimes still triggered after it, and someone mid-interview is not a drop-out."]]
               .map(function (t, i) {
                 return (
                   <div key={i} className="flex gap-2">
@@ -1994,8 +2006,8 @@ function WorkflowUI(props) {
             ...(cdMode === "C" ? [["Skipped but returned", tot.skipped, "#F9A825",
               "missed one, then carried on"]] : []),
             ["Schedule not completed", tot.notSent, "#0277BD", "did all that was sent"],
-            ["Never began", tot.never, "#9E9E9E", "nothing ever sent"],
-            ["Still in progress", tot.prog, "#607D8B", "cohort still running"]]
+            ["Never began", tot.never, "#9E9E9E", "nothing ever sent", "all"],
+            ["Still in progress", tot.prog, "#607D8B", "an interview in hand, not due yet"]]
             .map(function (t, i) {
               return (
                 <div key={i} className="rounded border border-gray-200 bg-white px-3 py-2"
@@ -2004,7 +2016,13 @@ function WorkflowUI(props) {
                   <div className="text-lg font-bold" style={{ color: t[2] }}>
                     {t[1].toLocaleString()}
                     <span className="ml-1 text-xs font-normal text-gray-500">
-                      {tot.n ? Math.round(100 * t[1] / tot.n) + "%" : ""}
+                      {/* Same base as the table below. These tiles used to divide by every enrolled
+                          worker while the table divided by the workers actually asked, so "Finished
+                          the design" read 60% here and 63.4% there. Never began is the exception and
+                          says so: it IS a share of everyone enrolled. */}
+                      {(t[4] === "all" ? tot.n : (tot.asked || tot.n))
+                        ? Math.round(100 * t[1] / (t[4] === "all" ? tot.n : (tot.asked || tot.n))) + "%"
+                        : ""}
                     </span>
                   </div>
                   <div className="text-gray-400" style={{ fontSize: "10px" }}>{t[3]}</div>
@@ -2035,6 +2053,7 @@ function WorkflowUI(props) {
                 <th className="px-2 py-1 text-left">{cdLevel === "design" ? "Own end dates" : "Started"}</th>
                 <th className="px-2 py-1 text-left">{cdLevel === "design" ? "Spread" : "Its own end"}</th>
                 <th className="px-2 py-1 text-right">Workers</th>
+                <th className="px-2 py-1 text-right" title="Workers the bot actually sent at least one interview to. Every percentage in this row is of THIS number, not of Workers - somebody who was never sent an interview cannot have stopped. Never began is the exception and is a share of Workers.">Asked</th>
                 <th className="px-2 py-1 text-right">Finished</th>
                 <th className="px-2 py-1 text-right">of which late</th>
                 <th className="px-2 py-1 text-right">Dropped off</th>
@@ -2065,6 +2084,14 @@ function WorkflowUI(props) {
                       {isD ? (r.spread ? r.spread + " days" : "same day") : r.end}
                     </td>
                     <td className="px-2 py-1 text-right">{r.n.toLocaleString()}</td>
+                    {/* The base every percentage in this row divides by. Without it on screen,
+                        % x Workers gives the wrong count - 1NPS1 read "Workers 97, Finished 100.0%,
+                        Never began 13.4%", which is impossible unless you already know the bases
+                        differ. */}
+                    <td className="px-2 py-1 text-right text-gray-600"
+                        title={r.never ? r.never + " of these workers were never sent an interview, so they are excluded from every rate except Never began" : ""}>
+                      {(r.asked != null ? r.asked : r.n).toLocaleString()}
+                    </td>
                     <td className="px-2 py-1 text-right">{pctCell(r.donePct)}</td>
                     <td className="px-2 py-1 text-right text-gray-500">{r.late ? pctCell(r.latePct) : "-"}</td>
                     <td className="px-2 py-1 text-right font-semibold" style={{ color: "#C62828" }}>{pctCell(r.dropPct)}</td>

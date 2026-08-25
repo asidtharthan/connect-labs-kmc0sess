@@ -2,6 +2,7 @@
 reconciled against (1) the 10-Jun master baseline, (2) independent recompute, (3) the GW
 workbook. Prints PASS/FAIL per check + a final accuracy summary. No spot checks.
 """
+
 import csv as _csv
 import glob
 import json
@@ -19,14 +20,58 @@ import build_master_4src as bm
 # reading it here keeps the gate honest. What a gate must never import is the RULE it is checking,
 # which is why the state machine below is still a hand-written re-implementation.
 from topic_status_lib import GRACE_DAYS as tsl_grace
-  # the master under test
+
+# the master under test
 
 TODAY = date.today()  # match the build's dynamic time-gating for the independent status recompute
-_CANON_TOPICS = ["A", "B", "C", "D", "E", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "8S", "8L", "10S", "10L", "11S", "11L", "13L", "99", "101", "F", "G"]
+_CANON_TOPICS = [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "11",
+    "12",
+    "13",
+    "14",
+    "8S",
+    "8L",
+    "10S",
+    "10L",
+    "11S",
+    "11L",
+    "13L",
+    "99",
+    "101",
+    "F",
+    "G",
+]
 TOPICS = [t for t in _CANON_TOPICS if any(t in bm.SUBGROUP_DESIGN[sg]["topics"] for sg in bm.SUBGROUP_DESIGN)]
 SG_ORDER = ["TRS", "TRE", "ABT1-A", "ABT1-B", "ABT2-A", "ABT2-B", "PANEL", "ABT3-A", "ABT3-B", "2WT", "EXT", "NPS"]
-ROLL = {"TRS": "TRS", "TRE": "TRE", "ABT1-A": "ABT1", "ABT1-B": "ABT1", "ABT2-A": "ABT2", "ABT2-B": "ABT2",
-        "PANEL": "PANEL", "ABT3-A": "ABT3", "ABT3-B": "ABT3", "2WT": "2WT", "EXT": "EXT", "NPS": "NPS"}
+ROLL = {
+    "TRS": "TRS",
+    "TRE": "TRE",
+    "ABT1-A": "ABT1",
+    "ABT1-B": "ABT1",
+    "ABT2-A": "ABT2",
+    "ABT2-B": "ABT2",
+    "PANEL": "PANEL",
+    "ABT3-A": "ABT3",
+    "ABT3-B": "ABT3",
+    "2WT": "2WT",
+    "EXT": "EXT",
+    "NPS": "NPS",
+}
 results = []  # (section, check, passed, detail)
 
 
@@ -66,8 +111,11 @@ print("=" * 90)
 if os.path.exists("master_v7_2026-06-10.csv"):
     # exclude the intentionally-removed test accounts from the baseline too, else their (now-dropped)
     # baseline rows look like a coverage regression. See bm.EXCLUDE_FLWS.
-    base = {r["trigger_form_id"]: r for r in _csv.DictReader(open("master_v7_2026-06-10.csv", encoding="utf-8"))
-            if r["connect_id"] not in bm.EXCLUDE_FLWS}
+    base = {
+        r["trigger_form_id"]: r
+        for r in _csv.DictReader(open("master_v7_2026-06-10.csv", encoding="utf-8"))
+        if r["connect_id"] not in bm.EXCLUDE_FLWS
+    }
     live = {r["trigger_form_id"]: r for r in bm.rows}
     shared = set(base) & set(live)
     only_base = set(base) - set(live)
@@ -166,7 +214,7 @@ def status_for(flw, cohort, topic):
             return "available-missed-overdue"
         return "available-not-started"
     if not td or not cad:
-        return "available-not-started"   # schedule unknown -> can't call it due, so can't call it missed
+        return "available-not-started"  # schedule unknown -> can't call it due, so can't call it missed
     if TODAY < td + timedelta(days=(n - 1) * cad):
         return "not-available-yet"
     return "not-triggered"
@@ -227,11 +275,11 @@ def status_v2(flw, cohort, topic):
         return "completed"
     if started:
         return "started-not-completed"
-    triggered = bool(m)          # a master row exists only where a trigger form does
+    triggered = bool(m)  # a master row exists only where a trigger form does
     if triggered:
         return "available-missed-overdue" if overdue else "available-not-started"
     if td is None or rel is None:
-        return "available-not-started"   # schedule unknown -> not provably due
+        return "available-not-started"  # schedule unknown -> not provably due
     if not avail:
         return "not-available-yet"
     return "not-triggered"
@@ -449,8 +497,10 @@ else:
                 continue
             k = (r["subgroup"], int(r["interview_n"]))
             exc_iv[k]["t"].add(r["connect_id"])
-            if r["is_started"] == "Y": exc_iv[k]["s"].add(r["connect_id"])
-            if r["is_completed"] == "Y": exc_iv[k]["c"].add(r["connect_id"])
+            if r["is_started"] == "Y":
+                exc_iv[k]["s"].add(r["connect_id"])
+            if r["is_completed"] == "Y":
+                exc_iv[k]["c"].add(r["connect_id"])
     exc_init = defaultdict(set)
     for _p in glob.glob("hq_pull_full/*welcome_click_start.jsonl"):
         for _line in open(_p, encoding="utf-8"):
@@ -473,7 +523,9 @@ else:
         ge, gt, gs, gc = gw_funnel[key]
         _ex = exc_iv.get(key, {"t": set(), "s": set(), "c": set()})
         ge -= len(exc_init.get(row["sg"], set()))  # elig = # initiated; drop excluded initiated
-        gt -= len(_ex["t"]); gs -= len(_ex["s"]); gc -= len(_ex["c"])
+        gt -= len(_ex["t"])
+        gs -= len(_ex["s"])
+        gc -= len(_ex["c"])
         le, lt, ls, lc = row["elig"], row["trig"], row["started"], row["completed"]
         if (ge, gt, gs, gc) == (le, lt, ls, lc):
             exact += 1
@@ -513,19 +565,29 @@ if not os.environ.get("AUDIT_SKIP_CLOCK"):
     # depends on command ordering is not a gate.
     _env_now = dict(os.environ, PYTHONIOENCODING="utf-8")
     _env_now.pop("INTERVIEWS_TODAY", None)
-    _r0 = subprocess.run([sys.executable, "build_payload_agg.py"], env=_env_now,
-                         capture_output=True, text=True, timeout=1800)
+    _r0 = subprocess.run(
+        [sys.executable, "build_payload_agg.py"], env=_env_now, capture_output=True, text=True, timeout=1800
+    )
     if _r0.returncode != 0:
-        chk("G", "ENDED cohorts are invariant to the build date", False,
-            f"baseline rebuild failed: {(_r0.stderr or '')[-200:]}")
+        chk(
+            "G",
+            "ENDED cohorts are invariant to the build date",
+            False,
+            f"baseline rebuild failed: {(_r0.stderr or '')[-200:]}",
+        )
         raise SystemExit(1)
     _now = json.load(open("payload_agg.json", encoding="utf-8"))
     _env = dict(os.environ, INTERVIEWS_TODAY="2027-03-01", PYTHONIOENCODING="utf-8")
-    _r = subprocess.run([sys.executable, "build_payload_agg.py"], env=_env,
-                        capture_output=True, text=True, timeout=1800)
+    _r = subprocess.run(
+        [sys.executable, "build_payload_agg.py"], env=_env, capture_output=True, text=True, timeout=1800
+    )
     if _r.returncode != 0:
-        chk("G", "closed cohorts are invariant to the build date", False,
-            f"future-dated rebuild failed: {(_r.stderr or '')[-200:]}")
+        chk(
+            "G",
+            "closed cohorts are invariant to the build date",
+            False,
+            f"future-dated rebuild failed: {(_r.stderr or '')[-200:]}",
+        )
     else:
         _fut = json.load(open("payload_agg.json", encoding="utf-8"))
         _A, _B = dict(_leaves(_now)), dict(_leaves(_fut))
@@ -541,8 +603,7 @@ if not os.environ.get("AUDIT_SKIP_CLOCK"):
         # cohorts where every deadline is already behind us must be frozen - and they are the ones the
         # requirement is actually about.
         _open |= {r["c"] for r in (_now.get("cohort_dropoff") or []) if not r.get("settled", True)}
-        _open |= {bm.cohort_to_sg(r["c"]) for r in (_now.get("cohort_dropoff") or [])
-                  if not r.get("settled", True)}
+        _open |= {bm.cohort_to_sg(r["c"]) for r in (_now.get("cohort_dropoff") or []) if not r.get("settled", True)}
         _today_only = {".today", ".built_at"}
 
         def _is_open(path):
@@ -565,19 +626,21 @@ if not os.environ.get("AUDIT_SKIP_CLOCK"):
                     return any(_row.get(f) in _open for f in ("sg", "c", "cohort", "subgroup", "key"))
             return False
 
-        _diff = [k for k in set(_A) | set(_B)
-                 if _A.get(k, "<absent>") != _B.get(k, "<absent>") and not _is_open(k)]
-        _moved_open = sum(1 for k in set(_A) | set(_B)
-                          if _A.get(k, "<absent>") != _B.get(k, "<absent>") and _is_open(k)
-                          and k not in _today_only)     # the two date stamps are not a cohort
-        chk("G", "ENDED cohorts are invariant to the build date "
-                 "(no silent-FLW drift on opportunities that are over)",
+        _diff = [k for k in set(_A) | set(_B) if _A.get(k, "<absent>") != _B.get(k, "<absent>") and not _is_open(k)]
+        _moved_open = sum(
+            1
+            for k in set(_A) | set(_B)
+            if _A.get(k, "<absent>") != _B.get(k, "<absent>") and _is_open(k) and k not in _today_only
+        )  # the two date stamps are not a cohort
+        chk(
+            "G",
+            "ENDED cohorts are invariant to the build date " "(no silent-FLW drift on opportunities that are over)",
             not _diff,
             f"{len(_A):,} leaves compared, {len(_diff)} moved on ended cohorts; "
             f"{_moved_open} moved on still-open cohorts ({', '.join(sorted(_open)) or 'none'}), "
-            f"which is expected"
-            + ("; OFFENDERS: " + ", ".join(sorted(_diff)[:4]) if _diff else ""))
-        json.dump(_now, open("payload_agg.json", "w", encoding="utf-8"))   # restore the real build
+            f"which is expected" + ("; OFFENDERS: " + ", ".join(sorted(_diff)[:4]) if _diff else ""),
+        )
+        json.dump(_now, open("payload_agg.json", "w", encoding="utf-8"))  # restore the real build
 
 
 print("\n" + "=" * 90)
@@ -587,6 +650,17 @@ passed = sum(1 for _, _, p, _ in results if p)
 for sec in ["A", "B", "C", "D", "E", "F", "G"]:
     secr = [r for r in results if r[0] == sec]
     print(f"  Section {sec}: {sum(1 for r in secr if r[2])}/{len(secr)} passed")
+# A gate that silently runs FEWER checks is indistinguishable from one that passes. Deleting the
+# interview-schedule file made brutal_verify drop 22 checks with NO failure, because its section is
+# written as "for each entry in this dict" and the dict was empty. Floor the count.
+_MIN_CHECKS = 26
+if (len(results)) < _MIN_CHECKS:
+    print("")
+    print(
+        f"  *** ONLY {len(results)} CHECKS RAN, EXPECTED >= 26 - a section is silently "
+        f"empty, usually a missing input file. Treating as FAILURE. ***"
+    )
+    passed = -1
 print(f"\n  TOTAL: {passed}/{len(results)} checks passed")
 print(
     "  RESULT:", "ALL PASS — 200% reconciled" if passed == len(results) else f"*** {len(results)-passed} FAILURES ***"
