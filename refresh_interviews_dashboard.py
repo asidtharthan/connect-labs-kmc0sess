@@ -46,6 +46,7 @@ Usage:
   python refresh_interviews_dashboard.py --pull-hq --pull-ocs     # + live HQ/OCS pull
   python refresh_interviews_dashboard.py --pull-hq --pull-ocs --pull-connect --push   # full daily run
 """
+
 import argparse
 import json
 import os
@@ -96,8 +97,10 @@ def inject():
         sys.exit(1)
     # Guard against embedding a stale pruned payload if someone rebuilt dashboard_data.json by hand.
     if os.path.getmtime(rd_path) < os.path.getmtime(dd_path) - 1:
-        print(f"ABORT: {RENDER_DATA_JSON} is older than {DATA_JSON} — rebuild with "
-              "build_dashboard_data.py.", flush=True)
+        print(
+            f"ABORT: {RENDER_DATA_JSON} is older than {DATA_JSON} — rebuild with " "build_dashboard_data.py.",
+            flush=True,
+        )
         sys.exit(1)
     with open(rd_path, encoding="utf-8") as f:
         data = f.read().strip()
@@ -112,28 +115,44 @@ def inject():
     # any reason we publish the commented template rather than nothing, and say so loudly.
     import subprocess
     import tempfile
+
     _stripped = os.path.join(tempfile.gettempdir(), "interviews_render_stripped.js")
     try:
-        _r = subprocess.run(["node", os.path.join(ROOT, "strip_render_comments.js"), TEMPLATE,
-                             _stripped], capture_output=True, text=True, timeout=300)
+        _r = subprocess.run(
+            ["node", os.path.join(ROOT, "strip_render_comments.js"), TEMPLATE, _stripped],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
         if _r.returncode == 0 and os.path.exists(_stripped):
             print("   " + (_r.stdout or "").strip(), flush=True)
             with open(_stripped, encoding="utf-8") as f:
                 tpl = f.read()
         else:
-            print(f"WARNING: comment strip failed (rc={_r.returncode}) - publishing the commented "
-                  f"template, which is larger: {(_r.stderr or '').strip()[:200]}", flush=True)
-    except Exception as _e:                                   # node missing, timeout, anything
+            # FATAL, not a warning. This is the only place the JSX is parsed on the publish path, so
+            # demoting its failure meant a syntax error could ship. Publishing nothing beats
+            # publishing a page that will not mount.
+            print(
+                f"ABORT: comment strip failed (rc={_r.returncode}). This is the only JSX parse in "
+                f"the publish path, so the failure is treated as fatal: "
+                f"{(_r.stderr or '').strip()[:400]}",
+                flush=True,
+            )
+            sys.exit(1)
+    except Exception as _e:  # node missing, timeout, anything
         print(f"WARNING: comment strip skipped ({_e}) - publishing the commented template", flush=True)
     out = tpl.replace("/*__DATA__*/", data)
     with open(RENDER_OUT, "w", encoding="utf-8") as f:
         f.write(out)
     kb = len(out.encode()) / 1024
-    code_kb = (len(tpl.encode()) - len("/*__DATA__*/")) / 1024   # tpl is the SHIPPED (stripped) copy
+    code_kb = (len(tpl.encode()) - len("/*__DATA__*/")) / 1024  # tpl is the SHIPPED (stripped) copy
     data_kb = len(data.encode()) / 1024
     print(f"--- wrote {RENDER_OUT} ({kb:.1f} KB = {code_kb:.1f} KB code + {data_kb:.1f} KB data)", flush=True)
-    print(f"---   payload: {full_kb:.1f} KB full -> {data_kb:.1f} KB pruned "
-          f"(saved {full_kb - data_kb:.1f} KB); headroom vs the 512 KB Labs limit: {512 - kb:.1f} KB", flush=True)
+    print(
+        f"---   payload: {full_kb:.1f} KB full -> {data_kb:.1f} KB pruned "
+        f"(saved {full_kb - data_kb:.1f} KB); headroom vs the 512 KB Labs limit: {512 - kb:.1f} KB",
+        flush=True,
+    )
     if kb > 500:
         print(f"WARNING: render is {kb:.0f} KB, near the 512 KB Labs limit — reduce granular sample.", flush=True)
     return out
@@ -229,9 +248,12 @@ def push(render_code):
         for attempt in range(1, tries + 1):
             try:
                 return _mcp_call(
-                    url, auth, "workflow_get",
+                    url,
+                    auth,
+                    "workflow_get",
                     {"workflow_id": WORKFLOW_ID, "opportunity_id": OWNER_OPP, "include_render_code": False},
-                    {"v": None}, timeout=120,
+                    {"v": None},
+                    timeout=120,
                 ).get("render_code_version")
             except Exception as e:
                 last = e
@@ -256,7 +278,9 @@ def push(render_code):
     for attempt in range(1, attempts + 1):
         try:
             res = _mcp_call(
-                url, auth, "workflow_update_render_code",
+                url,
+                auth,
+                "workflow_update_render_code",
                 {
                     "workflow_id": WORKFLOW_ID,
                     "opportunity_id": OWNER_OPP,
@@ -268,8 +292,10 @@ def push(render_code):
             )
             new_v = res.get("new_version")
             ok = new_v == (v0 + 1) if isinstance(v0, int) else bool(new_v)
-            print(f"--- push: render_code_version {v0} -> {new_v}  "
-                  f"{'OK' if ok else 'UNEXPECTED: ' + str(res)}", flush=True)
+            print(
+                f"--- push: render_code_version {v0} -> {new_v}  " f"{'OK' if ok else 'UNEXPECTED: ' + str(res)}",
+                flush=True,
+            )
             if ok:
                 return new_v
         except Exception as e:
@@ -280,12 +306,18 @@ def push(render_code):
                 print(f"    could not re-read version to check: {repr(e2)[:120]}", flush=True)
                 landed = None
             if isinstance(v0, int) and landed == v0 + 1:
-                print(f"--- push: the write DID land despite the error "
-                      f"(version {v0} -> {landed}); treating as success", flush=True)
+                print(
+                    f"--- push: the write DID land despite the error "
+                    f"(version {v0} -> {landed}); treating as success",
+                    flush=True,
+                )
                 return landed
             if isinstance(landed, int) and isinstance(v0, int) and landed > v0 + 1:
-                print(f"--- push: version moved {v0} -> {landed}, i.e. something else published "
-                      f"meanwhile. NOT retrying to avoid clobbering it.", flush=True)
+                print(
+                    f"--- push: version moved {v0} -> {landed}, i.e. something else published "
+                    f"meanwhile. NOT retrying to avoid clobbering it.",
+                    flush=True,
+                )
                 return False
         if attempt < attempts:
             sid["v"] = None  # a timed-out session can be wedged; start a clean one
@@ -328,8 +360,11 @@ def main():
     ap.add_argument("--pull-words", action="store_true", help="live-pull OCS message word counts (avg-words metric)")
     ap.add_argument("--pull-connect", action="store_true", help="live-pull Connect user_data (needs PAT)")
     ap.add_argument("--push", action="store_true", help="push refreshed render to workflow 3962 (needs PAT)")
-    ap.add_argument("--full-resync", action="store_true",
-                    help="force a FULL OCS re-scan (state + words) instead of the incremental window (self-heal)")
+    ap.add_argument(
+        "--full-resync",
+        action="store_true",
+        help="force a FULL OCS re-scan (state + words) instead of the incremental window (self-heal)",
+    )
     args = ap.parse_args()
     ocs_full = ["--full"] if args.full_resync else []
 
@@ -346,10 +381,12 @@ def main():
         run("1c. pull HQ interview schedule (cadence/topics)", [PY, "pull_hq_interview_schedule.py"], required=False)
     else:
         print("\n=== 1. pull HQ: skipped (using existing hq_pull_full/) ===", flush=True)
-    if args.pull_ocs:
-        run("2. pull OCS sessions (incremental)", [PY, "pull_ocs_state.py", *ocs_full])
-    else:
-        print("\n=== 2. pull OCS: skipped (using existing _ocs_state_cache.json) ===", flush=True)
+    # Step 2 (pull_ocs_state.py) is folded into step 2t below: both read the SAME endpoint, and the
+    # list response carries the session state the master build needs. Doing it once removes a second
+    # full round trip AND makes the state cache a complete daily snapshot instead of a 30-day
+    # incremental merge, which closes the window where a status change arriving more than 30 days
+    # after a session was created would never be seen. pull_ocs_state.py still works and is kept for
+    # manual use.
     if args.pull_ocs:
         # FULL scan every day, deliberately. Reviewing happens long after a session is created - tagged
         # sessions go back to March and the tagged total still climbs daily - so the created_at window
@@ -358,8 +395,7 @@ def main():
         # the per-session detail calls that the rate-limit concern was about.
         run("2t. pull OCS review tags (full scan)", [PY, "pull_ocs_tags.py"])
     else:
-        print("\n=== 2t. pull review tags: skipped (using existing _ocs_tags_cache.json) ===",
-              flush=True)
+        print("\n=== 2t. pull review tags: skipped (using existing _ocs_tags_cache.json) ===", flush=True)
     if args.pull_words:
         run("2b. pull OCS message word counts (incremental)", [PY, "pull_ocs_words.py", *ocs_full])
     else:
@@ -376,8 +412,8 @@ def main():
     run("5. build dashboard_data", [PY, "build_dashboard_data.py"])
 
     # 6: audit — hard gate
-    run("6a. end-to-end audit (27/27)", [PY, "audit_e2e.py"])
-    run("6b. dashboard_data audit (18/18)", [PY, "build_dashboard_data_audit.py"])
+    run("6a. end-to-end audit", [PY, "audit_e2e.py"])
+    run("6b. dashboard_data audit", [PY, "build_dashboard_data_audit.py"])
 
     # 7: inject
     render = inject()
@@ -388,6 +424,10 @@ def main():
     # verbatim. Hard gate: aborts before publishing if anything is off. Freshness asserts here
     # are enforced only when INTERVIEWS_STRICT_FRESHNESS=1 (set in the daily CI after a live pull).
     run("7b. brutal independent re-verification", [PY, "brutal_verify.py"])
+    # 7c. The render harness. It transpiles the template, mounts it in jsdom and asserts on the DOM -
+    # the only gate that checks what a READER sees rather than what the payload contains. It had never
+    # run in CI, which is how a stacked bar summing to 124.6% reached the live dashboard.
+    run("7c. render harness (jsdom)", ["node", "verify_render_dropoff.js"])
 
     # 8: push (gated on token)
     pushed_version = None
@@ -405,13 +445,15 @@ def main():
         # expired", which sent the 2026-08-15 investigation down the wrong path: that run's gates all
         # passed and the failure was a plain read TIMEOUT, not auth. Step 8 now prints the real
         # exception per attempt — point at it instead of speculating.
-        print("\nABORT: --push requested but publish FAILED (see step 8 above for the actual error) — "
-              "failing the job so it is not silently left un-published.\n"
-              "  * TimeoutError / TransportError  -> transient MCP slowness; retries are already in "
-              "place, so a failure here means all of them timed out. Re-running usually clears it.\n"
-              "  * 401 / 403 / auth              -> MCP_BEARER expired; re-mint it.\n"
-              "  * version moved unexpectedly    -> something else published meanwhile; do not force.",
-              flush=True)
+        print(
+            "\nABORT: --push requested but publish FAILED (see step 8 above for the actual error) — "
+            "failing the job so it is not silently left un-published.\n"
+            "  * TimeoutError / TransportError  -> transient MCP slowness; retries are already in "
+            "place, so a failure here means all of them timed out. Re-running usually clears it.\n"
+            "  * 401 / 403 / auth              -> MCP_BEARER expired; re-mint it.\n"
+            "  * version moved unexpectedly    -> something else published meanwhile; do not force.",
+            flush=True,
+        )
         sys.exit(1)
     # 9: record this run in the regression-guard history — ONLY after a confirmed publish. This file
     # (_run_history.json) is the baseline tomorrow's brutal_verify section H compares against, and it

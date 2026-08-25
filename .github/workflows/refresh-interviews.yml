@@ -75,8 +75,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Install Babel (render comment strip)
-        run: npm install --no-save --no-audit --no-fund @babel/core
+      - name: Install the render toolchain (comment strip + jsdom harness)
+        # @babel/core reprints the template without comments before publishing. The rest is what the
+        # render harness needs to mount the page and assert on the DOM - it is now a hard gate (7c),
+        # and it had never run in CI, which is how a stacked bar summing to 124.6% reached the live
+        # dashboard. jsdom is not in package.json, so it is named explicitly here.
+        run: npm install --no-save --no-audit --no-fund @babel/core @babel/preset-react jsdom react react-dom
 
       # Compile every script the refresh will invoke, BEFORE spending 15 minutes pulling data. A
       # SyntaxError in the orchestrator killed a publish after all the pulls had already run, and it
@@ -126,8 +130,14 @@ jobs:
           CONNECT_SNAP_1: ${{ secrets.CONNECT_SNAP_1 }}
           CONNECT_SNAP_2: ${{ secrets.CONNECT_SNAP_2 }}
           CONNECT_SNAP_3: ${{ secrets.CONNECT_SNAP_3 }}
+          CONNECT_SNAP_4: ${{ secrets.CONNECT_SNAP_4 }}
+          CONNECT_SNAP_5: ${{ secrets.CONNECT_SNAP_5 }}
+          CONNECT_SNAP_6: ${{ secrets.CONNECT_SNAP_6 }}
         run: |
-          printf '%s' "${CONNECT_SNAP_1}${CONNECT_SNAP_2}${CONNECT_SNAP_3}" | base64 -d | gunzip > connect_user_data_snapshot.csv || true
+          # Concatenate every part that exists. GitHub caps a secret at 48 KB, so the snapshot is
+          # split across several; unset parts contribute nothing, and adding a seventh later needs no
+          # change here.
+          printf '%s' "${CONNECT_SNAP_1}${CONNECT_SNAP_2}${CONNECT_SNAP_3}${CONNECT_SNAP_4}${CONNECT_SNAP_5}${CONNECT_SNAP_6}" | base64 -d | gunzip > connect_user_data_snapshot.csv || true
           echo "fallback snapshot rows: $(wc -l < connect_user_data_snapshot.csv 2>/dev/null || echo 0)"
       - name: Refresh (Connect headless + HQ + OCS), audit, and publish dashboard
         run: |

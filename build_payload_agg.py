@@ -2,6 +2,7 @@
 Funnel + Tables 1-3 + topic/subgroup status distributions + %Started line series.
 No per-row data (those need the server-side phase). Emits payload_agg.json + size.
 """
+
 import json
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
@@ -14,15 +15,58 @@ import topic_status_lib as tsl
 # does. If a finished cohort gains drop-outs simply because time passed, the daily refresh is counting
 # silence rather than behaviour, and that is a bug. audit_e2e runs the build twice and diffs.
 import os as _os
-TODAY = (date.fromisoformat(_os.environ["INTERVIEWS_TODAY"]) if _os.environ.get("INTERVIEWS_TODAY")
-         else date.today())
+
+TODAY = date.fromisoformat(_os.environ["INTERVIEWS_TODAY"]) if _os.environ.get("INTERVIEWS_TODAY") else date.today()
 # Canonical topic order; include every topic ANY subgroup design uses (auto-picks up 12/13/C from the
 # CCHQ-derived schedule) so topic-completion never silently drops a topic the bot actually runs.
-_CANON_TOPICS = ["A", "B", "C", "D", "E", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "8S", "8L", "10S", "10L", "11S", "11L", "13L", "99", "101", "F", "G"]
+_CANON_TOPICS = [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "11",
+    "12",
+    "13",
+    "14",
+    "8S",
+    "8L",
+    "10S",
+    "10L",
+    "11S",
+    "11L",
+    "13L",
+    "99",
+    "101",
+    "F",
+    "G",
+]
 TOPICS = [t for t in _CANON_TOPICS if any(t in bm.SUBGROUP_DESIGN[sg]["topics"] for sg in bm.SUBGROUP_DESIGN)]
 SG_ORDER = ["TRS", "TRE", "ABT1-A", "ABT1-B", "ABT2-A", "ABT2-B", "PANEL", "ABT3-A", "ABT3-B", "2WT", "EXT", "NPS"]
-ROLL = {"TRS": "TRS", "TRE": "TRE", "ABT1-A": "ABT1", "ABT1-B": "ABT1", "ABT2-A": "ABT2", "ABT2-B": "ABT2",
-        "PANEL": "PANEL", "ABT3-A": "ABT3", "ABT3-B": "ABT3", "2WT": "2WT", "EXT": "EXT", "NPS": "NPS"}
+ROLL = {
+    "TRS": "TRS",
+    "TRE": "TRE",
+    "ABT1-A": "ABT1",
+    "ABT1-B": "ABT1",
+    "ABT2-A": "ABT2",
+    "ABT2-B": "ABT2",
+    "PANEL": "PANEL",
+    "ABT3-A": "ABT3",
+    "ABT3-B": "ABT3",
+    "2WT": "2WT",
+    "EXT": "EXT",
+    "NPS": "NPS",
+}
 
 # ---- cells: unique (flw,cohort,interview_n) ----
 cell = {}
@@ -30,8 +74,16 @@ for r in bm.rows:
     k = (r["connect_id"], r["cohort_id"], int(r["interview_n"]))
     c = cell.setdefault(
         k,
-        {"sg": r["subgroup"], "n": int(r["interview_n"]), "flw": r["connect_id"],
-         "t": False, "s": False, "c": False, "hw": 0, "hm": 0},
+        {
+            "sg": r["subgroup"],
+            "n": int(r["interview_n"]),
+            "flw": r["connect_id"],
+            "t": False,
+            "s": False,
+            "c": False,
+            "hw": 0,
+            "hm": 0,
+        },
     )
     c["t"] = True
     if r["is_started"] == "Y":
@@ -78,6 +130,7 @@ for c in cells:
 # from the LAST interview's STARTED numerator (eligible base unchanged). Gated by the median
 # penult→last TRIGGER gap (<1 day) so it auto-applies to PANEL/ABT3 only if they're back-to-back.
 
+
 def _median(xs):
     xs = sorted(xs)
     n = len(xs)
@@ -87,10 +140,10 @@ def _median(xs):
 
 
 DEIMPACT_GAP_DAYS = 1.0
-deimpact = {}   # sg -> {"last_n": int, "count": int}
+deimpact = {}  # sg -> {"last_n": int, "count": int}
 for sg in SG_PRESENT:
     topics = bm.SUBGROUP_DESIGN[sg]["topics"]
-    if len(topics) < 3:   # 2-interview subgroups: normal-cadence non-sequential takers, not artifacts
+    if len(topics) < 3:  # 2-interview subgroups: normal-cadence non-sequential takers, not artifacts
         continue
     last_n, pen_n = len(topics), len(topics) - 1
     last_top, pen_top = topics[-1], topics[-2]
@@ -99,7 +152,7 @@ for sg in SG_PRESENT:
     if not did_last_only:
         continue
     gaps = []
-    for flw in (started_last | started_pen):
+    for flw in started_last | started_pen:
         pt = bm.triggers_by_flw_iv.get((flw, pen_top))
         lt = bm.triggers_by_flw_iv.get((flw, last_top))
         if pt and lt:
@@ -108,9 +161,14 @@ for sg in SG_PRESENT:
     if med is not None and med < DEIMPACT_GAP_DAYS:
         # count_c = how many of them COMPLETED it. Removing people from Started without removing
         # their completions is what made Completed exceed Started in seven rows.
-        deimpact[sg] = {"last_n": last_n, "count": len(did_last_only),
-                        "count_c": len(did_last_only & fset[(sg, last_n)]["c"])}
-print(f"[8] de-impact (penult/last artifact): {sum(d['count'] for d in deimpact.values())} FLWs across {sorted(deimpact)}")
+        deimpact[sg] = {
+            "last_n": last_n,
+            "count": len(did_last_only),
+            "count_c": len(did_last_only & fset[(sg, last_n)]["c"]),
+        }
+print(
+    f"[8] de-impact (penult/last artifact): {sum(d['count'] for d in deimpact.values())} FLWs across {sorted(deimpact)}"
+)
 
 # ---- per-(subgroup, interview) release status (items A1/A2): not-available / in-progress / settled ----
 # Uses per-cohort training dates + the CCHQ schedule offsets so "not yet offered" interviews (e.g. the
@@ -149,9 +207,11 @@ def _release_status(sg, n):
 funnel = []
 line = {}
 line_di = {}
-line_prev = {}   # per-subgroup: %Started with denominator = FLWs who STARTED the PREVIOUS interview (item: retention-prev)
+line_prev = (
+    {}
+)  # per-subgroup: %Started with denominator = FLWs who STARTED the PREVIOUS interview (item: retention-prev)
 line_status = {}
-line_days = {}   # per-subgroup: median days from the FLW's interview-1 trigger to interview-N trigger
+line_days = {}  # per-subgroup: median days from the FLW's interview-1 trigger to interview-N trigger
 for sg in SG_PRESENT:
     elig = len(elig_sg[sg]) or 1
     di = deimpact.get(sg)
@@ -177,7 +237,7 @@ for sg in SG_PRESENT:
         if n > 1:
             prev_set = fset[(sg, n - 1)]["s"]
             prev_started = len(prev_set)
-            prev_num = len(f["s"] & prev_set)   # started n AND started n-1
+            prev_num = len(f["s"] & prev_set)  # started n AND started n-1
         else:
             prev_started, prev_num = elig, s
         pct_started_prev = tsl.r1(100 * prev_num / prev_started) if prev_started else None
@@ -203,8 +263,8 @@ for sg in SG_PRESENT:
                 "pct_completed_di": tsl.r1(100 * c_di / s_di) if s_di else None,
                 "pct_started_di": tsl.r1(100 * s_di / elig),
                 # %Started vs FLWs who started the previous interview (reached-prev denominator)
-                "prev_started": prev_started,          # denominator = |started(n-1)| (n=1 -> elig)
-                "prev_num": prev_num,                  # numerator = |started(n) ∩ started(n-1)| (n=1 -> started)
+                "prev_started": prev_started,  # denominator = |started(n-1)| (n=1 -> elig)
+                "prev_num": prev_num,  # numerator = |started(n) ∩ started(n-1)| (n=1 -> started)
                 "pct_started_prev": pct_started_prev,
                 # release status (not-available / in-progress / settled) for funnel display
                 "status": st,
@@ -265,8 +325,7 @@ for _c in set(_cohort_first_trig) | set(bm.cohort_info):
         _st = _cohort_first_trig[_c].date()
     if not _st or not _cad:
         continue
-    COHORT_END[_c] = tsl.cohort_end(bm.SUBGROUP_DESIGN[_sg]["topics"], _st, _cad,
-                                    tsl.GRACE_DAYS.get(_c))
+    COHORT_END[_c] = tsl.cohort_end(bm.SUBGROUP_DESIGN[_sg]["topics"], _st, _cad, tsl.GRACE_DAYS.get(_c))
 
 # A subgroup's funnel line stays dotted while ANY of its cohorts is still inside its schedule. A cohort
 # with no invitation and no trigger yet cannot be dated, so it counts as still rolling out, as before.
@@ -293,7 +352,6 @@ LINE_DOTTED_UNTIL = {
 for _sg, _until in LINE_DOTTED_UNTIL.items():
     if _sg in line_active:
         line_active[_sg] = TODAY <= _until
-
 
 
 # ---- Tables 1-3 ----
@@ -379,7 +437,7 @@ def status_for(flw, cohort, topic):
         topic,
         bm.SUBGROUP_DESIGN[sg]["topics"],
         mlook.get((flw, cohort, topic)),
-        bm.cohort_info.get(cohort, {}).get("start_date"),   # one shared source, see build_master
+        bm.cohort_info.get(cohort, {}).get("start_date"),  # one shared source, see build_master
         bm.SUBGROUP_DESIGN[sg]["cadence"],
         TODAY,
         tsl.GRACE_DAYS.get(cohort),
@@ -405,8 +463,14 @@ topic_status_out = [
     {"code": tc, "name": bm.TOPIC_NAMES[tc], **{s: topic_status[tc][s] for s in STATES}} for tc in APPLICABLE
 ]
 # per-cohort topic status (for the by-cohort drilldown); the applicable states (topic IS in the cohort)
-STATES5 = ["completed", "started-not-completed", "available-missed-overdue", "available-not-started",
-           "not-available-yet", "not-triggered"]
+STATES5 = [
+    "completed",
+    "started-not-completed",
+    "available-missed-overdue",
+    "available-not-started",
+    "not-available-yet",
+    "not-triggered",
+]
 topic_status_cohort_out = {}
 for tc in APPLICABLE:
     rows_c = []
@@ -440,18 +504,27 @@ def _iv_blocks(topics, init_set, fget, di_n=None, di_ct=0, di_cc=0):
         t, s, c = len(f["t"]), len(f["s"]), len(f["c"])
         s_di = s - di_ct if (di_n is not None and n == di_n and di_ct) else s
         c_di = c - di_cc if (di_n is not None and n == di_n and di_cc) else c
-        out.append({
-            "n": n, "topic": tc, "name": bm.TOPIC_NAMES[tc],
-            "eligible": len(init_set), "triggered": t, "pct_trig": tsl.r1(100 * t / base),
-            "started": s, "pct_started": tsl.r1(100 * s / base),
-            "completed": c, "pct_completed": tsl.r1(100 * c / s) if s else None,
-            "pct_completed_base": tsl.r1(100 * c / base),  # completed / initiated base (retention)
-            "started_di": s_di, "pct_started_di": tsl.r1(100 * s_di / base),  # de-impacted (item 8)
-            # Completed is de-impacted by the SAME people, so the row cannot report more completions
-            # than starts. Without this, seven rows did exactly that.
-            "completed_di": c_di,
-            "pct_completed_di": tsl.r1(100 * c_di / s_di) if s_di else None,
-        })
+        out.append(
+            {
+                "n": n,
+                "topic": tc,
+                "name": bm.TOPIC_NAMES[tc],
+                "eligible": len(init_set),
+                "triggered": t,
+                "pct_trig": tsl.r1(100 * t / base),
+                "started": s,
+                "pct_started": tsl.r1(100 * s / base),
+                "completed": c,
+                "pct_completed": tsl.r1(100 * c / s) if s else None,
+                "pct_completed_base": tsl.r1(100 * c / base),  # completed / initiated base (retention)
+                "started_di": s_di,
+                "pct_started_di": tsl.r1(100 * s_di / base),  # de-impacted (item 8)
+                # Completed is de-impacted by the SAME people, so the row cannot report more completions
+                # than starts. Without this, seven rows did exactly that.
+                "completed_di": c_di,
+                "pct_completed_di": tsl.r1(100 * c_di / s_di) if s_di else None,
+            }
+        )
     return out
 
 
@@ -461,18 +534,30 @@ for sg in SG_PRESENT:
     claimed = u["claimed"]
     init = elig_sg.get(sg, set())
     connect = {
-        "invited": len(u["invited"]), "accepted": len(u["accepted"]),
-        "learn_started": len(u["learn_started"]), "learn_completed": len(u["learn_completed"]),
-        "claimed": len(claimed), "flw_reg": len(claimed & bm.flw_registered), "initiated": len(init),
+        "invited": len(u["invited"]),
+        "accepted": len(u["accepted"]),
+        "learn_started": len(u["learn_started"]),
+        "learn_completed": len(u["learn_completed"]),
+        "claimed": len(claimed),
+        "flw_reg": len(claimed & bm.flw_registered),
+        "initiated": len(init),
     }
     cohorts_n = sum(1 for c in bm.cohort_info if bm.cohort_info[c]["subgroup"] == sg)
-    dropoff_sg.append({
-        "sg": sg, "cohorts_n": cohorts_n, "connect": connect,
-        "interviews": _iv_blocks(bm.SUBGROUP_DESIGN[sg]["topics"], init, lambda n, _sg=sg: fset[(_sg, n)],
-                                 di_n=deimpact.get(sg, {}).get("last_n"),
-                                 di_ct=deimpact.get(sg, {}).get("count", 0),
-                                 di_cc=deimpact.get(sg, {}).get("count_c", 0)),
-    })
+    dropoff_sg.append(
+        {
+            "sg": sg,
+            "cohorts_n": cohorts_n,
+            "connect": connect,
+            "interviews": _iv_blocks(
+                bm.SUBGROUP_DESIGN[sg]["topics"],
+                init,
+                lambda n, _sg=sg: fset[(_sg, n)],
+                di_n=deimpact.get(sg, {}).get("last_n"),
+                di_ct=deimpact.get(sg, {}).get("count", 0),
+                di_cc=deimpact.get(sg, {}).get("count_c", 0),
+            ),
+        }
+    )
 
 dropoff_cohorts = defaultdict(list)
 for cohort in sorted(bm.cohort_info):
@@ -490,27 +575,41 @@ for cohort in sorted(bm.cohort_info):
             claimed_set.add(u)
     init = coh_init.get(cohort, set())
     connect = {
-        "invited": inv, "accepted": acc, "learn_started": ls, "learn_completed": lc,
-        "claimed": len(claimed_set), "flw_reg": len(claimed_set & bm.flw_registered), "initiated": len(init),
+        "invited": inv,
+        "accepted": acc,
+        "learn_started": ls,
+        "learn_completed": lc,
+        "claimed": len(claimed_set),
+        "flw_reg": len(claimed_set & bm.flw_registered),
+        "initiated": len(init),
     }
-    dropoff_cohorts[sg].append({
-        "cohort": cohort, "connect": connect,
-        "interviews": _iv_blocks(bm.SUBGROUP_DESIGN[sg]["topics"], init,
-                                 lambda n, _c=cohort: coh_fset.get((_c, n), {"t": set(), "s": set(), "c": set()})),
-    })
+    dropoff_cohorts[sg].append(
+        {
+            "cohort": cohort,
+            "connect": connect,
+            "interviews": _iv_blocks(
+                bm.SUBGROUP_DESIGN[sg]["topics"],
+                init,
+                lambda n, _c=cohort: coh_fset.get((_c, n), {"t": set(), "s": set(), "c": set()}),
+            ),
+        }
+    )
 
 dropoff = {"subgroups": dropoff_sg, "cohorts": dict(dropoff_cohorts)}
 
 # Subgroups whose Connect funnel (Invited/Accepted/Learn/Claimed) is PENDING: they have interview
 # data but their cohorts are missing from the Connect snapshot (a stale/failed Connect pull). The
 # render flags these so Invited=0 reads as "not pulled yet", not "nobody invited".
-connect_pending_sgs = sorted({
-    bm.cohort_info[c]["subgroup"]
-    for c in getattr(bm, "CONNECT_PENDING_COHORTS", set())
-    if c in bm.cohort_info and bm.cohort_info[c]["subgroup"] in SG_PRESENT
-})
+connect_pending_sgs = sorted(
+    {
+        bm.cohort_info[c]["subgroup"]
+        for c in getattr(bm, "CONNECT_PENDING_COHORTS", set())
+        if c in bm.cohort_info and bm.cohort_info[c]["subgroup"] in SG_PRESENT
+    }
+)
 if connect_pending_sgs:
     print(f"[eng] connect-funnel PENDING subgroups: {connect_pending_sgs}")
+
 
 # ---- Cohort Engagement (3-panel: recruitment / engagement-quality / current-status) ----
 # Neal's spec: separate what the single retention curve conflates — (1) how many FLWs have STARTED
@@ -561,9 +660,9 @@ def _slot_deadline(n, start, cad, cohort, trig_iso):
 
 
 _sid2date = {e["sid"]: e["first"].date() for _lst in bm.ocs_by_key.values() for e in _lst}
-_eng_flw_dates = defaultdict(lambda: defaultdict(set))     # sg -> flw -> {started session dates}
+_eng_flw_dates = defaultdict(lambda: defaultdict(set))  # sg -> flw -> {started session dates}
 _eng_comp_topic_dt = defaultdict(lambda: defaultdict(dict))  # sg -> flw -> {topic: earliest completed date}
-_eng_flw_llo = {}                                          # flw -> LLO (COWACDI / EHA), for the by-LLO split
+_eng_flw_llo = {}  # flw -> LLO (COWACDI / EHA), for the by-LLO split
 # sg -> flw -> [(deadline_date, completed_date_or_None)] for the interviews ACTUALLY PUT TO THAT FLW.
 # This is what replaced the flat 14-day silence rule: an FLW counts as dropped when one of their own
 # scheduled interviews went past its deadline unfinished. Only triggered slots appear here, so an FLW
@@ -572,7 +671,7 @@ _eng_flw_llo = {}                                          # flw -> LLO (COWACDI
 _eng_deadlines = defaultdict(lambda: defaultdict(list))
 # sg -> flw -> {(cohort, interview_n): (deadline, done, n)} - the collapsed form, flattened below
 _eng_dl_by_key = defaultdict(lambda: defaultdict(dict))
-_eng_flw_cad = {}                                          # flw -> a gap, first-wins; ALL view only
+_eng_flw_cad = {}  # flw -> a gap, first-wins; ALL view only
 # Per-SUBGROUP cadence. The global map above is first-wins, so TRS (earliest, 1,298 FLWs) claimed most
 # shared workers and PANEL's Active/Slow/Quiet bands were computed on a 7-day gap instead of its real 4
 # for 99% of its FLWs. A subgroup's own series must use its own cadence.
@@ -589,8 +688,8 @@ for r in bm.rows:
     # engagement chart cannot judge a cohort against a different calendar than the other two views.
     _rtrain = bm.cohort_info.get(r["cohort_id"], {}).get("start_date")
     if _rcad:
-        _eng_flw_cad.setdefault(_rflw, _rcad)          # first-wins, used ONLY by the pooled ALL view
-        _eng_sg_cad[_rsg][_rflw] = _rcad               # per-subgroup: always that subgroup's own cadence
+        _eng_flw_cad.setdefault(_rflw, _rcad)  # first-wins, used ONLY by the pooled ALL view
+        _eng_sg_cad[_rsg][_rflw] = _rcad  # per-subgroup: always that subgroup's own cadence
         if _rtrain and r.get("interview_n"):
             # Keyed by (cohort, interview) and collapsed, NOT appended. A duplicate bot trigger
             # produces two rows for one interview; appending both left a worker carrying an unfinished
@@ -602,11 +701,12 @@ for r in bm.rows:
             _eprev = _eng_dl_by_key[_rsg][_rflw].get(_ek)
             if _eprev is None or (_edone is not None and (_eprev[1] is None or _edone < _eprev[1])):
                 _eng_dl_by_key[_rsg][_rflw][_ek] = (
-                    _slot_deadline(int(r["interview_n"]), _rtrain, _rcad, r["cohort_id"],
-                                   r.get("trigger_received_on")),
+                    _slot_deadline(
+                        int(r["interview_n"]), _rtrain, _rcad, r["cohort_id"], r.get("trigger_received_on")
+                    ),
                     _edone,
-                    int(r["interview_n"]),   # reading C needs the slot number: a gap BEFORE their last
-                )                            # completed interview is a skip, a gap after it is a stop
+                    int(r["interview_n"]),  # reading C needs the slot number: a gap BEFORE their last
+                )  # completed interview is a skip, a gap after it is a stop
     if r.get("is_started") == "Y" and _d:
         _eng_flw_dates[r["subgroup"]][r["connect_id"]].add(_d)
     if r.get("is_completed") == "Y" and _d:
@@ -642,7 +742,7 @@ for _fsg, _fm in _eng_dl_by_key.items():
         _eng_deadlines[_fsg][_fflw] = list(_fslots.values())
 
 _eng_end = {}
-for _c, _ee in COHORT_END.items():          # the same map the funnel line and the drop-off view use
+for _c, _ee in COHORT_END.items():  # the same map the funnel line and the drop-off view use
     _esg = bm.cohort_to_sg(_c)
     if _esg not in SG_PRESENT:
         continue
@@ -657,8 +757,7 @@ def _eng_maxgap(ds):
     return max((b - a).days for a, b in zip(ds, ds[1:])) if len(ds) > 1 else 0
 
 
-def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date, deadlines=None, cad_of=None,
-                 gap_of=None):
+def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date, deadlines=None, cad_of=None, gap_of=None):
     """Per-week series for one subgroup (or None if no sessions).
 
     Adds a FINISHED bucket (completed all scheduled interviews) that outranks the silence buckets, so a
@@ -692,10 +791,11 @@ def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date, deadlines=None
     if not all_dates:
         return None
     first, last = min(all_dates), max(all_dates)
-    Ws, w = [], first + timedelta(days=6)   # week-ending dates every 7 days from first session
+    Ws, w = [], first + timedelta(days=6)  # week-ending dates every 7 days from first session
     while w < last:
-        Ws.append(w); w += timedelta(days=7)
-    Ws.append(last)                          # final point = data's last date (freezes ended cohorts)
+        Ws.append(w)
+        w += timedelta(days=7)
+    Ws.append(last)  # final point = data's last date (freezes ended cohorts)
     weeks, started_s = [], []
     steady_p, incons_p, drop_p, fin_p, wait_p, inprog_p = [], [], [], [], [], []
     new_s, active_s, slow_s, quiet_s, finst_s, wait_s, rbase_s = [], [], [], [], [], [], []
@@ -725,64 +825,109 @@ def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date, deadlines=None
             # who counts as dropped moves; the four buckets still close to 100 in every reading.
             _progC = tsl.progress_at_reading(_dls, W, _fdate, "C")
             _progA = tsl.progress_at_reading(_dls, W, _fdate, "A", silence_days=(sil > 14))
-            if is_finished:           fin += 1       # FINISHED outranks the other outcomes
-            elif _prog == "dropped":  drop += 1      # let a sent interview go past its deadline
-            elif _prog == "waiting":  wait += 1      # did everything sent; schedule sent no more
-            else:                     inprog += 1    # still has a live interview in hand
+            if is_finished:
+                fin += 1  # FINISHED outranks the other outcomes
+            elif _prog == "dropped":
+                drop += 1  # let a sent interview go past its deadline
+            elif _prog == "waiting":
+                wait += 1  # did everything sent; schedule sent no more
+            else:
+                inprog += 1  # still has a live interview in hand
             if not is_finished:
-                if _progC == "dropped":   dropC += 1
-                elif _progC == "waiting": waitC += 1
-                if _progA == "dropped":   dropA += 1
-                elif _progA == "waiting": waitA += 1
+                if _progC == "dropped":
+                    dropC += 1
+                elif _progC == "waiting":
+                    waitC += 1
+                if _progA == "dropped":
+                    dropA += 1
+                elif _progA == "waiting":
+                    waitA += 1
             # ---- RHYTHM: how they worked. Independent of the outcome, so a finisher counts too.
             # Needs at least two interviews - one interview has no gap to judge.
             if len(dsW) >= 2:
                 rbase += 1
-                if mg > _gt:        incons += 1
-                else:               steady += 1
-            if not is_finished:                      # FINISHED outranks new/active/slow/quiet too
+                if mg > _gt:
+                    incons += 1
+                else:
+                    steady += 1
+            if not is_finished:  # FINISHED outranks new/active/slow/quiet too
                 is_new = (fd > prevW) if prevW is not None else (fd >= Ws[0] - timedelta(days=6))
                 # Bands are one gap / two gaps rather than a flat 7 and 14, so "active" means the same
                 # thing (on pace) in a 3-day cohort and a 14-day one.
-                if is_new:              new += 1     # then: new -> active -> slow -> quiet
-                elif sil <= _cad:       active += 1
-                elif sil <= 2 * _cad:   slow += 1
-                else:                   quiet += 1
-        weeks.append(W.isoformat()); started_s.append(started)
+                if is_new:
+                    new += 1  # then: new -> active -> slow -> quiet
+                elif sil <= _cad:
+                    active += 1
+                elif sil <= 2 * _cad:
+                    slow += 1
+                else:
+                    quiet += 1
+        weeks.append(W.isoformat())
+        started_s.append(started)
         # outcome shares are of everyone who started; rhythm shares are of those with 2+ interviews
         # the four OUTCOME shares must close to 100 - the legend says so
         _f4, _d4, _w4, _p4 = _pcts_to_100([fin, drop, wait, inprog], started)
-        fin_p.append(_f4); drop_p.append(_d4); wait_p.append(_w4); inprog_p.append(_p4)
+        fin_p.append(_f4)
+        drop_p.append(_d4)
+        wait_p.append(_w4)
+        inprog_p.append(_p4)
         _s2, _i2 = _pcts_to_100([steady, incons], rbase)
-        steady_p.append(_s2); incons_p.append(_i2)
-        new_s.append(new); active_s.append(active); slow_s.append(slow); quiet_s.append(quiet)
-        finst_s.append(fin); wait_s.append(wait); rbase_s.append(rbase)
-        steady_s.append(steady); incons_s.append(incons)
-        drop_s.append(drop); inprog_s.append(inprog)
-        dropC_s.append(dropC); waitC_s.append(waitC)
-        dropA_s.append(dropA); waitA_s.append(waitA)
+        steady_p.append(_s2)
+        incons_p.append(_i2)
+        new_s.append(new)
+        active_s.append(active)
+        slow_s.append(slow)
+        quiet_s.append(quiet)
+        finst_s.append(fin)
+        wait_s.append(wait)
+        rbase_s.append(rbase)
+        steady_s.append(steady)
+        incons_s.append(incons)
+        drop_s.append(drop)
+        inprog_s.append(inprog)
+        dropC_s.append(dropC)
+        waitC_s.append(waitC)
+        dropA_s.append(dropA)
+        waitA_s.append(waitA)
         prevW = W
     ended = end_date is not None and TODAY > end_date
-    return {"weeks": weeks, "started": started_s,
-            # OUTCOME percentages are NOT shipped. They are exactly finished/dropped/waiting/inprog
-            # over `started`, and shipping both meant two sources of truth for one number and ~8 KB of
-            # a 512 KB render spent restating counts we already send. The page derives all four with
-            # the same largest-remainder rounding, for whichever reading is selected - which is also
-            # the only way the other two readings could be offered without shipping eight more arrays.
-            # rhythm: sums to 100 across starters with 2+ interviews (rhythm_base)
-            "steady_pct": steady_p, "incons_pct": incons_p, "rhythm_base": rbase_s,
-            "steady": steady_s, "incons": incons_s, "dropped": drop_s, "inprog": inprog_s,
-            "finished": finst_s, "new": new_s, "active": active_s, "slow": slow_s, "quiet": quiet_s,
-            "waiting": wait_s,
-            # the other two readings, as COUNTS - the render divides by `started` and takes
-            # in-progress as the residual, so nothing has to be kept in sync in two places
-            "dropC": dropC_s, "waitC": waitC_s, "dropA": dropA_s, "waitA": waitA_s,
-            "gap_thresh": gap_thresh, "total_started": started_s[-1],
-            "ended": ended, "end_date": end_date.isoformat() if end_date else None}
+    return {
+        "weeks": weeks,
+        "started": started_s,
+        # OUTCOME percentages are NOT shipped. They are exactly finished/dropped/waiting/inprog
+        # over `started`, and shipping both meant two sources of truth for one number and ~8 KB of
+        # a 512 KB render spent restating counts we already send. The page derives all four with
+        # the same largest-remainder rounding, for whichever reading is selected - which is also
+        # the only way the other two readings could be offered without shipping eight more arrays.
+        # rhythm: sums to 100 across starters with 2+ interviews (rhythm_base)
+        "steady_pct": steady_p,
+        "incons_pct": incons_p,
+        "rhythm_base": rbase_s,
+        "steady": steady_s,
+        "incons": incons_s,
+        "dropped": drop_s,
+        "inprog": inprog_s,
+        "finished": finst_s,
+        "new": new_s,
+        "active": active_s,
+        "slow": slow_s,
+        "quiet": quiet_s,
+        "waiting": wait_s,
+        # the other two readings, as COUNTS - the render divides by `started` and takes
+        # in-progress as the residual, so nothing has to be kept in sync in two places
+        "dropC": dropC_s,
+        "waitC": waitC_s,
+        "dropA": dropA_s,
+        "waitA": waitA_s,
+        "gap_thresh": gap_thresh,
+        "total_started": started_s[-1],
+        "ended": ended,
+        "end_date": end_date.isoformat() if end_date else None,
+    }
 
 
 cohort_engagement = {}
-cohort_engagement_llo = {}   # {sg: {"COWACDI": {...}, "EHA": {...}}} — same series, split by partner
+cohort_engagement_llo = {}  # {sg: {"COWACDI": {...}, "EHA": {...}}} — same series, split by partner
 for _sg in SG_PRESENT:
     _dlen = len(bm.SUBGROUP_DESIGN[_sg]["topics"])
     _gt, _end = 2 * bm.SUBGROUP_DESIGN[_sg]["cadence"], _eng_end.get(_sg)
@@ -817,8 +962,7 @@ for _sg_d in SG_PRESENT:
         if _flw not in _eng_all_finished or _dt < _eng_all_finished[_flw]:
             _eng_all_finished[_flw] = _dt
 _eng_flw_gap = {_f: 2 * _c for _f, _c in _eng_flw_cad.items()}
-_ce_all = _eng_compute(_eng_all_dates, _eng_all_finished, 8, None, _eng_all_deadlines,
-                       _eng_flw_cad, _eng_flw_gap)
+_ce_all = _eng_compute(_eng_all_dates, _eng_all_finished, 8, None, _eng_all_deadlines, _eng_flw_cad, _eng_flw_gap)
 
 
 def _pool_rhythm(target, parts):
@@ -852,7 +996,8 @@ def _pool_rhythm(target, parts):
     _sp, _ip = [], []
     for a, b, base in zip(st, ic, rb):
         _x, _y = _pcts_to_100([a, b], base)
-        _sp.append(_x); _ip.append(_y)
+        _sp.append(_x)
+        _ip.append(_y)
     target["steady_pct"], target["incons_pct"] = _sp, _ip
     # A pooled base counts FLW-per-cohort enrolments, not unique FLWs, so it can legitimately exceed
     # this series' started count (an FLW in two cohorts has two rhythms). Flagged so the gates and the
@@ -917,13 +1062,16 @@ if _ce_all:
         _fdl, _fnl = _eng_filter_llo(_eng_all_dates, _eng_all_finished, _llo)
         _cl = _eng_compute(_fdl, _fnl, 8, None, _eng_all_deadlines, _eng_flw_cad, _eng_flw_gap)
         if _cl:
-            _llo_parts = [cohort_engagement_llo[_s][_llo] for _s in SG_PRESENT
-                          if _llo in cohort_engagement_llo.get(_s, {})]
+            _llo_parts = [
+                cohort_engagement_llo[_s][_llo] for _s in SG_PRESENT if _llo in cohort_engagement_llo.get(_s, {})
+            ]
             _all_llo[_llo] = _pool_outcome(_pool_rhythm(_cl, _llo_parts), _llo_parts)
     if _all_llo:
         cohort_engagement_llo["ALL"] = _all_llo
-print(f"[eng] cohort_engagement: "
-      f"{[(sg, cohort_engagement[sg]['total_started'], cohort_engagement[sg]['finished'][-1]) for sg in cohort_engagement]}")
+print(
+    f"[eng] cohort_engagement: "
+    f"{[(sg, cohort_engagement[sg]['total_started'], cohort_engagement[sg]['finished'][-1]) for sg in cohort_engagement]}"
+)
 print(f"[eng] by-LLO splits for: {sorted(cohort_engagement_llo)}")
 
 # ---- per-COHORT drop-off, each scored at its OWN end date (Ali's task 2) --------------------------
@@ -950,16 +1098,18 @@ for r in bm.rows:
         _prev = _coh_slot.get(_k)
         # Completed beats not-completed; between two completed rows keep the earlier date.
         if _prev is None or (_done is not None and (_prev[1] is None or _done < _prev[1])):
-            _coh_slot[_k] = (_slot_deadline(int(r["interview_n"]), _tr, _cad, _c,
-                                            r.get("trigger_received_on")), _done,
-                             int(r["interview_n"]))
+            _coh_slot[_k] = (
+                _slot_deadline(int(r["interview_n"]), _tr, _cad, _c, r.get("trigger_received_on")),
+                _done,
+                int(r["interview_n"]),
+            )
     if r.get("is_completed") == "Y" and _d:
         _coh_done[_c][_f][r["topic_code"]] = _d
     if r.get("is_started") == "Y" and _d:
-        _coh_dates[_c][_f].add(_d)   # for option A, which is a pure silence rule
+        _coh_dates[_c][_f].add(_d)  # for option A, which is a pure silence rule
 
 _coh_dl = defaultdict(lambda: defaultdict(list))
-_coh_seq = defaultdict(lambda: defaultdict(list))   # cohort -> flw -> [(interview_n, completed?)]
+_coh_seq = defaultdict(lambda: defaultdict(list))  # cohort -> flw -> [(interview_n, completed?)]
 for (_c, _f, _n), _v in _coh_slot.items():
     _coh_dl[_c][_f].append(_v)
     _coh_seq[_c][_f].append((_n, _v[1] is not None))
@@ -991,11 +1141,11 @@ for _c, _inf in sorted(bm.cohort_info.items()):
     _inf_c = bm.cohort_info.get(_c, {})
     _tr, _tr_src = _inf_c.get("start_date"), _inf_c.get("start_src")
     if not _tr or not _cad:
-        continue                                     # no start date at all: cannot say when it ended
-    _end = COHORT_END.get(_c)                        # the one shared map, not a second computation
+        continue  # no start date at all: cannot say when it ended
+    _end = COHORT_END.get(_c)  # the one shared map, not a second computation
     if _end is None:
         continue
-    _asof = min(_end, TODAY)                         # a cohort still running is scored as it stands
+    _asof = min(_end, TODAY)  # a cohort still running is scored as it stands
     _closed = _end <= TODAY
     # The date the three readings are evaluated at. NOT today: a slot sent after the cohort closed can
     # have a deadline in the future, so scoring at today would make an ended cohort accumulate
@@ -1024,7 +1174,7 @@ for _c, _inf in sorted(bm.cohort_info.items()):
         _fdate = sorted(_dts.values())[len(_tops) - 1] if len(_dts) >= len(_tops) else None
         _dl = _coh_dl.get(_c, {}).get(_f, ())
         if not _dl:
-            _tally["never-began"] += 1   # claimed, but the bot never sent them anything
+            _tally["never-began"] += 1  # claimed, but the bot never sent them anything
             continue
 
         # ---- the three readings, from the ONE shared definition. This used to be an inline copy that
@@ -1044,7 +1194,7 @@ for _c, _inf in sorted(bm.cohort_info.items()):
                     else:
                         _tally["C_open"] += 1
                 else:
-                    _tally["skipped"] += 1                     # skipped one, came back
+                    _tally["skipped"] += 1  # skipped one, came back
         # A: the pre-21-Aug rule - not finished, and silent for more than 14 days as of the cohort's
         # own last observed session (the old weekly grid froze there rather than running to today).
         _ds = _coh_dates.get(_c, {}).get(_f)
@@ -1093,32 +1243,47 @@ for _c, _inf in sorted(bm.cohort_info.items()):
     # is divided by this: someone who was never sent an interview cannot have stopped, so leaving them
     # in the denominator only deflates the rate against a population that can never be in the numerator.
     _all_due = all(_t[0] <= TODAY for _fl in _coh_dl.get(_c, {}).values() for _t in _fl)
-    _row = {"c": _c, "s": _tr.isoformat(), "e": _end.isoformat(), "n": _n,
-            "nb": _n - _tally["never-began"],
-            # every deadline in this cohort has already passed -> nothing here can change again
-            "settled": bool(_all_due),
-            "f": _tally["finished"], "l": _tally["completed-late"], "d": _tally["dropped"],
-            "dA": _tally["A"], "dB": _tally["B"], "dC": _tally["C"], "sk": _tally["skipped"],
-            "w": _tally["waiting"], "z": _tally["never-began"],
-            # p = still in progress. Shipped explicitly so f+l+d+w+z+p == n for EVERY cohort; leaving
-            # it as an implied residual meant three cohorts had 7 workers in no bucket at all.
-            "p": _tally["in-progress"],
-            "ts": _sent, "tc": _cdone}
+    _row = {
+        "c": _c,
+        "s": _tr.isoformat(),
+        "e": _end.isoformat(),
+        "n": _n,
+        "nb": _n - _tally["never-began"],
+        # every deadline in this cohort has already passed -> nothing here can change again
+        "settled": bool(_all_due),
+        "f": _tally["finished"],
+        "l": _tally["completed-late"],
+        "d": _tally["dropped"],
+        "dA": _tally["A"],
+        "dB": _tally["B"],
+        "dC": _tally["C"],
+        "sk": _tally["skipped"],
+        "w": _tally["waiting"],
+        "z": _tally["never-began"],
+        # p = still in progress. Shipped explicitly so f+l+d+w+z+p == n for EVERY cohort; leaving
+        # it as an implied residual meant three cohorts had 7 workers in no bucket at all.
+        "p": _tally["in-progress"],
+        "ts": _sent,
+        "tc": _cdone,
+    }
     if tsl.GRACE_DAYS.get(_c, _cad) != _cad:
         _row["g"] = GRACE_DAYS[_c]
     if _tr_src != "invitation":
         _row["x"] = 1
     cohort_dropoff.append(_row)
 _cd_tot = sum(c["n"] for c in cohort_dropoff)
-_cd_f, _cd_l, _cd_d, _cd_w, _cd_z = (sum(c[k] for c in cohort_dropoff)
-                                     for k in ("f", "l", "d", "w", "z"))
+_cd_f, _cd_l, _cd_d, _cd_w, _cd_z = (sum(c[k] for c in cohort_dropoff) for k in ("f", "l", "d", "w", "z"))
 _cd_A, _cd_B, _cd_C, _cd_sk = (sum(c[k] for c in cohort_dropoff) for k in ("dA", "dB", "dC", "sk"))
-print(f"[eng] dropped, three readings: A(silent 14d)={_cd_A}  B(missed any)={_cd_B}  "
-      f"C(stopped, never returned)={_cd_C}  skipped-but-returned={_cd_sk}")
-print(f"[eng] cohort_dropoff: {len(cohort_dropoff)} cohorts, {_cd_tot} FLW-cohort pairs, "
-      f"on-time={_cd_f} late={_cd_l} dropped={_cd_d} schedule-not-completed={_cd_w} "
-      f"never-began={_cd_z} in_progress={_cd_tot - _cd_f - _cd_l - _cd_d - _cd_w - _cd_z} "
-      f"(fallback start dates: {sum(1 for c in cohort_dropoff if c.get('x'))})")
+print(
+    f"[eng] dropped, three readings: A(silent 14d)={_cd_A}  B(missed any)={_cd_B}  "
+    f"C(stopped, never returned)={_cd_C}  skipped-but-returned={_cd_sk}"
+)
+print(
+    f"[eng] cohort_dropoff: {len(cohort_dropoff)} cohorts, {_cd_tot} FLW-cohort pairs, "
+    f"on-time={_cd_f} late={_cd_l} dropped={_cd_d} schedule-not-completed={_cd_w} "
+    f"never-began={_cd_z} in_progress={_cd_tot - _cd_f - _cd_l - _cd_d - _cd_w - _cd_z} "
+    f"(fallback start dates: {sum(1 for c in cohort_dropoff if c.get('x'))})"
+)
 
 # ---- OCS review status of every COMPLETED interview ------------------------------------------
 # The recurring "OCS shows 8,6xx, Labs shows 9,4xx" question has one cause: the OCS screen filters to
@@ -1162,9 +1327,11 @@ review_status = {
     "by_topic": {tc: {k: v[k] for k in _REVIEW_KEYS} for tc, v in sorted(_rev_topic.items())},
 }
 _rev_tot = sum(_rev_overall[k] for k in _REVIEW_KEYS)
-print(f"[rev] OCS review status over {_rev_tot} completed interviews "
-      f"(unique FLW x cohort x interview, deduped from {sum(1 for r in bm.rows if r.get('is_completed') == 'Y')} rows): "
-      + "  ".join(f"{k}={_rev_overall[k]}" for k in _REVIEW_KEYS))
+print(
+    f"[rev] OCS review status over {_rev_tot} completed interviews "
+    f"(unique FLW x cohort x interview, deduped from {sum(1 for r in bm.rows if r.get('is_completed') == 'Y')} rows): "
+    + "  ".join(f"{k}={_rev_overall[k]}" for k in _REVIEW_KEYS)
+)
 
 payload = {
     "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),  # stamped at build; render shows this
@@ -1183,12 +1350,12 @@ payload = {
     },
     "funnel": funnel,
     "line_pct_started": line,
-    "line_days": line_days,           # median days from when FLW DID interview-1 to interview-N (session start)
-    "line_pct_started_di": line_di,   # de-impacted %started series (item 8)
+    "line_days": line_days,  # median days from when FLW DID interview-1 to interview-N (session start)
+    "line_pct_started_di": line_di,  # de-impacted %started series (item 8)
     "line_pct_started_prev": line_prev,  # %started vs FLWs who started the PREVIOUS interview (reached-prev denom)
-    "line_status": line_status,       # per-point release status (not-available/in-progress/settled)
-    "line_active": line_active,       # per-subgroup: still actively triggering -> dotted funnel line
-    "deimpact": deimpact,             # {sg: {last_n, count}} penult/last artifact summary
+    "line_status": line_status,  # per-point release status (not-available/in-progress/settled)
+    "line_active": line_active,  # per-subgroup: still actively triggering -> dotted funnel line
+    "deimpact": deimpact,  # {sg: {last_n, count}} penult/last artifact summary
     "cohort_dropoff": cohort_dropoff,  # per-cohort outcome scored at that cohort's OWN end date
     "table1": t1,
     "table2": t2,

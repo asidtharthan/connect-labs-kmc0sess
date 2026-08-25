@@ -2,6 +2,7 @@
 master (build_master_4src) and vs the audit_e2e-validated payload_agg.json. All PASS required.
 Run after build_dashboard_data.py.  UTF-8: run with PYTHONUTF8=1.
 """
+
 import json
 import topic_status_lib as tsl
 import sys
@@ -41,8 +42,20 @@ chk("table2 identical", dd["table2"] == pay["table2"])
 chk("table3 identical", dd["table3"] == pay["table3"])
 
 # avg_words: independent recompute = Σ session_human_words / Σ session_human_msgs over STARTED rows
-_ROLL = {"TRS": "TRS", "TRE": "TRE", "ABT1-A": "ABT1", "ABT1-B": "ABT1", "ABT2-A": "ABT2", "ABT2-B": "ABT2",
-         "PANEL": "PANEL", "ABT3-A": "ABT3", "ABT3-B": "ABT3", "2WT": "2WT", "EXT": "EXT", "NPS": "NPS"}
+_ROLL = {
+    "TRS": "TRS",
+    "TRE": "TRE",
+    "ABT1-A": "ABT1",
+    "ABT1-B": "ABT1",
+    "ABT2-A": "ABT2",
+    "ABT2-B": "ABT2",
+    "PANEL": "PANEL",
+    "ABT3-A": "ABT3",
+    "ABT3-B": "ABT3",
+    "2WT": "2WT",
+    "EXT": "EXT",
+    "NPS": "NPS",
+}
 
 
 def _avg(pred):
@@ -62,7 +75,11 @@ for r in dd["table1"]:
         aw_bad += 1
         print(f"   t1 {r['key']}: dd={r.get('avg_words')} exp={exp}")
 for r in dd["table3"]:
-    exp = _avg(lambda x: x["subgroup"] in _abt) if r["key"] == "Overall" else _avg(lambda x, k=r["key"]: x["subgroup"] == k)
+    exp = (
+        _avg(lambda x: x["subgroup"] in _abt)
+        if r["key"] == "Overall"
+        else _avg(lambda x, k=r["key"]: x["subgroup"] == k)
+    )
     if r.get("avg_words") != exp:
         aw_bad += 1
         print(f"   t3 {r['key']}: dd={r.get('avg_words')} exp={exp}")
@@ -76,8 +93,15 @@ chk("avg_words == independent recompute (Σwords/Σmsgs over started rows)", aw_
 ts_ok = True
 ts_bad = 0
 pay_ts = {t["code"]: t for t in pay["topic_status"]}
-_ORDER6 = ["not-applicable", "not-available-yet", "available-not-started", "available-missed-overdue",
-           "started-not-completed", "completed", "not-triggered"]
+_ORDER6 = [
+    "not-applicable",
+    "not-available-yet",
+    "available-not-started",
+    "available-missed-overdue",
+    "started-not-completed",
+    "completed",
+    "not-triggered",
+]
 claimed_pairs = dd["counts"]["claimed_pairs"] if "claimed_pairs" in dd["counts"] else pay["counts"]["claimed_pairs"]
 for t in dd["topicStatus"]:
     p = pay_ts[t["code"]]
@@ -182,8 +206,13 @@ xbad = 0
 for sg in SG_ORDER:
     for iv in dsg[sg]["interviews"]:
         f = fmap.get((sg, iv["n"]))
-        if not f or iv["triggered"] != f["trig"] or iv["started"] != f["started"] \
-                or iv["completed"] != f["completed"] or iv["eligible"] != f["elig"]:
+        if (
+            not f
+            or iv["triggered"] != f["trig"]
+            or iv["started"] != f["started"]
+            or iv["completed"] != f["completed"]
+            or iv["eligible"] != f["elig"]
+        ):
             xbad += 1
 chk("dropoff subgroup interviews == validated funnel (trig/started/completed/elig)", xbad == 0, f"{xbad} mismatches")
 cbad = 0
@@ -203,13 +232,19 @@ mbad = ibad = 0
 for name, g in groups:
     c = g["connect"]
     # logically-guaranteed monotonic subset: accepted<=invited, learn_completed<=learn_started, flw_reg<=claimed
-    if not (c["invited"] >= c["accepted"] and c["learn_started"] >= c["learn_completed"] and c["claimed"] >= c["flw_reg"]):
+    if not (
+        c["invited"] >= c["accepted"] and c["learn_started"] >= c["learn_completed"] and c["claimed"] >= c["flw_reg"]
+    ):
         mbad += 1
         print(f"    connect monotonic violation: {name} {c}")
     for iv in g["interviews"]:
         if not (iv["completed"] <= iv["started"] <= iv["triggered"]):
             ibad += 1
-chk("connect funnel monotonic (accepted<=invited, learnC<=learnS, flwReg<=claimed) all groups", mbad == 0, f"{mbad} bad / {len(groups)}")
+chk(
+    "connect funnel monotonic (accepted<=invited, learnC<=learnS, flwReg<=claimed) all groups",
+    mbad == 0,
+    f"{mbad} bad / {len(groups)}",
+)
 chk("each interview completed<=started<=triggered (all subgroups+cohorts)", ibad == 0, f"{ibad} bad")
 chk("per-cohort dropoff present for every cohort", ncoh == len({r["cohort_id"] for r in bm.rows}), f"{ncoh} cohorts")
 
@@ -227,7 +262,11 @@ ucoh = len({r["cohort_id"] for r in bm.rows})
 chk("counts.cohorts == unique cohort_ids", dd["counts"]["cohorts"] == ucoh, f"{dd['counts']['cohorts']} == {ucoh}")
 ts2 = len({(r["connect_id"], r["cohort_id"], r["interview_n"]) for r in bm.rows if r["is_started"] == "Y"})
 tc2 = len({(r["connect_id"], r["cohort_id"], r["interview_n"]) for r in bm.rows if r["is_completed"] == "Y"})
-chk("counts.started == unique started interviews", dd["counts"]["started"] == ts2, f"{dd['counts']['started']} == {ts2}")
+chk(
+    "counts.started == unique started interviews",
+    dd["counts"]["started"] == ts2,
+    f"{dd['counts']['started']} == {ts2}",
+)
 chk(
     "counts.completed == unique completed interviews",
     dd["counts"]["completed"] == tc2,
@@ -286,11 +325,16 @@ print("=" * 80)
 print("F. NEW FEATURES — FLW×Topic matrix (4), de-impact (8), completed-of-base (6)")
 print("=" * 80)
 fm = dd.get("flwMatrix", [])
-chk("flwMatrix row count == (claimed ∪ interviewed) (FLW,cohort) pairs", len(fm) == claimed_pairs,
-    f"{len(fm)} == {claimed_pairs}")
+chk(
+    "flwMatrix row count == (claimed ∪ interviewed) (FLW,cohort) pairs",
+    len(fm) == claimed_pairs,
+    f"{len(fm)} == {claimed_pairs}",
+)
 cell_bad = 0
 for r in fm:
-    _rsg = r.get("g") or bm.cohort_info.get(r["c"], {}).get("subgroup")   # flwMatrix rows now drop g; derive from cohort
+    _rsg = r.get("g") or bm.cohort_info.get(r["c"], {}).get(
+        "subgroup"
+    )  # flwMatrix rows now drop g; derive from cohort
     topics = bm.SUBGROUP_DESIGN.get(_rsg, {}).get("topics", [])
     if len(r["s"]) != len(topics):
         cell_bad += 1
@@ -316,7 +360,11 @@ for sg, info in di.items():
     last = fmap2[sg][info["last_n"]]
     if last["started_di"] != last["started"] - info["count"]:
         di_bad += 1
-chk("deimpact: last started_di == started − count; only >=3-interview subgroups", di_bad == 0, f"{di_bad} bad; sgs={sorted(di)}")
+chk(
+    "deimpact: last started_di == started − count; only >=3-interview subgroups",
+    di_bad == 0,
+    f"{di_bad} bad; sgs={sorted(di)}",
+)
 dq_bad = 0
 for f in dd["funnel"]:
     if f["started_di"] > f["started"] or f["pct_started_di"] != tsl.r1(100 * f["started_di"] / f["elig"]):
@@ -346,8 +394,11 @@ for sg in SG_ORDER:
         # lineSeries pts_prev must equal the funnel value
         if ls[sg].get("pts_prev", [])[n - 1] != f.get("pct_started_prev"):
             lp_bad += 1
-chk("pct_started_prev = 100*|started(n)∩started(n-1)|/started(n-1) (n=1->elig), bounded ≤100, lineSeries matches",
-    lp_bad == 0, f"{lp_bad} bad")
+chk(
+    "pct_started_prev = 100*|started(n)∩started(n-1)|/started(n-1) (n=1->elig), bounded ≤100, lineSeries matches",
+    lp_bad == 0,
+    f"{lp_bad} bad",
+)
 cb_bad = sum(1 for f in dd["funnel"] if f["pct_completed_base"] != tsl.r1(100 * f["completed"] / f["elig"]))
 chk("funnel pct_completed_base == 100*completed/eligible (all rows)", cb_bad == 0, f"{cb_bad} bad")
 
@@ -386,19 +437,43 @@ for _sg2, _agg in sorted(_cd_by_sg.items()):
     # DIRECTION is enforced. Where they coincide (the design was active today), the numbers must agree
     # to within the workers engagement cannot see at all.
     _same_day = _s["weeks"][_i] == dd.get("today")
+    # Enforced on EVERY design. The engagement series freezes at that design's last observed session
+    # while the drop-off view scores at today, so for a design that went quiet weeks ago some extra
+    # deadlines have passed and a gap is expected - but it is BOUNDED, and the bound is stated rather
+    # than the check being skipped. Skipping was how a re-introduction of the original bug went
+    # undetected on 10 of 12 designs.
+    #   - session-less workers: the engagement view structurally cannot see them.
+    #   - in-progress at the snapshot: exactly the workers whose deadline can arrive in between.
+    _inflight = (
+        _s.get("started", [0])[_i]
+        - _s.get("finished", [0])[_i]
+        - _s.get("dropped", [0])[_i]
+        - _s.get("waiting", [0])[_i]
+    )
+    _allow = max(_sessionless, 0) + max(_inflight, 0)
     for _tag, _cdk, _cek in (("C", "dC", "dropC"), ("B", "dB", "dropped")):
         _gap = _agg[_cdk] - _s[_cek][_i]
         if _gap < 0:
-            _xv_bad.append(f"{_sg2}/{_tag}: drop-off {_agg[_cdk]} is LOWER than engagement "
-                           f"{_s[_cek][_i]} - drop-off sees strictly more workers, so this is drift")
-        elif _same_day and _gap > max(_sessionless, 0):
-            _xv_bad.append(f"{_sg2}/{_tag}: same as-of date ({_s['weeks'][_i]}) but drop-off "
-                           f"{_agg[_cdk]} vs engagement {_s[_cek][_i]} (gap {_gap}, only "
-                           f"{max(_sessionless, 0)} session-less workers explain it)")
-chk("cross-view: Drop-off by cohort and Cohort Engagement agree on who dropped",
+            _xv_bad.append(
+                f"{_sg2}/{_tag}: drop-off {_agg[_cdk]} is LOWER than engagement "
+                f"{_s[_cek][_i]} - drop-off sees strictly more workers, so this is drift"
+            )
+        elif _gap > _allow:
+            _xv_bad.append(
+                f"{_sg2}/{_tag}: drop-off {_agg[_cdk]} vs engagement {_s[_cek][_i]} "
+                f"(gap {_gap} exceeds the {_allow} explainable: {max(_sessionless, 0)} "
+                f"session-less + {max(_inflight, 0)} in-flight at "
+                f"{_s['weeks'][_i]}{' = today' if _same_day else ''})"
+            )
+chk(
+    "cross-view: Drop-off by cohort and Cohort Engagement agree on who dropped",
     not _xv_bad,
-    "; ".join(_xv_bad[:4]) if _xv_bad else
-    f"{len(_cd_by_sg)} designs, both readings, within the session-less allowance")
+    (
+        "; ".join(_xv_bad[:4])
+        if _xv_bad
+        else f"{len(_cd_by_sg)} designs, both readings, within the session-less allowance"
+    ),
+)
 
 # ---- OCS review status -------------------------------------------------------------------------
 # The verdict split must account for EVERY completed interview exactly once, and the by-design and
@@ -413,21 +488,22 @@ if _rs:
     # and the check passed while the view read 9,480 against the Overview's 9,459. A gate that shares
     # the bug it is meant to catch is worse than no gate. counts.completed is the published headline,
     # so that is the number the split has to add up to.
-    _cells = {(r["connect_id"], r["cohort_id"], r["interview_n"])
-              for r in bm.rows if r.get("is_completed") == "Y"}
+    _cells = {(r["connect_id"], r["cohort_id"], r["interview_n"]) for r in bm.rows if r.get("is_completed") == "Y"}
     _tot = sum(_rs["overall"].get(k, 0) for k in _rk)
-    chk("reviewStatus: verdicts add up to the OVERVIEW completed count, exactly",
+    chk(
+        "reviewStatus: verdicts add up to the OVERVIEW completed count, exactly",
         _tot == len(_cells) == dd["counts"]["completed"],
-        f"split {_tot} | unique interviews {len(_cells)} | Overview {dd['counts']['completed']}")
-    chk("reviewStatus: duplicate bot triggers are not double-counted",
+        f"split {_tot} | unique interviews {len(_cells)} | Overview {dd['counts']['completed']}",
+    )
+    chk(
+        "reviewStatus: duplicate bot triggers are not double-counted",
         _tot <= sum(1 for r in bm.rows if r.get("is_completed") == "Y"),
-        f"{sum(1 for r in bm.rows if r.get('is_completed') == 'Y') - _tot} duplicate row(s) collapsed")
+        f"{sum(1 for r in bm.rows if r.get('is_completed') == 'Y') - _tot} duplicate row(s) collapsed",
+    )
     _bysg = sum(v.get(k, 0) for v in _rs.get("by_sg", {}).values() for k in _rk)
-    chk("reviewStatus: by-design breakdown adds back to the overall", _bysg == _tot,
-        f"{_bysg} vs {_tot}")
+    chk("reviewStatus: by-design breakdown adds back to the overall", _bysg == _tot, f"{_bysg} vs {_tot}")
     _bytop = sum(v.get(k, 0) for v in _rs.get("by_topic", {}).values() for k in _rk)
-    chk("reviewStatus: by-topic breakdown adds back to the overall", _bytop == _tot,
-        f"{_bytop} vs {_tot}")
+    chk("reviewStatus: by-topic breakdown adds back to the overall", _bytop == _tot, f"{_bytop} vs {_tot}")
     # Independent recompute of the verdict itself, straight off the master rows.
     _RANK = {"suspected_ai": 0, "unacceptable": 1, "acceptable": 2, "not-reviewed": 3}
     _best = {}
@@ -444,20 +520,41 @@ if _rs:
     for _v in _best.values():
         _own[_v] = _own.get(_v, 0) + 1
     _bad = [k for k in _rk if _own.get(k, 0) != _rs["overall"].get(k, 0)]
-    chk("reviewStatus: payload == independent recompute from master rows", not _bad,
-        ", ".join(f"{k}: {_own.get(k, 0)} vs {_rs['overall'].get(k, 0)}" for k in _bad) or "all four match")
+    chk(
+        "reviewStatus: payload == independent recompute from master rows",
+        not _bad,
+        ", ".join(f"{k}: {_own.get(k, 0)} vs {_rs['overall'].get(k, 0)}" for k in _bad) or "all four match",
+    )
 else:
-    chk("reviewStatus present in the payload", False,
-        "missing - the daily job step 2t (pull_ocs_tags.py) may not have run")
+    chk(
+        "reviewStatus present in the payload",
+        False,
+        "missing - the daily job step 2t (pull_ocs_tags.py) may not have run",
+    )
 
 _eng_started["ALL"] = set().union(*_eng_started.values()) if _eng_started else set()  # program-wide distinct
 _eng_bad = []
 # Per-week arrays that must all be the same length. Deliberately lists only what the RENDER receives:
 # the rhythm counts, the `waiting` count and ended/end_date are stripped in build_dashboard_data
 # because nothing in the template reads them, so naming them here would fail on their absence.
-_eng_keys = ("weeks", "started", "steady_pct", "incons_pct", "rhythm_base", "finished",
-             "new", "active", "slow", "quiet", "dropped", "waiting", "dropC", "waitC",
-             "dropA", "waitA")
+_eng_keys = (
+    "weeks",
+    "started",
+    "steady_pct",
+    "incons_pct",
+    "rhythm_base",
+    "finished",
+    "new",
+    "active",
+    "slow",
+    "quiet",
+    "dropped",
+    "waiting",
+    "dropC",
+    "waitC",
+    "dropA",
+    "waitA",
+)
 
 
 def _largest_remainder(counts, base):
@@ -476,7 +573,8 @@ def _largest_remainder(counts, base):
 def _eng_consistent(label, c, expect_started=None):
     """Internal invariants for one engagement series; append issues to _eng_bad."""
     if len({len(c[k]) for k in _eng_keys}) != 1:
-        _eng_bad.append(f"{label}: array lengths differ"); return
+        _eng_bad.append(f"{label}: array lengths differ")
+        return
     for i in range(len(c["weeks"])):
         if c["finished"][i] + c["new"][i] + c["active"][i] + c["slow"][i] + c["quiet"][i] != c["started"][i]:
             _eng_bad.append(f"{label}[{i}]: Panel3 stack != Panel1 started")
@@ -490,8 +588,7 @@ def _eng_consistent(label, c, expect_started=None):
         # The outcome percentages are no longer shipped: the page derives them from the counts for
         # whichever reading is selected. So this recomputes them the way the page will, INDEPENDENTLY
         # of the render, and does it for all three readings - each has to close on its own.
-        for _tag, _dk, _wk in (("B", "dropped", "waiting"), ("C", "dropC", "waitC"),
-                               ("A", "dropA", "waitA")):
+        for _tag, _dk, _wk in (("B", "dropped", "waiting"), ("C", "dropC", "waitC"), ("A", "dropA", "waitA")):
             _st = c["started"][i]
             _ip = _st - c["finished"][i] - c[_dk][i] - c[_wk][i]
             if _ip < 0:
@@ -499,8 +596,7 @@ def _eng_consistent(label, c, expect_started=None):
                 continue
             _o = sum(_largest_remainder([c["finished"][i], c[_dk][i], c[_wk][i], _ip], _st))
             if _o != (100 if _st else 0):
-                _eng_bad.append(f"{label}[{i}]/{_tag}: outcome % sum {_o}, expected "
-                                f"{100 if _st else 0}")
+                _eng_bad.append(f"{label}[{i}]/{_tag}: outcome % sum {_o}, expected " f"{100 if _st else 0}")
         if c["dropC"][i] > c["dropped"][i]:
             _eng_bad.append(f"{label}[{i}]: C ({c['dropC'][i]}) exceeds B ({c['dropped'][i]})")
         _r = c["steady_pct"][i] + c["incons_pct"][i]
@@ -523,8 +619,11 @@ def _eng_consistent(label, c, expect_started=None):
 
 for sg, c in _eng.items():
     _eng_consistent(sg, c, expect_started=len(_eng_started.get(sg, ())))
-chk("cohortEngagement: Panel3==Panel1, %~100, monotonic, ties to distinct started FLWs (all subgroups)",
-    not _eng_bad, "; ".join(_eng_bad[:6]))
+chk(
+    "cohortEngagement: Panel3==Panel1, %~100, monotonic, ties to distinct started FLWs (all subgroups)",
+    not _eng_bad,
+    "; ".join(_eng_bad[:6]),
+)
 
 # by-LLO splits: each split internally consistent AND COWACDI+EHA started == the all-LLO started
 _engllo = dd.get("cohortEngagementLLO", {})
@@ -539,8 +638,11 @@ for sg, splits in _engllo.items():
         split_sum = sum(splits[llo]["total_started"] for llo in splits)
         if split_sum != all_c["total_started"]:
             _llo_bad.append(f"{sg}: COWACDI+EHA started {split_sum} != all {all_c['total_started']}")
-chk("cohortEngagementLLO: each LLO split consistent AND COWACDI+EHA started == all-LLO started",
-    not _llo_bad, "; ".join(_llo_bad[:6]))
+chk(
+    "cohortEngagementLLO: each LLO split consistent AND COWACDI+EHA started == all-LLO started",
+    not _llo_bad,
+    "; ".join(_llo_bad[:6]),
+)
 
 # ---- FLW-level analysis (flwEngagement): ties to canonical distinct-started-FLW count + %s sum ~100 ----
 _fe = dd.get("flwEngagement", {})
@@ -602,13 +704,27 @@ if _mi:
         for r in _fe["byState"]:
             if not r.get("residual") and r["k"] in _mc and _mc[r["k"]] != r["n"]:
                 _fe_bad.append(f"micro state {r['k']} n={_mc[r['k']]} != byState n={r['n']}")
-chk("flwEngagement: n_flws==distinct started FLWs; tier/persona counts sum to n_flws & %~100; cross-cuts in "
+chk(
+    "flwEngagement: n_flws==distinct started FLWs; tier/persona counts sum to n_flws & %~100; cross-cuts in "
     "range+complete; survival bounded by elig; micro block aligns with the aggregates",
-    not _fe_bad, "; ".join(_fe_bad[:6]))
+    not _fe_bad,
+    "; ".join(_fe_bad[:6]),
+)
 
 print("=" * 80)
 n_pass = sum(results)
 n_tot = len(results)
+# A gate that silently runs FEWER checks is indistinguishable from one that passes. Deleting the
+# interview-schedule file made brutal_verify drop 22 checks with NO failure, because its section is
+# written as "for each entry in this dict" and the dict was empty. Floor the count.
+_MIN_CHECKS = 42
+if (n_tot) < _MIN_CHECKS:
+    print("")
+    print(
+        f"  *** ONLY {n_tot} CHECKS RAN, EXPECTED >= 42 - a section is silently "
+        f"empty, usually a missing input file. Treating as FAILURE. ***"
+    )
+    n_pass = -1
 print(f"  TOTAL: {n_pass}/{n_tot} checks passed")
 print(f"  RESULT: {'ALL PASS' if n_pass == n_tot else 'FAILURES PRESENT'}")
 print("=" * 80)

@@ -686,14 +686,16 @@ check(
     !/137 vs 177/.test(injected) &&
     !/1,305 vs parent 1,298/.test(injected),
 );
-// A closed cohort cannot contain anyone "still in progress".
+// A cohort past its end date CAN legitimately hold work in progress: interviews are still triggered
+// after the nominal end, and someone whose deadline has not arrived is not a drop-out. What must hold
+// is that they have a reason - the cohort is not `settled` (every deadline behind us). Anyone in
+// progress inside a settled cohort is drift.
 (function () {
-  const today = payload.today;
   const bad = (payload.cohortDropoff || []).filter(function (r) {
-    return r.e <= today && (r.p || 0) > 0;
+    return (r.p || 0) > 0 && r.settled === true;
   });
   check(
-    'no closed cohort reports anyone still in progress',
+    'in-progress workers only exist where a deadline has not yet arrived',
     bad.length === 0,
     bad.length
       ? bad
@@ -702,7 +704,7 @@ check(
             return r.c + ':' + r.p;
           })
           .join(', ')
-      : 'all closed cohorts settled',
+      : 'no settled cohort holds work in progress',
   );
 })();
 
@@ -769,6 +771,61 @@ check(
     `${bySg} vs ${tot}`,
   );
 })();
+
+// The stacked bar's segments must share ONE base or the bar cannot sum to 100. This is the check that
+// was missing when the row percentages moved to the asked base and three segments did not: 38 of 73
+// bars overflowed, the worst to 124.6%, and the browser silently rescaled them all.
+(function () {
+  const bad = [];
+  (payload.cohortDropoff || []).forEach(function (r) {
+    const base = r.nb != null ? r.nb : r.n;
+    if (!base) return;
+    const pct = (v) => Math.round((1000 * v) / base) / 10;
+    // Reading C is the default and the one the bar draws.
+    // Never began is NOT a segment: those workers are not in the asked base. The six that remain
+    // partition it exactly, which is why this must land on 100 and not merely near it.
+    const total =
+      pct(r.f) +
+      pct(r.l || 0) +
+      pct(r.dC) +
+      pct(r.sk || 0) +
+      pct(r.w) +
+      pct(r.p || 0);
+    if (total < 99.0 || total > 101.0)
+      bad.push(r.c + '=' + total.toFixed(1) + '%');
+  });
+  check(
+    'split-bar segments share one base and sum to 100',
+    bad.length === 0,
+    bad.length
+      ? bad.slice(0, 4).join(', ')
+      : `${(payload.cohortDropoff || []).length} rows`,
+  );
+})();
+
+// The summary tiles and the table beneath them must divide by the same base, or the same words carry
+// two numbers on one screen ("Finished the design" read 60% in the tile and 63.4% in the table).
+(function () {
+  const rows = payload.cohortDropoff || [];
+  const n = rows.reduce((a, r) => a + r.n, 0);
+  const asked = rows.reduce((a, r) => a + (r.nb != null ? r.nb : r.n), 0);
+  const done = rows.reduce((a, r) => a + r.f + (r.l || 0), 0);
+  check(
+    'tile and table bases agree (asked, not enrolled)',
+    asked > 0 && asked <= n,
+    `asked ${asked.toLocaleString()} of ${n.toLocaleString()} enrolled; finished ${Math.round(
+      (100 * done) / asked,
+    )}% of asked vs ${Math.round(
+      (100 * done) / n,
+    )}% of enrolled - the page must show the former`,
+  );
+})();
+
+// Every rate divides by `asked`, so `asked` has to be ON SCREEN or a reader cannot reproduce a count.
+check(
+  'the asked base is a visible column, not just a comment',
+  /&gt;Asked&lt;\/th&gt;/.test(injected) || />Asked<\/th>/.test(injected),
+);
 
 // ---------------------------------------------------------------- size guard
 // The Labs render_code limit is a hard 512 KB and brutal_verify enforces it in CI. This local check

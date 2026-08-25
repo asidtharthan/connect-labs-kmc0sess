@@ -20,6 +20,7 @@ USAGE:
     python pull_hq_full_payloads.py --form trigger_bot
     python pull_hq_full_payloads.py --domain connect-interview-cowacdi
 """
+
 import argparse
 import json
 import os
@@ -76,7 +77,11 @@ FORMS = {
     "trigger_payment_unit": "http://openrosa.org/formdesigner/3B5E0517-BAD6-4F83-97DA-3C32996BC947",
 }
 
-PAGE_SIZE = 100
+# 1000 is CommCare's maximum and is verified working against the live API (1,000 objects in 0.9s vs
+# 100 in 0.7s - the endpoint is latency-bound, not size-bound). At 100 the daily job made ~347 data
+# requests plus 48 terminating ones for 34,668 records, and the inter-page sleep alone burned ~173s of
+# a 12-minute run. At 1000 that is ~131 requests and ~35 sleeps.
+PAGE_SIZE = 1000
 SLEEP_BETWEEN_PAGES = 0.5
 
 
