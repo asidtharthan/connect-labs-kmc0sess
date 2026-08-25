@@ -1069,18 +1069,32 @@ print(f"[eng] cohort_dropoff: {len(cohort_dropoff)} cohorts, {_cd_tot} FLW-cohor
 # Counted over COMPLETED interviews only. A review verdict on an interview nobody finished would not
 # mean anything, and mixing the two bases is how the two systems stopped agreeing in the first place.
 _REVIEW_KEYS = ("acceptable", "unacceptable", "suspected_ai", "not-reviewed")
-_rev_overall = defaultdict(int)
-_rev_sg = defaultdict(lambda: defaultdict(int))
-_rev_topic = defaultdict(lambda: defaultdict(int))
+# Verdict priority when ONE interview has more than one session. A duplicate bot trigger produces two
+# master rows for the same (FLW, cohort, interview), each with its own OCS session and therefore
+# possibly its own verdict - live examples include one row not-reviewed beside its twin acceptable, and
+# one acceptable beside its twin suspected_ai. Strongest signal wins, and anything a person actually
+# looked at outranks something nobody has. Same order _review_status uses inside a single session.
+_REVIEW_RANK = {"suspected_ai": 0, "unacceptable": 1, "acceptable": 2, "not-reviewed": 3}
+_rev_cell = {}
 for _r in bm.rows:
     if _r.get("is_completed") != "Y":
         continue
     _st = _r.get("review_status") or "not-reviewed"
     if _st not in _REVIEW_KEYS:
         _st = "not-reviewed"
+    # Keyed on the INTERVIEW, not the row, so this ties to the Overview's completed count exactly.
+    _key = (_r["connect_id"], _r["cohort_id"], _r["interview_n"])
+    _prev = _rev_cell.get(_key)
+    if _prev is None or _REVIEW_RANK[_st] < _REVIEW_RANK[_prev[0]]:
+        _rev_cell[_key] = (_st, _r["subgroup"], _r["topic_code"])
+
+_rev_overall = defaultdict(int)
+_rev_sg = defaultdict(lambda: defaultdict(int))
+_rev_topic = defaultdict(lambda: defaultdict(int))
+for _st, _sg, _tc in _rev_cell.values():
     _rev_overall[_st] += 1
-    _rev_sg[_r["subgroup"]][_st] += 1
-    _rev_topic[_r["topic_code"]][_st] += 1
+    _rev_sg[_sg][_st] += 1
+    _rev_topic[_tc][_st] += 1
 review_status = {
     "keys": list(_REVIEW_KEYS),
     "overall": {k: _rev_overall[k] for k in _REVIEW_KEYS},
@@ -1088,7 +1102,8 @@ review_status = {
     "by_topic": {tc: {k: v[k] for k in _REVIEW_KEYS} for tc, v in sorted(_rev_topic.items())},
 }
 _rev_tot = sum(_rev_overall[k] for k in _REVIEW_KEYS)
-print(f"[rev] OCS review status over {_rev_tot} completed interviews: "
+print(f"[rev] OCS review status over {_rev_tot} completed interviews "
+      f"(unique FLW x cohort x interview, deduped from {sum(1 for r in bm.rows if r.get('is_completed') == 'Y')} rows): "
       + "  ".join(f"{k}={_rev_overall[k]}" for k in _REVIEW_KEYS))
 
 payload = {
