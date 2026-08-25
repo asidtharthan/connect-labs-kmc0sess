@@ -1060,9 +1060,41 @@ print(f"[eng] cohort_dropoff: {len(cohort_dropoff)} cohorts, {_cd_tot} FLW-cohor
       f"never-began={_cd_z} in_progress={_cd_tot - _cd_f - _cd_l - _cd_d - _cd_w - _cd_z} "
       f"(fallback start dates: {sum(1 for c in cohort_dropoff if c.get('x'))})")
 
+# ---- OCS review status of every COMPLETED interview ------------------------------------------
+# The recurring "OCS shows 8,6xx, Labs shows 9,4xx" question has one cause: the OCS screen filters to
+# sessions a reviewer has TAGGED, and a tenth of completed interviews have not been reviewed yet. So
+# the not-reviewed bucket is a first-class value here, never a blank and never filtered away by
+# default - hiding it is the very thing that created the confusion.
+#
+# Counted over COMPLETED interviews only. A review verdict on an interview nobody finished would not
+# mean anything, and mixing the two bases is how the two systems stopped agreeing in the first place.
+_REVIEW_KEYS = ("acceptable", "unacceptable", "suspected_ai", "not-reviewed")
+_rev_overall = defaultdict(int)
+_rev_sg = defaultdict(lambda: defaultdict(int))
+_rev_topic = defaultdict(lambda: defaultdict(int))
+for _r in bm.rows:
+    if _r.get("is_completed") != "Y":
+        continue
+    _st = _r.get("review_status") or "not-reviewed"
+    if _st not in _REVIEW_KEYS:
+        _st = "not-reviewed"
+    _rev_overall[_st] += 1
+    _rev_sg[_r["subgroup"]][_st] += 1
+    _rev_topic[_r["topic_code"]][_st] += 1
+review_status = {
+    "keys": list(_REVIEW_KEYS),
+    "overall": {k: _rev_overall[k] for k in _REVIEW_KEYS},
+    "by_sg": {sg: {k: v[k] for k in _REVIEW_KEYS} for sg, v in sorted(_rev_sg.items())},
+    "by_topic": {tc: {k: v[k] for k in _REVIEW_KEYS} for tc, v in sorted(_rev_topic.items())},
+}
+_rev_tot = sum(_rev_overall[k] for k in _REVIEW_KEYS)
+print(f"[rev] OCS review status over {_rev_tot} completed interviews: "
+      + "  ".join(f"{k}={_rev_overall[k]}" for k in _REVIEW_KEYS))
+
 payload = {
     "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),  # stamped at build; render shows this
     "today": str(TODAY),
+    "review_status": review_status,
     "counts": {
         "cohorts": len(bm.cohort_info),
         "flws": len({c["flw"] for c in cells}),

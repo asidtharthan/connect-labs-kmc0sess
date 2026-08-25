@@ -67,6 +67,16 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install -r requirements-refresh.txt
+
+      # Babel reprints the render template without its comments before publishing (27 KB of a hard
+      # 512 KB cap). Only @babel/core is needed, so install just that rather than the whole dev tree.
+      # If this step is ever removed the publish still works - it falls back to the commented template
+      # and says so - but headroom drops back to ~2 KB, which is where it was when this was added.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Babel (render comment strip)
+        run: npm install --no-save --no-audit --no-fund @babel/core
       # Carry the OCS caches between daily runs so the session/word pulls are INCREMENTAL (only new +
       # recently-changed sessions) instead of re-downloading all ~18k sessions each day. Rolling key:
       # every run saves a fresh cache (unique key) and restores the most recent prior one (restore-keys
@@ -77,6 +87,7 @@ jobs:
           path: |
             _ocs_state_cache.json
             _ocs_words_cache.json
+            _ocs_tags_cache.json
           key: ocs-cache-${{ github.run_id }}
           restore-keys: |
             ocs-cache-

@@ -357,6 +357,38 @@ _eng_started = defaultdict(set)
 for r in bm.rows:
     if r.get("is_started") == "Y" and r.get("matched_session_id"):
         _eng_started[r["subgroup"]].add(r["connect_id"])
+# ---- OCS review status -------------------------------------------------------------------------
+# The verdict split must account for EVERY completed interview exactly once, and the by-design and
+# by-topic breakdowns must each add back to the overall. If they do not, the view would show a number
+# that cannot be reconciled with the completed count - which is the exact failure mode this whole
+# feature exists to close.
+_rs = dd.get("reviewStatus") or {}
+if _rs:
+    _rk = _rs.get("keys") or []
+    _completed = sum(1 for r in bm.rows if r.get("is_completed") == "Y")
+    _tot = sum(_rs["overall"].get(k, 0) for k in _rk)
+    chk("reviewStatus: verdicts account for every completed interview, once",
+        _tot == _completed, f"{_tot} vs {_completed} completed")
+    _bysg = sum(v.get(k, 0) for v in _rs.get("by_sg", {}).values() for k in _rk)
+    chk("reviewStatus: by-design breakdown adds back to the overall", _bysg == _tot,
+        f"{_bysg} vs {_tot}")
+    _bytop = sum(v.get(k, 0) for v in _rs.get("by_topic", {}).values() for k in _rk)
+    chk("reviewStatus: by-topic breakdown adds back to the overall", _bytop == _tot,
+        f"{_bytop} vs {_tot}")
+    # Independent recompute of the verdict itself, straight off the master rows.
+    _own = {}
+    for r in bm.rows:
+        if r.get("is_completed") != "Y":
+            continue
+        _v = r.get("review_status") or "not-reviewed"
+        _own[_v] = _own.get(_v, 0) + 1
+    _bad = [k for k in _rk if _own.get(k, 0) != _rs["overall"].get(k, 0)]
+    chk("reviewStatus: payload == independent recompute from master rows", not _bad,
+        ", ".join(f"{k}: {_own.get(k, 0)} vs {_rs['overall'].get(k, 0)}" for k in _bad) or "all four match")
+else:
+    chk("reviewStatus present in the payload", False,
+        "missing - the daily job step 2t (pull_ocs_tags.py) may not have run")
+
 _eng_started["ALL"] = set().union(*_eng_started.values()) if _eng_started else set()  # program-wide distinct
 _eng_bad = []
 # Per-week arrays that must all be the same length. Deliberately lists only what the RENDER receives:

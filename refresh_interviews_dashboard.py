@@ -350,6 +350,17 @@ def main():
         run("2. pull OCS sessions (incremental)", [PY, "pull_ocs_state.py", *ocs_full])
     else:
         print("\n=== 2. pull OCS: skipped (using existing _ocs_state_cache.json) ===", flush=True)
+    if args.pull_ocs:
+        # FULL scan every day, deliberately. Reviewing happens long after a session is created - tagged
+        # sessions go back to March and the tagged total still climbs daily - so the created_at window
+        # that makes step 2 incremental would freeze an April session's verdict forever. Affordable
+        # because tags come from the paginated LIST endpoint (~112 requests for all 22k sessions), not
+        # the per-session detail calls that the rate-limit concern was about.
+        run("2t. pull OCS review tags (full scan)", [PY, "pull_ocs_tags.py"])
+    else:
+        print("
+=== 2t. pull review tags: skipped (using existing _ocs_tags_cache.json) ===",
+              flush=True)
     if args.pull_words:
         run("2b. pull OCS message word counts (incremental)", [PY, "pull_ocs_words.py", *ocs_full])
     else:

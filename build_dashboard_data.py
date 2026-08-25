@@ -247,6 +247,9 @@ out = {
     "subgroupDesign": bm.SUBGROUP_DESIGN,
     "topicNames": bm.TOPIC_NAMES,
     "topicQuestions": bm.TOPIC_QUESTIONS,
+    # OCS review verdict on every COMPLETED interview, with not-yet-reviewed as its own bucket.
+    # Small (four counts per subgroup and per topic), so it survives the render prune.
+    "reviewStatus": payload.get("review_status", {}),
     "unmappedCohorts": payload.get("unmapped_cohorts", []),
 }
 s = json.dumps(out, separators=(",", ":"))

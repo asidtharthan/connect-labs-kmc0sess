@@ -25,6 +25,30 @@ import pandas as pd
 ROOT = Path(__file__).parent
 HQ_DIR = ROOT / "hq_pull_full"
 CACHE = ROOT / "_ocs_state_cache.json"
+TAGS_CACHE = ROOT / "_ocs_tags_cache.json"   # {sid: [tags]} from pull_ocs_tags.py (full daily scan)
+
+# OCS review verdicts, most specific first. `suspected_ai` is checked BEFORE acceptable/unacceptable
+# because a session can carry both, and "we think the FLW pasted an AI answer" is the more important
+# fact about it. Everything else OCS puts in `tags` (Run-on Session, n/a, Test) is bookkeeping, not a
+# verdict, and must never be mixed in - that is what makes "how many were acceptable" unanswerable.
+_REVIEW_ORDER = ("suspected_ai", "unacceptable", "acceptable")
+
+
+def _review_status(sid, tags_by_sid):
+    """One of suspected_ai / unacceptable / acceptable / not-reviewed, for a matched session.
+
+    ABSENCE of a verdict is itself the answer, and a meaningful one: on 2026-08-25, 931 of the 9,624
+    sessions OCS marks interview_complete (10%) carried no verdict at all. Filtering those away
+    silently is exactly what made the OCS screen read 8,6xx against the dashboard's 9,4xx, so
+    not-reviewed is a first-class value here rather than a blank.
+    """
+    if not sid:
+        return ""
+    ts = set(tags_by_sid.get(sid) or ())
+    for v in _REVIEW_ORDER:
+        if v in ts:
+            return v
+    return "not-reviewed"
 WORDS_CACHE = ROOT / "_ocs_words_cache.json"  # {sid: {human_words, human_msgs}} from pull_ocs_words.py
 BASELINE = ROOT / "master_v7_2026-06-10.csv"
 TODAY = date.today()  # dynamic: is_released / time-gating reflect the real run date
@@ -491,6 +515,17 @@ for s in sessions:
     )
 for k in ocs_by_key:
     ocs_by_key[k].sort(key=lambda x: x["first"])
+_ocs_tags = {}
+if TAGS_CACHE.exists():
+    try:
+        _ocs_tags = json.loads(TAGS_CACHE.read_text())
+    except (ValueError, OSError):
+        _ocs_tags = {}
+if not _ocs_tags:
+    print("[4t] NOTE: no OCS review-tag cache - every row will read 'not-reviewed'. "
+          "Run pull_ocs_tags.py.", flush=True)
+else:
+    print(f"[4t] OCS review tags: {len(_ocs_tags):,} tagged sessions", flush=True)
 print(f"[4] OCS live: {len(sessions)} sessions, {len(ocs_by_key)} (pid,iv) keys")
 
 # ---------------- OCS message word counts (per session; from pull_ocs_words.py) ----------------
@@ -553,6 +588,7 @@ for (flw, iv), trs in triggers_by_flw_iv.items():
                 "trigger_form_id": tb["form_id"],
                 "trigger_received_on": tb["received_on"].isoformat(),
                 "matched_session_id": m["sid"] if m else "",
+                "review_status": _review_status(m["sid"] if m else "", _ocs_tags),
                 "session_status": m["status"] if m else "",
                 "session_human_words": sw.get("human_words", 0) if m else 0,
                 "session_human_msgs": sw.get("human_msgs", 0) if m else 0,
