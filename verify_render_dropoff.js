@@ -263,21 +263,58 @@ if (dropHtml) {
       : `${designs.length} designs`,
   );
 
+  // The view defaults to reading C (stopped and never came back), so the tiles must show dC, not dB.
   const tot = CD.reduce(
-    (a, r) => ({ n: a.n + r.n, f: a.f + r.f, d: a.d + r.d, w: a.w + r.w }),
-    { n: 0, f: 0, d: 0, w: 0 },
+    (a, r) => ({
+      n: a.n + r.n,
+      f: a.f + r.f + (r.l || 0),
+      dA: a.dA + (r.dA || 0),
+      dB: a.dB + (r.dB || 0),
+      dC: a.dC + (r.dC || 0),
+      sk: a.sk + (r.sk || 0),
+      w: a.w + r.w,
+    }),
+    { n: 0, f: 0, dA: 0, dB: 0, dC: 0, sk: 0, w: 0 },
   );
   check(
-    'KPI totals present verbatim',
+    'KPI totals present verbatim, for the DEFAULT reading',
     dropHtml.includes(tot.f.toLocaleString()) &&
-      dropHtml.includes(tot.d.toLocaleString()) &&
+      dropHtml.includes(tot.dC.toLocaleString()) &&
       dropHtml.includes(tot.w.toLocaleString()),
-    `finished=${tot.f} dropped=${tot.d} waiting=${tot.w}`,
+    `finished=${tot.f} dropped(C)=${tot.dC} schedule-n/c=${tot.w}`,
+  );
+  // C and "skipped but returned" must together be exactly B - they are one split of the same people.
+  check(
+    'C + skipped-but-returned == B, exactly',
+    tot.dC + tot.sk === tot.dB,
+    `${tot.dC} + ${tot.sk} = ${tot.dC + tot.sk} vs B ${tot.dB}`,
+  );
+  check(
+    'all three readings are shipped for every cohort',
+    CD.every(function (r) {
+      return ['dA', 'dB', 'dC', 'sk'].every(function (k) {
+        return typeof r[k] === 'number' && r[k] >= 0;
+      });
+    }),
+    `${CD.length} cohorts`,
+  );
+  check(
+    'no reading can exceed the workers in its cohort',
+    CD.every(function (r) {
+      return r.dA <= r.n && r.dB <= r.n && r.dC <= r.n && r.sk <= r.n;
+    }),
+  );
+  check(
+    'the three options are offered with one sentence each',
+    /Dropped off means:/.test(dropHtml) &&
+      /Stopped and never came back/.test(dropHtml) &&
+      /Missed any interview/.test(dropHtml) &&
+      /No contact for 14 days/.test(dropHtml),
   );
   check(
     'buckets account for every worker',
-    tot.f + tot.d + tot.w <= tot.n,
-    `${tot.f}+${tot.d}+${tot.w} of ${tot.n}`,
+    tot.f + tot.dC + tot.sk + tot.w <= tot.n,
+    `${tot.f}+${tot.dC}+${tot.sk}+${tot.w} of ${tot.n}`,
   );
   check(
     'cohort count in the button label is right',
@@ -605,6 +642,34 @@ check(
   "single-interview designs read 'not measurable', not 0%",
   /not measurable/.test(injected),
 );
+
+// The Documentation tab's rule is structure only, every number from live data. Hardcoded illustrative
+// figures went stale within a day of being written, so assert none came back.
+check(
+  'documentation tab carries no hardcoded illustrative figures',
+  !/319 interviews smaller/.test(injected) &&
+    !/137 vs 177/.test(injected) &&
+    !/1,305 vs parent 1,298/.test(injected),
+);
+// A closed cohort cannot contain anyone "still in progress".
+(function () {
+  const today = payload.today;
+  const bad = (payload.cohortDropoff || []).filter(function (r) {
+    return r.e <= today && (r.p || 0) > 0;
+  });
+  check(
+    'no closed cohort reports anyone still in progress',
+    bad.length === 0,
+    bad.length
+      ? bad
+          .slice(0, 3)
+          .map(function (r) {
+            return r.c + ':' + r.p;
+          })
+          .join(', ')
+      : 'all closed cohorts settled',
+  );
+})();
 
 // ---------------------------------------------------------------- size guard
 // The Labs render_code limit is a hard 512 KB and brutal_verify enforces it in CI. This local check

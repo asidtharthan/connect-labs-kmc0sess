@@ -60,6 +60,9 @@ function WorkflowUI(props) {
   var cdl = React.useState("design"); var cdLevel = cdl[0], setCdLevel = cdl[1];       // drop-off view: by design | every cohort
   var cds = React.useState("drop"); var cdSort = cds[0], setCdSort = cds[1];           // drop-off view: sort by drop-off % | cohort id
   var cdw = React.useState(false); var cdWhy = cdw[0], setCdWhy = cdw[1];               // drop-off view: the fixed-days explainer, collapsed by default
+  // Which of the three readings of "dropped off" is on show. C is the default because it is the one
+  // that answers the question people actually mean; B and A are kept for comparison and continuity.
+  var cdm = React.useState("C"); var cdMode = cdm[0], setCdMode = cdm[1];
   var esg = React.useState("ALL"); var engSg = esg[0], setEngSg = esg[1];              // cohort-engagement: selected cohort (default ALL - meaningful first view)
   var ell = React.useState("all"); var engLlo = ell[0], setEngLlo = ell[1];            // cohort-engagement: LLO filter (all | COWACDI | EHA)
   var ewin = React.useState("active"); var engWin = ewin[0], setEngWin = ewin[1];      // cohort-engagement: active window | full timeline
@@ -416,7 +419,7 @@ function WorkflowUI(props) {
         base: "Fixed base = initiated", gotcha: "Falls steeply for long schedules simply because later interviews have not been offered yet." },
       { g: "Retention", name: "Retention line - Reached previous interview", where: "Funnels → Retention lines (Denominator toggle)",
         how: "Started at N divided by started at N−1, any status.",
-        base: "Moving base = the previous step", gotcha: "Answers “of those who got here, how many continued”. NOT the same numerator as the other view: it counts FLWs who started interview N *and also* started N-1, so it is smaller than the raw Started figure in the drop-off table (319 interviews smaller across the programme; ABT1-B Int4 137 vs 177). Using raw Started would push several last slots past 100%." },
+        base: "Moving base = the previous step", gotcha: "Answers “of those who got here, how many continued”. NOT the same numerator as the other view: it counts FLWs who started interview N *and also* started N-1, so it is smaller than the raw Started figure shown in the drop-off table. Using raw Started would push several last slots past 100%. (Deliberately no worked example here: this tab derives every number from live data, and a hardcoded illustration goes stale within days.)" },
       { g: "Retention", name: "De-impact", where: "Funnels → de-impact toggle",
         how: "Removes FLWs affected by a known upstream scheduling artefact where a final interview could fire back-to-back with the one before it.",
         base: "-", gotcha: "A correction for a bug in the interview app, not a data cleanup. Root cause is upstream; the toggle only shows what the number would be without it." },
@@ -1579,6 +1582,10 @@ function WorkflowUI(props) {
       // f = completed by the window end, l = completed after it, d = dropped, w = schedule never
       // fully sent, z = nothing ever sent. In-progress is the residual.
       var late = r.l || 0, never = r.z || 0;
+      // A / B / C are three readings of the SAME workers. Everything else on the row is a fact that
+      // does not depend on which one is selected.
+      var dropped = cdMode === "A" ? (r.dA || 0) : cdMode === "B" ? (r.dB || 0) : (r.dC || 0);
+      var skipped = cdMode === "C" ? (r.sk || 0) : 0;
       var prog = r.n - r.f - late - r.d - r.w - never;
       var pc = function (v) { return r.n ? Math.round(1000 * v / r.n) / 10 : null; };
       return {
@@ -1587,13 +1594,13 @@ function WorkflowUI(props) {
         graceOverridden: r.g != null, startEstimated: !!r.x,
         start: r.s, end: r.e, closed: r.e <= (DATA.today || ""),
         n: r.n, onTime: r.f, late: late, done: r.f + late,
-        drop: r.d, notSent: r.w, never: never, prog: prog,
+        drop: dropped, skipped: skipped, notSent: r.w, never: never, prog: prog,
         sent: r.ts || 0, sentDone: r.tc || 0,
         sentDonePct: r.ts ? Math.round(1000 * r.tc / r.ts) / 10 : null,
         donePct: pc(r.f + late), onTimePct: pc(r.f),
         // "of which late" is a share of the FINISHERS, not of all workers - the header says "of which".
         latePct: (r.f + late) ? Math.round(1000 * late / (r.f + late)) / 10 : null,
-        dropPct: pc(r.d), notSentPct: pc(r.w), neverPct: pc(never)
+        dropPct: pc(dropped), skippedPct: pc(skipped), notSentPct: pc(r.w), neverPct: pc(never)
       };
     });
   }
@@ -1603,11 +1610,11 @@ function WorkflowUI(props) {
     var by = {};
     rows.forEach(function (r) {
       var a = by[r.sg] || (by[r.sg] = { sg: r.sg, ivs: r.ivs, gap: r.gap, cohorts: 0, n: 0,
-        onTime: 0, late: 0, done: 0, drop: 0, notSent: 0, never: 0, prog: 0,
+        onTime: 0, late: 0, done: 0, drop: 0, skipped: 0, notSent: 0, never: 0, prog: 0,
         sent: 0, sentDone: 0, ends: [] });
       a.cohorts++; a.n += r.n; a.onTime += r.onTime; a.late += r.late; a.done += r.done;
-      a.drop += r.drop; a.notSent += r.notSent; a.never += r.never; a.prog += r.prog;
-      a.sent += r.sent; a.sentDone += r.sentDone;
+      a.drop += r.drop; a.skipped += r.skipped; a.notSent += r.notSent; a.never += r.never;
+      a.prog += r.prog; a.sent += r.sent; a.sentDone += r.sentDone;
       a.ends.push(r.end);
     });
     return Object.keys(by).map(function (k) {
@@ -1617,7 +1624,8 @@ function WorkflowUI(props) {
       a.spread = Math.round((new Date(a.endLast) - new Date(a.endFirst)) / 86400000);
       a.donePct = pc(a.done); a.onTimePct = pc(a.onTime);
       a.latePct = a.done ? Math.round(1000 * a.late / a.done) / 10 : null;
-      a.dropPct = pc(a.drop); a.notSentPct = pc(a.notSent); a.neverPct = pc(a.never);
+      a.dropPct = pc(a.drop); a.skippedPct = pc(a.skipped);
+      a.notSentPct = pc(a.notSent); a.neverPct = pc(a.never);
       a.sentDonePct = a.sent ? Math.round(1000 * a.sentDone / a.sent) / 10 : null;
       return a;
     });
@@ -1631,9 +1639,9 @@ function WorkflowUI(props) {
     var byDesign = cohortDropByDesign(rows);
     var tot = rows.reduce(function (a, r) {
       a.n += r.n; a.onTime += r.onTime; a.late += r.late; a.done += r.done;
-      a.drop += r.drop; a.notSent += r.notSent; a.never += r.never; a.prog += r.prog;
-      a.sent += r.sent; a.sentDone += r.sentDone; return a;
-    }, { n: 0, onTime: 0, late: 0, done: 0, drop: 0, notSent: 0, never: 0, prog: 0,
+      a.drop += r.drop; a.skipped += r.skipped; a.notSent += r.notSent; a.never += r.never;
+      a.prog += r.prog; a.sent += r.sent; a.sentDone += r.sentDone; return a;
+    }, { n: 0, onTime: 0, late: 0, done: 0, drop: 0, skipped: 0, notSent: 0, never: 0, prog: 0,
          sent: 0, sentDone: 0 });
     // Sorting applies to BOTH levels. By id sorts designs alphabetically and cohorts by cohort id.
     function sortRows(list, isDesign) {
@@ -1660,7 +1668,8 @@ function WorkflowUI(props) {
       var lateOfAll = r.n ? Math.round(1000 * r.late / r.n) / 10 : 0;
       var progOfAll = r.n ? Math.round(1000 * r.prog / r.n) / 10 : 0;
       var seg = [["#5E35B1", r.onTimePct, "Finished on time"], ["#7E57C2", lateOfAll, "Finished late"],
-                 ["#C62828", r.dropPct, "Dropped off"], ["#0277BD", r.notSentPct, "Schedule not completed"],
+                 ["#C62828", r.dropPct, "Dropped off"], ["#F9A825", r.skippedPct, "Skipped but returned"],
+                 ["#0277BD", r.notSentPct, "Schedule not completed"],
                  ["#607D8B", progOfAll, "Still in progress"], ["#9E9E9E", r.neverPct, "Never began"]];
       return (
         <div className="flex h-4 w-full overflow-hidden rounded" title={seg.map(function (t) { return t[2] + " " + pctCell(t[1]); }).join(" / ")}>
@@ -1673,6 +1682,32 @@ function WorkflowUI(props) {
 
     return (
       <div className="space-y-3">
+        {/* THE one control that matters here. Three readings of the same workers, one sentence each. */}
+        <div className="rounded border border-gray-300 bg-gray-50 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-gray-700">Dropped off means:</span>
+            {subBtn(cdMode, "C", setCdMode, "Stopped and never came back")}
+            {subBtn(cdMode, "B", setCdMode, "Missed any interview")}
+            {subBtn(cdMode, "A", setCdMode, "No contact for 14 days")}
+          </div>
+          <div className="mt-1 text-xs text-gray-700">
+            {cdMode === "C" ? (
+              <span><b>They left an interview undone and never completed another one.</b> Someone who
+              skipped an interview but carried on is counted separately, under <i>Skipped but returned</i>
+              - not as a drop-out.</span>
+            ) : cdMode === "B" ? (
+              <span><b>They left any interview undone, even if they carried on afterwards.</b> This is a
+              coverage measure rather than retention: someone who completed 12 of 13 and skipped one
+              counts here. Long schedules score worse simply because they offer more chances to miss one.</span>
+            ) : (
+              <span><b>The method used before 21 August: no interview for more than 14 days.</b> The same
+              14 days for every design, regardless of whether interviews are 3 or 14 days apart, and it
+              ignores whether anything was actually missed. Shown for continuity - note it climbs on its
+              own as time passes, so it is not comparable between dates.</span>
+            )}
+          </div>
+        </div>
+
         <div className="flex flex-wrap items-center gap-2 px-1">
           <span className="text-xs font-semibold text-gray-700">Show:</span>
           {subBtn(cdLevel, "design", setCdLevel, "By cohort design (" + byDesign.length + ")")}
@@ -1707,7 +1742,14 @@ function WorkflowUI(props) {
           <div className="mb-2 text-xs font-semibold text-gray-700">What each column means</div>
           <div className="grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
             {[["Finished the design", "#5E35B1", "Did every interview in their plan - the same measure the Cohort engagement panel calls Finished. Split into on time (by their cohort's end) and late (after it); both are finishes."],
-              ["Dropped off", "#C62828", "An interview WAS sent to them, its deadline passed, and they never completed it. Note this includes sessions they STARTED and abandoned part-way, not only silence - roughly 40% of these are replies that never reached the end. Leaving ONE interview undone is enough, so read it beside the sent-and-done column."],
+              ["Dropped off", "#C62828", cdMode === "C"
+                ? "They left an interview undone and then completed nothing further - they stopped. Includes sessions started and abandoned part-way, not only silence."
+                : cdMode === "B"
+                ? "They left at least one sent interview undone, whether or not they carried on. One missed interview out of thirteen is enough to land here."
+                : "No interview for more than 14 days, measured at their cohort's last activity. Says nothing about what was missed."],
+              ["Skipped but returned", "#F9A825", cdMode === "C"
+                ? "Missed an interview, then came back and did more. Engaged people with a hole in their data - a different problem from someone who left."
+                : "Only shown under “Stopped and never came back”; the other readings fold these people into Dropped off."],
               ["Schedule not completed", "#0277BD", "They completed everything that was ever sent to them, but their plan was never fully sent, and the cohort has since closed. Nothing is still coming. Not their doing, so kept out of drop-off."],
               ["Never began", "#9E9E9E", "Claimed the opportunity but the bot never sent them a single interview."],
               ["Still in progress", "#607D8B", "Their cohort is still running and they have a live interview in hand. Outcome not decided yet."]]
@@ -1728,7 +1770,10 @@ function WorkflowUI(props) {
 
         <div className="flex flex-wrap gap-2">
           {[["Finished the design", tot.done, "#5E35B1", tot.late ? tot.onTime.toLocaleString() + " on time, " + tot.late.toLocaleString() + " late" : "all on time"],
-            ["Dropped off", tot.drop, "#C62828", "let a sent interview go undone"],
+            ["Dropped off", tot.drop, "#C62828", cdMode === "C" ? "stopped and never came back"
+              : cdMode === "B" ? "left any interview undone" : "no interview for 14+ days"],
+            ...(cdMode === "C" ? [["Skipped but returned", tot.skipped, "#F9A825",
+              "missed one, then carried on"]] : []),
             ["Schedule not completed", tot.notSent, "#0277BD", "did all that was sent"],
             ["Never began", tot.never, "#9E9E9E", "nothing ever sent"],
             ["Still in progress", tot.prog, "#607D8B", "cohort still running"]]
@@ -1774,6 +1819,7 @@ function WorkflowUI(props) {
                 <th className="px-2 py-1 text-right">Finished</th>
                 <th className="px-2 py-1 text-right">of which late</th>
                 <th className="px-2 py-1 text-right">Dropped off</th>
+                {cdMode === "C" && <th className="px-2 py-1 text-right">Skipped but returned</th>}
                 <th className="px-2 py-1 text-right">Schedule not completed</th>
                 <th className="px-2 py-1 text-right">Never began</th>
                 <th className="px-2 py-1 text-right">Of interviews sent, done</th>
@@ -1803,6 +1849,7 @@ function WorkflowUI(props) {
                     <td className="px-2 py-1 text-right">{pctCell(r.donePct)}</td>
                     <td className="px-2 py-1 text-right text-gray-500">{r.late ? pctCell(r.latePct) : "-"}</td>
                     <td className="px-2 py-1 text-right font-semibold" style={{ color: "#C62828" }}>{pctCell(r.dropPct)}</td>
+                    {cdMode === "C" && <td className="px-2 py-1 text-right" style={{ color: "#F9A825" }}>{r.skipped ? pctCell(r.skippedPct) : "-"}</td>}
                     <td className="px-2 py-1 text-right" style={{ color: "#0277BD" }}>{pctCell(r.notSentPct)}</td>
                     <td className="px-2 py-1 text-right text-gray-500">{r.never ? pctCell(r.neverPct) : "-"}</td>
                     <td className="px-2 py-1 text-right font-medium" style={{ color: "#2E7D32" }}
@@ -2895,10 +2942,10 @@ function WorkflowUI(props) {
                                       {co.cohort} - {co.interviews.length} interview{co.interviews.length === 1 ? "" : "s"}
                                       {/* de-impact is only computed at subgroup level, so these rows stay RAW.
                                           Say so, otherwise the parent row's Started looks like it disagrees with
-                                          the sum of its own children (e.g. ABT1-B Int 4: 137 vs 177).
+                                          the sum of its own children whenever de-impact is on.
                                             Separately, the ELIGIBLE column also sums higher than its
                                             parent wherever an FLW is claimed in two cohorts of the same
-                                            design (TRS: children 1,305 vs parent 1,298) - the subgroup
+                                            design (most visibly in TRS) - the subgroup
                                             base counts each person once, the cohort bases cannot. */}
                                       {deImpact ? <span className="ml-2 text-amber-700 font-normal">· raw (de-impact applies to the subgroup row above, not per-cohort)</span> : null}
                                     </div>
