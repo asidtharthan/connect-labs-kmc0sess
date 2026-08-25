@@ -357,6 +357,49 @@ _eng_started = defaultdict(set)
 for r in bm.rows:
     if r.get("is_started") == "Y" and r.get("matched_session_id"):
         _eng_started[r["subgroup"]].add(r["connect_id"])
+# ---- CROSS-VIEW: the two drop-off views must describe the same workers ---------------------------
+# See the docstring reasoning above this file's review-status block. The failure this catches is real:
+# reading C was implemented twice, and the copy in cohort_dropoff omitted the deadline test, so workers
+# who had started an interview within the last 72 hours were reported as "stopped and never came back".
+_ce = dd.get("cohortEngagement") or {}
+_cd_by_sg = {}
+for _r in dd.get("cohortDropoff") or []:
+    _sg2 = (dd.get("cohortSG") or {}).get(_r["c"])
+    if not _sg2:
+        continue
+    _a = _cd_by_sg.setdefault(_sg2, {"dB": 0, "dC": 0, "dA": 0, "n": 0, "z": 0})
+    for _k3 in ("dB", "dC", "dA", "n", "z"):
+        _a[_k3] += _r.get(_k3, 0)
+
+_xv_bad = []
+for _sg2, _agg in sorted(_cd_by_sg.items()):
+    _s = _ce.get(_sg2)
+    if not _s or not _s.get("weeks"):
+        continue
+    _i = len(_s["weeks"]) - 1
+    # The engagement series cannot see workers with no session at all. Drop-off can, and counts them
+    # as dropped under every reading. So drop-off should be HIGHER by at most that many, never lower.
+    _sessionless = _agg["n"] - _agg["z"] - _s["started"][_i]
+    # The two views are only comparable like-for-like when they are scored at the SAME instant.
+    # Engagement's grid ends at that design's last observed session; drop-off scores at today. Where
+    # those differ, more deadlines have passed for drop-off and a gap is expected, so only the
+    # DIRECTION is enforced. Where they coincide (the design was active today), the numbers must agree
+    # to within the workers engagement cannot see at all.
+    _same_day = _s["weeks"][_i] == dd.get("today")
+    for _tag, _cdk, _cek in (("C", "dC", "dropC"), ("B", "dB", "dropped")):
+        _gap = _agg[_cdk] - _s[_cek][_i]
+        if _gap < 0:
+            _xv_bad.append(f"{_sg2}/{_tag}: drop-off {_agg[_cdk]} is LOWER than engagement "
+                           f"{_s[_cek][_i]} - drop-off sees strictly more workers, so this is drift")
+        elif _same_day and _gap > max(_sessionless, 0):
+            _xv_bad.append(f"{_sg2}/{_tag}: same as-of date ({_s['weeks'][_i]}) but drop-off "
+                           f"{_agg[_cdk]} vs engagement {_s[_cek][_i]} (gap {_gap}, only "
+                           f"{max(_sessionless, 0)} session-less workers explain it)")
+chk("cross-view: Drop-off by cohort and Cohort Engagement agree on who dropped",
+    not _xv_bad,
+    "; ".join(_xv_bad[:4]) if _xv_bad else
+    f"{len(_cd_by_sg)} designs, both readings, within the session-less allowance")
+
 # ---- OCS review status -------------------------------------------------------------------------
 # The verdict split must account for EVERY completed interview exactly once, and the by-design and
 # by-topic breakdowns must each add back to the overall. If they do not, the view would show a number

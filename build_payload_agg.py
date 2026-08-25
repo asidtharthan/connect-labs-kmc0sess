@@ -106,7 +106,10 @@ for sg in SG_PRESENT:
             gaps.append(abs((lt[0]["received_on"] - pt[0]["received_on"]).total_seconds()) / 86400.0)
     med = _median(gaps)
     if med is not None and med < DEIMPACT_GAP_DAYS:
-        deimpact[sg] = {"last_n": last_n, "count": len(did_last_only)}
+        # count_c = how many of them COMPLETED it. Removing people from Started without removing
+        # their completions is what made Completed exceed Started in seven rows.
+        deimpact[sg] = {"last_n": last_n, "count": len(did_last_only),
+                        "count_c": len(did_last_only & fset[(sg, last_n)]["c"])}
 print(f"[8] de-impact (penult/last artifact): {sum(d['count'] for d in deimpact.values())} FLWs across {sorted(deimpact)}")
 
 # ---- per-(subgroup, interview) release status (items A1/A2): not-available / in-progress / settled ----
@@ -163,6 +166,7 @@ for sg in SG_PRESENT:
         f = fset[(sg, n)]
         t, s, cc = len(f["t"]), len(f["s"]), len(f["c"])
         s_di = s - di["count"] if (di and n == di["last_n"]) else s
+        c_di = cc - di.get("count_c", 0) if (di and n == di["last_n"]) else cc
         st = _release_status(sg, n)
         # "reached-previous-interview" retention: of the FLWs who STARTED interview n-1, what fraction
         # ALSO started interview n. Numerator = |started(n) ∩ started(n-1)| (NOT raw started(n) — an FLW
@@ -195,6 +199,8 @@ for sg in SG_PRESENT:
                 "pct_completed_base": tsl.r1(100 * cc / elig),
                 # de-impacted started (penult/last artifact removed from the LAST interview only)
                 "started_di": s_di,
+                "completed_di": c_di,
+                "pct_completed_di": tsl.r1(100 * c_di / s_di) if s_di else None,
                 "pct_started_di": tsl.r1(100 * s_di / elig),
                 # %Started vs FLWs who started the previous interview (reached-prev denominator)
                 "prev_started": prev_started,          # denominator = |started(n-1)| (n=1 -> elig)
@@ -425,7 +431,7 @@ for r in bm.rows:
         coh_fset[key]["c"].add(r["connect_id"])
 
 
-def _iv_blocks(topics, init_set, fget, di_n=None, di_ct=0):
+def _iv_blocks(topics, init_set, fget, di_n=None, di_ct=0, di_cc=0):
     base = len(init_set) or 1
     out = []
     for i, tc in enumerate(topics):
@@ -433,6 +439,7 @@ def _iv_blocks(topics, init_set, fget, di_n=None, di_ct=0):
         f = fget(n)
         t, s, c = len(f["t"]), len(f["s"]), len(f["c"])
         s_di = s - di_ct if (di_n is not None and n == di_n and di_ct) else s
+        c_di = c - di_cc if (di_n is not None and n == di_n and di_cc) else c
         out.append({
             "n": n, "topic": tc, "name": bm.TOPIC_NAMES[tc],
             "eligible": len(init_set), "triggered": t, "pct_trig": tsl.r1(100 * t / base),
@@ -440,6 +447,10 @@ def _iv_blocks(topics, init_set, fget, di_n=None, di_ct=0):
             "completed": c, "pct_completed": tsl.r1(100 * c / s) if s else None,
             "pct_completed_base": tsl.r1(100 * c / base),  # completed / initiated base (retention)
             "started_di": s_di, "pct_started_di": tsl.r1(100 * s_di / base),  # de-impacted (item 8)
+            # Completed is de-impacted by the SAME people, so the row cannot report more completions
+            # than starts. Without this, seven rows did exactly that.
+            "completed_di": c_di,
+            "pct_completed_di": tsl.r1(100 * c_di / s_di) if s_di else None,
         })
     return out
 
@@ -458,7 +469,9 @@ for sg in SG_PRESENT:
     dropoff_sg.append({
         "sg": sg, "cohorts_n": cohorts_n, "connect": connect,
         "interviews": _iv_blocks(bm.SUBGROUP_DESIGN[sg]["topics"], init, lambda n, _sg=sg: fset[(_sg, n)],
-                                 di_n=deimpact.get(sg, {}).get("last_n"), di_ct=deimpact.get(sg, {}).get("count", 0)),
+                                 di_n=deimpact.get(sg, {}).get("last_n"),
+                                 di_ct=deimpact.get(sg, {}).get("count", 0),
+                                 di_cc=deimpact.get(sg, {}).get("count_c", 0)),
     })
 
 dropoff_cohorts = defaultdict(list)
@@ -902,7 +915,10 @@ print(f"[eng] by-LLO splits for: {sorted(cohort_engagement_llo)}")
 # design. That scores a TRS cohort which closed on 15 April against the same calendar as one that
 # closed on 22 May, 37 days later. Here every cohort gets its own end date and is measured there, so
 # the numbers are comparable across designs and across start dates.
-_coh_slot = {}                                      # (cohort, flw, interview_n) -> (deadline, done_or_None)
+# (cohort, flw, interview_n) -> (deadline, done_or_None, interview_n). The third element is what lets
+# the SHARED reading function tell a skip from a stop; without it, progress_at_reading silently falls
+# back to reading B, which is exactly how the two views drifted apart.
+_coh_slot = {}
 _coh_done = defaultdict(lambda: defaultdict(dict))  # cohort -> flw -> {topic: completed date}
 _coh_dates = defaultdict(lambda: defaultdict(set))  # cohort -> flw -> {session dates}
 for r in bm.rows:
@@ -919,7 +935,8 @@ for r in bm.rows:
         # Completed beats not-completed; between two completed rows keep the earlier date.
         if _prev is None or (_done is not None and (_prev[1] is None or _done < _prev[1])):
             _coh_slot[_k] = (_slot_deadline(int(r["interview_n"]), _tr, _cad, _c,
-                                            r.get("trigger_received_on")), _done)
+                                            r.get("trigger_received_on")), _done,
+                             int(r["interview_n"]))
     if r.get("is_completed") == "Y" and _d:
         _coh_done[_c][_f][r["topic_code"]] = _d
     if r.get("is_started") == "Y" and _d:
@@ -971,7 +988,7 @@ for _c, _inf in sorted(bm.cohort_info.items()):
     _sent = _cdone = 0
     for _f2, _lst in _coh_dl.get(_c, {}).items():
         _sent += len(_lst)
-        _cdone += sum(1 for _d0, _d1 in _lst if _d1 is not None)
+        _cdone += sum(1 for _t in _lst if _t[1] is not None)
     for _f in sorted(_coh_seen.get(_c, ())):
         _dts = _coh_done.get(_c, {}).get(_f, {})
         _fdate = sorted(_dts.values())[len(_tops) - 1] if len(_dts) >= len(_tops) else None
@@ -980,23 +997,24 @@ for _c, _inf in sorted(bm.cohort_info.items()):
             _tally["never-began"] += 1   # claimed, but the bot never sent them anything
             continue
 
-        # ---- the three readings of "dropped off", all on the same worker
-        _seq = sorted(_coh_seq.get(_c, {}).get(_f, ()))
-        _undone = [_n for _n, _done in _seq if not _done]
-        _last_done = max([_n for _n, _done in _seq if _done], default=-1)
+        # ---- the three readings, from the ONE shared definition. This used to be an inline copy that
+        # omitted the deadline test, so a worker whose interview was sent three days ago and is not yet
+        # due read as "stopped and never came back". Same function the engagement chart calls, same
+        # 3-tuple input, so the two views cannot drift apart again.
         _finished_all = _fdate is not None
-        if _undone and not _finished_all:
-            _tally["B"] += 1                                   # B: left anything undone
-            # C: did they carry on afterwards? A gap BEFORE their last completed interview is a skip,
-            # not a departure. Only an unfinished tail means they actually stopped.
-            if any(_n > _last_done for _n in _undone):
-                # ...unless the cohort is still running, in which case the tail may yet be done
-                if _closed:
-                    _tally["C"] += 1
+        if not _finished_all:
+            _b = tsl.progress_at_reading(_dl, TODAY, _fdate, "B")
+            if _b == "dropped":
+                _tally["B"] += 1
+                _c_state = tsl.progress_at_reading(_dl, TODAY, _fdate, "C")
+                if _c_state == "dropped":
+                    # ...unless the cohort is still running, in which case the tail may yet be done
+                    if _closed:
+                        _tally["C"] += 1
+                    else:
+                        _tally["C_open"] += 1
                 else:
-                    _tally["C_open"] += 1
-            else:
-                _tally["skipped"] += 1                         # skipped one, came back
+                    _tally["skipped"] += 1                     # skipped one, came back
         # A: the pre-21-Aug rule - not finished, and silent for more than 14 days as of the cohort's
         # own last observed session (the old weekly grid froze there rather than running to today).
         _ds = _coh_dates.get(_c, {}).get(_f)
@@ -1036,7 +1054,11 @@ for _c, _inf in sorted(bm.cohort_info.items()):
     # fully sent, z = nothing ever sent. Exhaustive, so f+l+d+w+z+in-progress == n.
     # dA / dB / dC = the three readings. sk = skipped one and came back (B minus C). The render
     # switches which of the three it calls "Dropped off"; everything else is shared.
+    # nb = the workers the bot actually ASKED (n minus never-began). Every rate except "never began"
+    # is divided by this: someone who was never sent an interview cannot have stopped, so leaving them
+    # in the denominator only deflates the rate against a population that can never be in the numerator.
     _row = {"c": _c, "s": _tr.isoformat(), "e": _end.isoformat(), "n": _n,
+            "nb": _n - _tally["never-began"],
             "f": _tally["finished"], "l": _tally["completed-late"], "d": _tally["dropped"],
             "dA": _tally["A"], "dB": _tally["B"], "dC": _tally["C"], "sk": _tally["skipped"],
             "w": _tally["waiting"], "z": _tally["never-began"],

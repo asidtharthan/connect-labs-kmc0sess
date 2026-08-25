@@ -518,7 +518,10 @@ RD = json.loads(raw_json)
 # a payload with a missing key.
 ALLOWED_DROP_TOP = {"funnel", "granular_total"}
 ALLOWED_DROP_COHORT = {"connect"}
-ALLOWED_DROP_COHORT_IV = {"pct_completed_base", "started_di", "pct_started_di", "name"}
+ALLOWED_DROP_COHORT_IV = {"pct_completed_base", "started_di", "pct_started_di", "name",
+                          # per-cohort rows are never de-impacted (the toggle is subgroup-level and
+                          # the page says so), so their de-impact fields are dead weight in the render
+                          "completed_di", "pct_completed_di"}
 ADDED_KEYS = {"flwMatrixCohorts", "flwMatrixV2", "flwMatrixOrder", "flwMatrixOrderW"}
 
 # G1: top-level key set == dashboard keys - dropped - flwMatrix + the flwMatrix* encoding keys
