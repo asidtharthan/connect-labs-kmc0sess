@@ -507,6 +507,18 @@ if not os.environ.get("AUDIT_SKIP_CLOCK"):
         else:
             yield p, o
 
+    # Build BOTH sides here rather than trusting whatever payload_agg.json happens to hold. Reading
+    # the on-disk file made this check depend on what ran before it: a stale file from an earlier
+    # build reported 275 phantom moves, and a clean rebuild then reported none. A gate whose verdict
+    # depends on command ordering is not a gate.
+    _env_now = dict(os.environ, PYTHONIOENCODING="utf-8")
+    _env_now.pop("INTERVIEWS_TODAY", None)
+    _r0 = subprocess.run([sys.executable, "build_payload_agg.py"], env=_env_now,
+                         capture_output=True, text=True, timeout=1800)
+    if _r0.returncode != 0:
+        chk("G", "ENDED cohorts are invariant to the build date", False,
+            f"baseline rebuild failed: {(_r0.stderr or '')[-200:]}")
+        raise SystemExit(1)
     _now = json.load(open("payload_agg.json", encoding="utf-8"))
     _env = dict(os.environ, INTERVIEWS_TODAY="2027-03-01", PYTHONIOENCODING="utf-8")
     _r = subprocess.run([sys.executable, "build_payload_agg.py"], env=_env,
