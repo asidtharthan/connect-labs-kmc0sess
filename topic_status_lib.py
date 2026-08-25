@@ -23,6 +23,7 @@ STATE INDEX ORDER IS APPEND-ONLY. flwMatrix ships these as bare integers, so `co
 and `started-not-completed` must stay 4 — renderers, CSV exports and gates all index on those. New
 states go on the END. Display order is a separate concern (see BAR_ORDER in the render).
 """
+
 import math
 from datetime import timedelta
 
@@ -234,5 +235,5 @@ def progress_at_reading(deadlines, asof, finished_date=None, reading="B", silenc
     last_done = max(done_ns) if done_ns else -1
     overdue_ns = [t[2] for t in deadlines if t[0] <= asof and (t[1] is None or t[1] > asof)]
     if any(n > last_done for n in overdue_ns):
-        return "dropped"                    # the tail is unfinished: they stopped
-    return "in-progress" if live else "waiting"   # skipped one, came back
+        return "dropped"  # the tail is unfinished: they stopped
+    return "in-progress" if live else "waiting"  # skipped one, came back
