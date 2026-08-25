@@ -362,9 +362,22 @@ _eng_bad = []
 # Per-week arrays that must all be the same length. Deliberately lists only what the RENDER receives:
 # the rhythm counts, the `waiting` count and ended/end_date are stripped in build_dashboard_data
 # because nothing in the template reads them, so naming them here would fail on their absence.
-_eng_keys = ("weeks", "started", "finished_pct", "steady_pct", "incons_pct", "drop_pct",
-             "waiting_pct", "inprog_pct", "rhythm_base", "finished", "new", "active", "slow",
-             "quiet")
+_eng_keys = ("weeks", "started", "steady_pct", "incons_pct", "rhythm_base", "finished",
+             "new", "active", "slow", "quiet", "dropped", "waiting", "dropC", "waitC",
+             "dropA", "waitA")
+
+
+def _largest_remainder(counts, base):
+    """Largest-remainder percentages. Deliberately a SEPARATE implementation from the payload's."""
+    if not base:
+        return [0] * len(counts)
+    exact = [100.0 * c / base for c in counts]
+    out = [int(e) for e in exact]
+    rem = 100 - sum(out)
+    order = sorted(range(len(counts)), key=lambda i: exact[i] - int(exact[i]), reverse=True)
+    for k in range(rem):
+        out[order[k % len(order)]] += 1
+    return out
 
 
 def _eng_consistent(label, c, expect_started=None):
@@ -381,9 +394,22 @@ def _eng_consistent(label, c, expect_started=None):
         # closed. Checking them as one sum would hide exactly that failure.
         # EXACTLY 100 now, not 99-101: largest-remainder rounding closes the stack, and the legend
         # promises it closes. A tolerance here would let the promise quietly break again.
-        _o = (c["finished_pct"][i] + c["drop_pct"][i] + c["waiting_pct"][i] + c["inprog_pct"][i])
-        if _o != (100 if c["started"][i] else 0):
-            _eng_bad.append(f"{label}[{i}]: outcome % sum {_o}, expected {100 if c['started'][i] else 0}")
+        # The outcome percentages are no longer shipped: the page derives them from the counts for
+        # whichever reading is selected. So this recomputes them the way the page will, INDEPENDENTLY
+        # of the render, and does it for all three readings - each has to close on its own.
+        for _tag, _dk, _wk in (("B", "dropped", "waiting"), ("C", "dropC", "waitC"),
+                               ("A", "dropA", "waitA")):
+            _st = c["started"][i]
+            _ip = _st - c["finished"][i] - c[_dk][i] - c[_wk][i]
+            if _ip < 0:
+                _eng_bad.append(f"{label}[{i}]/{_tag}: in-progress residual is negative ({_ip})")
+                continue
+            _o = sum(_largest_remainder([c["finished"][i], c[_dk][i], c[_wk][i], _ip], _st))
+            if _o != (100 if _st else 0):
+                _eng_bad.append(f"{label}[{i}]/{_tag}: outcome % sum {_o}, expected "
+                                f"{100 if _st else 0}")
+        if c["dropC"][i] > c["dropped"][i]:
+            _eng_bad.append(f"{label}[{i}]: C ({c['dropC'][i]}) exceeds B ({c['dropped'][i]})")
         _r = c["steady_pct"][i] + c["incons_pct"][i]
         _rb = c["rhythm_base"][i]
         if _rb and _r != 100:

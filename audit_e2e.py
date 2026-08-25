@@ -488,11 +488,49 @@ else:
         f"exact={exact} forward-drift={drift_fwd} other={drift_other}",
     )
 
+# ---------------------------------------------------------------- G. the clock must not move numbers
+# A cohort that has ENDED must not gain drop-outs simply because the daily job ran again. If it does,
+# the refresh is counting silence rather than behaviour, and every closed cohort drifts worse forever.
+# Rebuild the payload with the clock pushed months forward and diff EVERY leaf: only the date stamp may
+# move. Opt out with AUDIT_SKIP_CLOCK=1 (it costs one extra build).
+if not os.environ.get("AUDIT_SKIP_CLOCK"):
+    import subprocess
+
+    def _leaves(o, p=""):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                yield from _leaves(v, p + "." + str(k))
+        elif isinstance(o, list):
+            for i2, v in enumerate(o):
+                yield from _leaves(v, p + "[" + str(i2) + "]")
+        else:
+            yield p, o
+
+    _now = json.load(open("payload_agg.json", encoding="utf-8"))
+    _env = dict(os.environ, INTERVIEWS_TODAY="2027-03-01", PYTHONIOENCODING="utf-8")
+    _r = subprocess.run([sys.executable, "build_payload_agg.py"], env=_env,
+                        capture_output=True, text=True, timeout=1800)
+    if _r.returncode != 0:
+        chk("G", "closed cohorts are invariant to the build date", False,
+            f"future-dated rebuild failed: {(_r.stderr or '')[-200:]}")
+    else:
+        _fut = json.load(open("payload_agg.json", encoding="utf-8"))
+        _A, _B = dict(_leaves(_now)), dict(_leaves(_fut))
+        _diff = [k for k in set(_A) | set(_B)
+                 if _A.get(k, "<absent>") != _B.get(k, "<absent>") and k not in (".today", ".built_at")]
+        chk("G", "closed cohorts are invariant to the build date "
+                 "(no silent-FLW drift on ended opportunities)",
+            not _diff,
+            f"{len(_A):,} leaves compared, {len(_diff)} moved"
+            + (": " + ", ".join(sorted(_diff)[:4]) if _diff else ""))
+        json.dump(_now, open("payload_agg.json", "w", encoding="utf-8"))   # restore the real build
+
+
 print("\n" + "=" * 90)
 print("AUDIT SUMMARY")
 print("=" * 90)
 passed = sum(1 for _, _, p, _ in results if p)
-for sec in ["A", "B", "C", "D", "E", "F"]:
+for sec in ["A", "B", "C", "D", "E", "F", "G"]:
     secr = [r for r in results if r[0] == sec]
     print(f"  Section {sec}: {sum(1 for r in secr if r[2])}/{len(secr)} passed")
 print(f"\n  TOTAL: {passed}/{len(results)} checks passed")

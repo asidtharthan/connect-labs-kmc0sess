@@ -148,7 +148,8 @@ def progress_at(deadlines, asof, finished_date=None):
     if finished_date is not None and finished_date <= asof:
         return "finished"
     overdue = live = False
-    for dl, done in deadlines:
+    for _t in deadlines:
+        dl, done = _t[0], _t[1]
         if done is not None and done <= asof:
             continue  # done by now, nothing outstanding for this slot
         if dl <= asof:
@@ -196,3 +197,42 @@ def r1(x):
     if x is None:
         return None
     return math.floor(x * 10 + 0.5) / 10 if x >= 0 else -(math.floor(-x * 10 + 0.5) / 10)
+
+
+def progress_at_reading(deadlines, asof, finished_date=None, reading="B", silence_days=None):
+    """`progress_at` under one of the three published readings of "dropped off".
+
+    Same four mutually exclusive buckets in every reading (finished / dropped / waiting / in-progress),
+    so the outcome stack still closes to 100 whichever one is selected. Only who counts as DROPPED moves.
+
+      B  missed any        - an interview they were sent went past its deadline undone. The reading the
+                             chart has always used. A coverage measure: a 13-interview design offers
+                             thirteen chances to slip, a 2-interview design offers two.
+      C  stopped, never     - dropped only if the overdue interview is AFTER everything they completed.
+         came back           Someone who skipped one and carried on is working, not gone, so they fall
+                             back to in-progress (or waiting, if nothing is live).
+      A  silent 14 days    - the pre-21-Aug rule: not finished and no session for `silence_days`. Pure
+                             silence, blind to the schedule, so a cohort whose schedule stalled reads as
+                             mass desertion. Kept for continuity only.
+
+    `deadlines` items are (deadline, completed_date_or_None) or (deadline, completed_date_or_None,
+    interview_n). Reading C needs the third element; without it, it falls back to B.
+    """
+    if finished_date is not None and finished_date <= asof:
+        return "finished"
+    live = any(t[0] > asof and t[1] is None for t in deadlines)
+    if reading == "A":
+        if silence_days is None:
+            return progress_at(deadlines, asof, finished_date)
+        return "dropped" if silence_days else ("in-progress" if live else "waiting")
+    base = progress_at(deadlines, asof, finished_date)
+    if reading != "C" or base != "dropped":
+        return base
+    if not deadlines or len(deadlines[0]) < 3:
+        return base
+    done_ns = [t[2] for t in deadlines if t[1] is not None and t[1] <= asof]
+    last_done = max(done_ns) if done_ns else -1
+    overdue_ns = [t[2] for t in deadlines if t[0] <= asof and (t[1] is None or t[1] > asof)]
+    if any(n > last_done for n in overdue_ns):
+        return "dropped"                    # the tail is unfinished: they stopped
+    return "in-progress" if live else "waiting"   # skipped one, came back

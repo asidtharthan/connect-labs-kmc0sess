@@ -9,7 +9,13 @@ from datetime import date, datetime, timedelta, timezone
 import build_master_4src as bm
 import topic_status_lib as tsl
 
-TODAY = date.today()  # drives status time-gating; dynamic so the daily job gates against the real date
+# Drives status time-gating; dynamic so the daily job gates against the real date. INTERVIEWS_TODAY
+# overrides it for one purpose: proving that a CLOSED cohort's numbers do not move as the calendar
+# does. If a finished cohort gains drop-outs simply because time passed, the daily refresh is counting
+# silence rather than behaviour, and that is a bug. audit_e2e runs the build twice and diffs.
+import os as _os
+TODAY = (date.fromisoformat(_os.environ["INTERVIEWS_TODAY"]) if _os.environ.get("INTERVIEWS_TODAY")
+         else date.today())
 # Canonical topic order; include every topic ANY subgroup design uses (auto-picks up 12/13/C from the
 # CCHQ-derived schedule) so topic-completion never silently drops a topic the bot actually runs.
 _CANON_TOPICS = ["A", "B", "C", "D", "E", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "8S", "8L", "10S", "10L", "11S", "11L", "13L", "99", "101", "F", "G"]
@@ -575,7 +581,8 @@ for r in bm.rows:
                 _slot_deadline(int(r["interview_n"]), _rtrain, _rcad, r["cohort_id"],
                                r.get("trigger_received_on")),
                 _d if r.get("is_completed") == "Y" else None,
-            ))
+                int(r["interview_n"]),      # reading C needs the slot number: a gap BEFORE their last
+            ))                              # completed interview is a skip, a gap after it is a stop
     if r.get("is_started") == "Y" and _d:
         _eng_flw_dates[r["subgroup"]][r["connect_id"]].add(_d)
     if r.get("is_completed") == "Y" and _d:
@@ -664,10 +671,12 @@ def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date, deadlines=None
     steady_p, incons_p, drop_p, fin_p, wait_p, inprog_p = [], [], [], [], [], []
     new_s, active_s, slow_s, quiet_s, finst_s, wait_s, rbase_s = [], [], [], [], [], [], []
     steady_s, incons_s, drop_s, inprog_s = [], [], [], []
+    dropC_s, waitC_s, dropA_s, waitA_s = [], [], [], []
     prevW = None
     for W in Ws:
         started = steady = incons = drop = new = active = slow = quiet = fin = wait = 0
         inprog = rbase = 0
+        dropC = waitC = dropA = waitA = 0
         for _flw, ds in flw_dates.items():
             dsW = sorted(d for d in ds if d <= W)
             if not dsW:
@@ -680,12 +689,22 @@ def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date, deadlines=None
             is_finished = _fdate is not None and _fdate <= W
             _gt = (gap_of or {}).get(_flw, gap_thresh)
             _cad = (cad_of or {}).get(_flw) or max(_gt // 2, 1)
-            _prog = tsl.progress_at((deadlines or {}).get(_flw, ()), W, _fdate)
-            # ---- OUTCOME: where they ended up. Mutually exclusive.
+            _dls = (deadlines or {}).get(_flw, ())
+            _prog = tsl.progress_at(_dls, W, _fdate)
+            # ---- OUTCOME: where they ended up. Mutually exclusive, and computed three ways so the
+            # chart can be read under any of the three published definitions of "dropped off". Only
+            # who counts as dropped moves; the four buckets still close to 100 in every reading.
+            _progC = tsl.progress_at_reading(_dls, W, _fdate, "C")
+            _progA = tsl.progress_at_reading(_dls, W, _fdate, "A", silence_days=(sil > 14))
             if is_finished:           fin += 1       # FINISHED outranks the other outcomes
             elif _prog == "dropped":  drop += 1      # let a sent interview go past its deadline
             elif _prog == "waiting":  wait += 1      # did everything sent; schedule sent no more
             else:                     inprog += 1    # still has a live interview in hand
+            if not is_finished:
+                if _progC == "dropped":   dropC += 1
+                elif _progC == "waiting": waitC += 1
+                if _progA == "dropped":   dropA += 1
+                elif _progA == "waiting": waitA += 1
             # ---- RHYTHM: how they worked. Independent of the outcome, so a finisher counts too.
             # Needs at least two interviews - one interview has no gap to judge.
             if len(dsW) >= 2:
@@ -711,16 +730,24 @@ def _eng_compute(flw_dates, finished_dates, gap_thresh, end_date, deadlines=None
         finst_s.append(fin); wait_s.append(wait); rbase_s.append(rbase)
         steady_s.append(steady); incons_s.append(incons)
         drop_s.append(drop); inprog_s.append(inprog)
+        dropC_s.append(dropC); waitC_s.append(waitC)
+        dropA_s.append(dropA); waitA_s.append(waitA)
         prevW = W
     ended = end_date is not None and TODAY > end_date
     return {"weeks": weeks, "started": started_s,
-            # outcome: sums to 100 across all starters
-            "finished_pct": fin_p, "drop_pct": drop_p, "waiting_pct": wait_p, "inprog_pct": inprog_p,
+            # OUTCOME percentages are NOT shipped. They are exactly finished/dropped/waiting/inprog
+            # over `started`, and shipping both meant two sources of truth for one number and ~8 KB of
+            # a 512 KB render spent restating counts we already send. The page derives all four with
+            # the same largest-remainder rounding, for whichever reading is selected - which is also
+            # the only way the other two readings could be offered without shipping eight more arrays.
             # rhythm: sums to 100 across starters with 2+ interviews (rhythm_base)
             "steady_pct": steady_p, "incons_pct": incons_p, "rhythm_base": rbase_s,
             "steady": steady_s, "incons": incons_s, "dropped": drop_s, "inprog": inprog_s,
             "finished": finst_s, "new": new_s, "active": active_s, "slow": slow_s, "quiet": quiet_s,
             "waiting": wait_s,
+            # the other two readings, as COUNTS - the render divides by `started` and takes
+            # in-progress as the residual, so nothing has to be kept in sync in two places
+            "dropC": dropC_s, "waitC": waitC_s, "dropA": dropA_s, "waitA": waitA_s,
             "gap_thresh": gap_thresh, "total_started": started_s[-1],
             "ended": ended, "end_date": end_date.isoformat() if end_date else None}
 

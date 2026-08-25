@@ -106,11 +106,30 @@ def inject():
     if "/*__DATA__*/" not in tpl:
         print("ABORT: template missing /*__DATA__*/ placeholder", flush=True)
         sys.exit(1)
+    # Ship without comments. The source keeps every one of them - they are what makes the render
+    # auditable - but they cost 27 KB of a hard 512 KB render_code limit that was down to 2 KB of
+    # headroom. Babel reprints (no presets, no transforms) so JSX is untouched. If the strip fails for
+    # any reason we publish the commented template rather than nothing, and say so loudly.
+    import subprocess
+    import tempfile
+    _stripped = os.path.join(tempfile.gettempdir(), "interviews_render_stripped.js")
+    try:
+        _r = subprocess.run(["node", os.path.join(ROOT, "strip_render_comments.js"), TEMPLATE,
+                             _stripped], capture_output=True, text=True, timeout=300)
+        if _r.returncode == 0 and os.path.exists(_stripped):
+            print("   " + (_r.stdout or "").strip(), flush=True)
+            with open(_stripped, encoding="utf-8") as f:
+                tpl = f.read()
+        else:
+            print(f"WARNING: comment strip failed (rc={_r.returncode}) - publishing the commented "
+                  f"template, which is larger: {(_r.stderr or '').strip()[:200]}", flush=True)
+    except Exception as _e:                                   # node missing, timeout, anything
+        print(f"WARNING: comment strip skipped ({_e}) - publishing the commented template", flush=True)
     out = tpl.replace("/*__DATA__*/", data)
     with open(RENDER_OUT, "w", encoding="utf-8") as f:
         f.write(out)
     kb = len(out.encode()) / 1024
-    code_kb = (len(tpl.encode()) - len("/*__DATA__*/")) / 1024
+    code_kb = (len(tpl.encode()) - len("/*__DATA__*/")) / 1024   # tpl is the SHIPPED (stripped) copy
     data_kb = len(data.encode()) / 1024
     print(f"--- wrote {RENDER_OUT} ({kb:.1f} KB = {code_kb:.1f} KB code + {data_kb:.1f} KB data)", flush=True)
     print(f"---   payload: {full_kb:.1f} KB full -> {data_kb:.1f} KB pruned "

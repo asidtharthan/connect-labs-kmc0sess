@@ -66,6 +66,9 @@ function WorkflowUI(props) {
   var esg = React.useState("ALL"); var engSg = esg[0], setEngSg = esg[1];              // cohort-engagement: selected cohort (default ALL - meaningful first view)
   var ell = React.useState("all"); var engLlo = ell[0], setEngLlo = ell[1];            // cohort-engagement: LLO filter (all | COWACDI | EHA)
   var ewin = React.useState("active"); var engWin = ewin[0], setEngWin = ewin[1];      // cohort-engagement: active window | full timeline
+  // Which of the three readings of "dropped off" the OUTCOME lines use. Same three as the Drop-off by
+  // cohort view and the same default, so the two views cannot tell different stories about one worker.
+  var edm = React.useState("C"); var engMode = edm[0], setEngMode = edm[1];
   var emk = React.useState(false); var engMark = emk[0], setEngMark = emk[1];
   var dsc = React.useState("flow"); var docSec = dsc[0], setDocSec = dsc[1];          // Documentation tab: which section
   var dnd = React.useState(null); var docNode = dnd[0], setDocNode = dnd[1];          // Documentation tab: selected lineage node
@@ -373,7 +376,7 @@ function WorkflowUI(props) {
           ["Connect funnel", "Invited → accepted → Learn completed → claimed → initiated. Everything before an interview exists."],
           ["Interview drop-off table", "Per interview slot: eligible, triggered, started, completed, with three percentage bases (see Indicators)."],
           ["Retention lines", "Completion by interview number, with a Denominator toggle and a de-impact toggle."],
-          ["Cohort Engagement (3 panels)", "Weekly recruitment, outcome (Completed / Dropped off / Schedule not completed / In progress) plus rhythm (Steady / Inconsistent), and status-now (New / Active / Slow / Quiet / Finished)."],
+          ["Cohort Engagement (3 panels)", "Weekly recruitment, outcome (Finished / Dropped off / Schedule not completed / In progress) plus rhythm (Steady / Inconsistent), and status-now (New / Active / Slow / Quiet / Finished). The outcome lines follow whichever of the three readings of “dropped off” is selected; rhythm and status-now measure gaps between sessions, so no definition of drop-off changes them."],
           ["Drop-off by cohort", "One row per cohort design or per individual cohort, each scored at ITS OWN end date rather than today or a date shared across the design. Five mutually exclusive states, defined on the page itself, plus a table showing what a fixed number of days would have meant in each design. Sortable by drop-off or by name at either level."]
         ] },
       { id: "fullretention", name: "Full Retention Table", question: "Give me every cohort × interview number in one grid.",
@@ -427,10 +430,14 @@ function WorkflowUI(props) {
         how: "Completed EVERY interview in their cohort’s design. The finish date is the date the last one was completed.",
         base: "FLWs who started ≥ 1 interview in that subgroup",
         gotcha: "Depends on the design length, so it is not comparable across subgroups without saying how many interviews each has. Finished OUTRANKS every other status - a finisher is never counted as dropped." },
-      { g: "Engagement", name: "Dropped off", where: "Funnels → Cohort Engagement; Funnels → Drop-off by cohort",
-        how: "Has NOT finished the schedule AND an interview they were actually sent went past its deadline unfinished. The deadline is one interview gap after it was released - so 3 days in a 3-day design and 14 in a 14-day one. This is the same rule the FLW × Topic matrix uses to call a slot missed/overdue, so the two halves of the dashboard now agree.",
+      { g: "Engagement", name: "Dropped off - THREE readings", where: "Funnels → Cohort Engagement; Funnels → Drop-off by cohort (same three buttons in both)",
+        how: "Both views offer the same three readings of the same workers, with the same default. (1) STOPPED AND NEVER CAME BACK - default - they let a sent interview pass its deadline AND completed nothing afterwards. (2) MISSED ANY INTERVIEW - they let any sent interview pass its deadline, even if they carried on. (3) NO CONTACT FOR 14 DAYS - not finished and no session for 14 days, the same 14 for every design. A deadline is one interview gap after it was released (that is, after the interview was sent), so 3 days in a 3-day design and 14 in a 14-day one - the same rule the FLW × Topic matrix uses to call a slot missed/overdue.",
         base: "FLWs who started ≥ 1 interview",
-        gotcha: "Only interviews the bot ACTUALLY SENT can be missed. An FLW who completed everything sent to them but whose design never finished is counted as SCHEDULE NOT COMPLETED, not Dropped - blaming them for a schedule that stopped would be wrong. Recoverable on purpose: complete a late interview and the FLW leaves this bucket." },
+        gotcha: "Read MISSED ANY INTERVIEW as data coverage, not retention: a longer schedule offers more chances to slip, so it penalises long designs by construction. NO CONTACT FOR 14 DAYS is kept for continuity only - it is blind to how fast a cohort runs, it climbs on its own as time passes, and it is a reconstruction rather than a replay of the figures published before 21 Aug. Only interviews the bot ACTUALLY SENT can be missed: an FLW who completed everything sent but whose design never finished is SCHEDULE NOT COMPLETED, not dropped. Recoverable on purpose: complete a late interview and the FLW leaves the bucket." },
+      { g: "Engagement", name: "Skipped but returned", where: "Funnels → Drop-off by cohort (shown under the default reading)",
+        how: "Missed a sent interview, then completed at least one interview after it. Exactly the difference between MISSED ANY INTERVIEW and STOPPED AND NEVER CAME BACK, so the two always add back to it.",
+        base: "FLWs who started ≥ 1 interview",
+        gotcha: "These are engaged workers with a hole in their data, which is a different problem from people who left and needs a different response. Do not add them to a drop-off figure - under the default reading they are deliberately NOT dropped." },
       { g: "Engagement", name: "Schedule not completed", where: "Funnels → Cohort Engagement; Funnels → Drop-off by cohort",
         how: "Completed every interview that was ever SENT to them, but their design is not complete because nothing further was sent, and their cohort has since closed.",
         base: "FLWs who started ≥ 1 interview",
@@ -490,7 +497,7 @@ function WorkflowUI(props) {
       { g: "Display", name: "Dotted vs solid funnel line", where: "Funnels → Retention lines",
         how: "Dotted while a subgroup is still inside its expected rollout window; solid once every cohort has passed it.",
         base: "-",
-        gotcha: "Dotted means “still arriving, do not read the fall as attrition”. Two subgroups whose real schedule cannot be derived have a pinned end date, taken from the Cohort Tracker." }
+        gotcha: "Dotted means “still arriving, do not read the fall as attrition”. The end date comes from the SAME cohort-end map the drop-off view uses, so a line cannot go solid on a cohort that view still scores as open. A pinned override exists for a design whose real rollout cannot be derived, but none is in force." }
     ],
 
     // ---- adding a cohort: the checklist, verified against current code
@@ -1299,6 +1306,63 @@ function WorkflowUI(props) {
                 );
               });
             })()}
+            {/* The retention rules, one row per cohort design. Ali asked for exactly this table: one
+                row per cohort config type, one column per calculation that feeds the retention graphs.
+                Built from live DATA (subgroupDesign + cohortSG + cohortDropoff) - nothing hardcoded,
+                so a new design appears here the day it is onboarded. */}
+            <div className="mt-4">
+              <div className="text-xs font-bold text-white inline-block rounded px-1.5 py-0.5 mb-1" style={{ background: "#5E35B1" }}>Retention rules, by cohort design</div>
+              <div className="text-xs text-gray-600 mb-1">
+                Every rule below is derived from the design itself, so it adapts as cohorts are added.
+                Nothing here is a hand-set threshold.
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table className="min-w-full text-xs border-collapse">
+                  <thead className="bg-gray-50 text-gray-600">
+                    <tr>
+                      {["Design", "Cohorts", "Interviews", "Gap", "Runs", "Missed when",
+                        "Steady means", "Active / Slow / Quiet"]
+                        .map(function (h) { return <th key={h} className="px-2 py-1 text-left border-b">{h}</th>; })}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(function () {
+                      var sd = DATA.subgroupDesign || {}, cs = DATA.cohortSG || {};
+                      var byS = {};
+                      (DATA.cohortDropoff || []).forEach(function (r) {
+                        var sg = cs[r.c];
+                        if (!sg) return;
+                        var a = byS[sg] || (byS[sg] = { n: 0, s: r.s, e: r.e });
+                        a.n += 1;
+                        if (r.s < a.s) a.s = r.s;
+                        if (r.e > a.e) a.e = r.e;
+                      });
+                      return Object.keys(byS).sort(function (x, y) { return byS[y].n - byS[x].n; })
+                        .map(function (sg) {
+                          var d = sd[sg] || {}, cad = d.cadence, a = byS[sg];
+                          return (
+                            <tr key={sg} className="border-b">
+                              <td className="px-2 py-1 font-medium">{sg}</td>
+                              <td className="px-2 py-1">{a.n}</td>
+                              <td className="px-2 py-1">{(d.topics || []).length || "-"}</td>
+                              <td className="px-2 py-1">{cad ? cad + "d" : "-"}</td>
+                              <td className="px-2 py-1">{a.s + " to " + a.e}</td>
+                              <td className="px-2 py-1">{cad ? cad + "d after it is sent" : "-"}</td>
+                              <td className="px-2 py-1">{cad ? "no gap over " + 2 * cad + "d" : "-"}</td>
+                              <td className="px-2 py-1">{cad ? "≤" + cad + "d / " + (cad + 1) + "-" + 2 * cad + "d / over " + 2 * cad + "d" : "-"}</td>
+                            </tr>
+                          );
+                        });
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+              <div className="text-xs mt-1" style={{ color: "#b45309" }}>
+                <b>Read with care:</b> every column is a multiple of that design&apos;s own interview
+                gap, which is why none of them is a fixed number of days across designs. Comparing two
+                designs on a raw day-count instead will always favour the slower one.
+              </div>
+            </div>
           </div>, "#0277BD") : null}
 
         {/* ---------- 6. TROUBLESHOOTING */}
@@ -1438,11 +1502,43 @@ function WorkflowUI(props) {
   function activeEndFor(sg, ce, thrPct) {
     return sg === "ALL" ? activeEndIdxAll(DATA.cohortEngagement || {}, thrPct) : activeEndIdx(ce, thrPct);
   }
+  // Re-derive the four OUTCOME percentages under a chosen reading of "dropped off". The payload ships
+  // COUNTS for the two non-default readings; finished never moves and in-progress is the residual, so
+  // nothing has to be kept in step in two places. Largest-remainder so the four still close to 100 -
+  // the legend promises they do.
+  function pcts100(counts, base) {
+    if (!base) return counts.map(function () { return 0; });
+    var exact = counts.map(function (c) { return (100 * c) / base; });
+    var out = exact.map(Math.floor);
+    var rem = 100 - out.reduce(function (a, b) { return a + b; }, 0);
+    var order = exact
+      .map(function (e, i) { return [e - Math.floor(e), i]; })
+      .sort(function (a, b) { return b[0] - a[0]; });
+    for (var k = 0; k < rem; k++) out[order[k % order.length][1]] += 1;
+    return out;
+  }
+  function applyReading(ce, mode) {
+    if (!ce) return ce;
+    var dk = mode === "C" ? "dropC" : mode === "A" ? "dropA" : "dropped";
+    var wk = mode === "C" ? "waitC" : mode === "A" ? "waitA" : "waiting";
+    // A payload that still ships the percentages (an older render) is left exactly as built.
+    if (!Array.isArray(ce[dk]) || !Array.isArray(ce[wk])) return ce;
+    var out = Object.assign({}, ce);
+    out.drop_pct = []; out.waiting_pct = []; out.inprog_pct = []; out.finished_pct = [];
+    for (var i = 0; i < ce.weeks.length; i++) {
+      var st = ce.started[i], fin = ce.finished[i], dv = ce[dk][i], wv = ce[wk][i];
+      var ip = Math.max(0, st - fin - dv - wv);
+      var p = pcts100([fin, dv, wv, ip], st);
+      out.finished_pct.push(p[0]); out.drop_pct.push(p[1]);
+      out.waiting_pct.push(p[2]); out.inprog_pct.push(p[3]);
+    }
+    return out;
+  }
   // Return a copy of an engagement series sliced to weeks [0..endIdx].
   function sliceCe(ce, endIdx) {
     var keys = ["weeks", "started", "finished_pct", "steady_pct", "incons_pct", "drop_pct",
       "waiting_pct", "inprog_pct", "rhythm_base", "finished", "new", "active", "slow", "quiet",
-      "waiting"];
+      "waiting", "dropped", "inprog", "dropC", "waitC", "dropA", "waitA"];
     var out = Object.assign({}, ce);
     keys.forEach(function (k) { if (Array.isArray(ce[k])) out[k] = ce[k].slice(0, endIdx + 1); });
     return out;
@@ -1483,10 +1579,10 @@ function WorkflowUI(props) {
   React.useEffect(function () {
     if (activeTab !== "funnels" || funView !== "engagement" || !window.Chart) return;
     [eng1Inst, eng2Inst, eng3Inst].forEach(function (r) { if (r.current) { r.current.destroy(); r.current = null; } });
-    var full = engData(engSg, engLlo);
+    var full = applyReading(engData(engSg, engLlo), engMode);
     if (!full) return;
     var aEnd = activeEndFor(engSg, full, engThr);
-    var ce = engWin === "active" ? sliceCe(full, aEnd) : full;
+    var ce = applyReading(engWin === "active" ? sliceCe(full, aEnd) : full, engMode);
     var labels = ce.weeks.map(fmtWk), gt = ce.gap_thresh;
     // Full timeline is CLEAN by default. The dashed boundary + greyed tail is now opt-in (engMark),
     // because "Full timeline" reading as "the whole timeline, unannotated" is what people expect and
@@ -1515,7 +1611,9 @@ function WorkflowUI(props) {
           // Dropped is no longer a flat 14-day silence rule. It asks whether an interview THIS FLW was
           // actually sent went past its deadline (released, plus one interview gap to do it) unfinished,
           // so it means the same thing in a 3-day-gap design and a 14-day-gap one.
-          { label: "Dropped off: let a due interview pass", data: ce.drop_pct, borderColor: "#C62828", backgroundColor: "#C62828" },
+          { label: "Dropped off: " + (engMode === "C" ? "stopped and never came back"
+              : engMode === "B" ? "missed any interview" : "no contact for 14 days"),
+            data: ce.drop_pct, borderColor: "#C62828", backgroundColor: "#C62828" },
           { label: "Schedule not completed: did all sent, nothing more sent", data: ce.waiting_pct, borderColor: "#0277BD", backgroundColor: "#0277BD" },
           { label: "Still in progress", data: ce.inprog_pct, borderColor: "#607D8B", backgroundColor: "#607D8B" },
           // ---- RHYTHM: a SEPARATE reading over starters with 2+ interviews. These two sum to 100 on
@@ -1560,7 +1658,7 @@ function WorkflowUI(props) {
       });
     }
     return function () { [eng1Inst, eng2Inst, eng3Inst].forEach(function (r) { if (r.current) { r.current.destroy(); r.current = null; } }); };
-  }, [activeTab, funView, engSg, engLlo, engWin, engThr, engMark]);
+  }, [activeTab, funView, engSg, engLlo, engWin, engThr, engMark, engMode]);
 
   // ---- Drop-off by cohort (cross-cohort comparison) ----------------------------------------------
   // Each cohort is scored at ITS OWN end date, not at today and not at a date shared across its whole
@@ -1923,10 +2021,10 @@ function WorkflowUI(props) {
   function renderEngagement() {
     var CE = DATA.cohortEngagement || {};
     var sgs = (CE["ALL"] ? ["ALL"] : []).concat(SG_ORDER.filter(function (sg) { return CE[sg]; }));
-    var full = engData(engSg, engLlo);
+    var full = applyReading(engData(engSg, engLlo), engMode);
     var aEnd = full ? activeEndFor(engSg, full, engThr) : 0;
     var hasTail = full && aEnd < full.weeks.length - 1;
-    var ce = full ? (engWin === "active" ? sliceCe(full, aEnd) : full) : null;
+    var ce = full ? applyReading(engWin === "active" ? sliceCe(full, aEnd) : full, engMode) : null;
     // Windowed vs current finished count. A trimmed cohort legitimately charts a lower final bar
     // than the KPI tile shows, and comparing the two was exactly the confusion reported on
     // 2026-08-13 (chart 83 vs actual 85). State both numbers rather than leaving it to be inferred.
@@ -1942,6 +2040,24 @@ function WorkflowUI(props) {
           <span className="text-xs font-medium text-gray-600">LLO:</span>
           {[["all", "Both"], ["COWACDI", "COWACDI"], ["EHA", "EHA"]].map(function (o) { return <span key={o[0]}>{subBtn(engLlo, o[0], setEngLlo, o[1])}</span>; })}
           {ce ? <button onClick={downloadEngPng} title="Download all 3 panels as one PNG" className="ml-auto px-3 py-1.5 text-sm rounded-md border border-gray-300 hover:bg-gray-100">↓ PNG</button> : null}
+        </div>
+        {/* The same three readings as Drop-off by cohort, with the same default, so the two views
+            cannot describe one worker two different ways. It drives the OUTCOME lines in panel 2 only:
+            rhythm and panel 3 read gaps between sessions, not missed deadlines, so no definition of
+            drop-off changes them. Saying so on the page is better than letting someone click and
+            wonder why two of the three panels sat still. */}
+        <div className="flex flex-wrap items-center gap-2 px-1">
+          <span className="text-xs font-semibold text-gray-700">Dropped off means:</span>
+          {subBtn(engMode, "C", setEngMode, "Stopped and never came back")}
+          {subBtn(engMode, "B", setEngMode, "Missed any interview")}
+          {subBtn(engMode, "A", setEngMode, "No contact for 14 days")}
+          <span className="text-gray-500" style={{ fontSize: "11px" }}>
+            {engMode === "C"
+              ? "Missed an interview and completed nothing after it. What people usually mean by dropping off."
+              : engMode === "B"
+                ? "Missed any interview at all, even if they carried on afterwards. A coverage measure: longer schedules offer more chances to slip."
+                : "Not finished and no session for 14 days, the same 14 for every design. Kept for reference; it is blind to how fast a cohort runs."}
+          </span>
         </div>
         <div className="flex flex-wrap items-center gap-2 px-1">
           {/* Hide these controls when they cannot do anything, rather than leaving dead buttons that
@@ -2051,7 +2167,7 @@ function WorkflowUI(props) {
                 {engSg === "ALL" ? (
                   <span><b>Program-wide roll-up.</b> <b>{started}</b> FLWs have started interviewing across all cohorts; <b>{finished}%</b> have <b>finished</b> their whole schedule and <b>{drop}%</b> dropped off, meaning an interview they were sent went past its deadline unfinished. For a further <b>{waitPctNow}%</b> the <b>schedule was not completed</b>: they did everything sent to them, but their plan was never fully sent. Cohorts run different-length schedules, so read this as the recruitment + completion picture; for one cohort's engagement detail, pick it above.</span>
                 ) : (
-                  <span><b>Read this as recruitment + engagement, not attrition.</b> Of <b>{started}</b> FLWs who started interviewing in {scope}, <b>{finished}%</b> <b>finished</b> all their interviews and <b>{activeNow}</b> are active right now. <b>{drop}%</b> dropped off, meaning an interview they were sent went past its deadline (one interview gap after it was sent) unfinished, and for <b>{waitPctNow}%</b> the <b>schedule was not completed</b> - they did everything sent and nothing more was sent. A dip in the retention curve is mostly <i>finishers</i>, <i>later starts</i> and <i>slower cadence</i> - not people quitting.{engWin === "active" && hasTail ? <span> <b>The tiles above are as of {fmtWk(DATA.today)}; the charts below stop at ~{endTxt}</b> (the active window).{windowLags ? <span> So the charts end on <b>{finPctWin}% finished / {dropWin}% dropped</b> while the current figures are <b>{finished}% / {drop}%</b> - the gap is activity in the trimmed weeks, not two different measures.</span> : null} Switch to Full timeline for the complete series.</span> : null}</span>
+                  <span><b>Read this as recruitment + engagement, not attrition.</b> The <i>Dropped off means</i> choice above changes the outcome lines in panel 2 only - rhythm and panel 3 measure gaps between sessions, so no definition of drop-off moves them. Of <b>{started}</b> FLWs who started interviewing in {scope}, <b>{finished}%</b> <b>finished</b> all their interviews and <b>{activeNow}</b> are active right now. <b>{drop}%</b> dropped off, meaning an interview they were sent went past its deadline (one interview gap after it was sent) unfinished, and for <b>{waitPctNow}%</b> the <b>schedule was not completed</b> - they did everything sent and nothing more was sent. A dip in the retention curve is mostly <i>finishers</i>, <i>later starts</i> and <i>slower cadence</i> - not people quitting.{engWin === "active" && hasTail ? <span> <b>The tiles above are as of {fmtWk(DATA.today)}; the charts below stop at ~{endTxt}</b> (the active window).{windowLags ? <span> So the charts end on <b>{finPctWin}% finished / {dropWin}% dropped</b> while the current figures are <b>{finished}% / {drop}%</b> - the gap is activity in the trimmed weeks, not two different measures.</span> : null} Switch to Full timeline for the complete series.</span> : null}</span>
                 )}
               </div>
               <div className="flex flex-wrap gap-2 px-1">
