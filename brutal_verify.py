@@ -15,6 +15,8 @@ Layers verified:
                        drop-allowlist, byte-identical retained keys, exact flwMatrix round-trip
 """
 import csv, json, os, re, sys
+
+import topic_status_lib as tsl   # for r1(), the shared half-up rounding CONVENTION only
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -361,9 +363,9 @@ for sg, s in do.items():
                 and iv["started"] == len(f["s"]) and iv["completed"] == len(f["c"])):
             do_bad += 1; print(f"    dropoff mismatch {sg} Int{n}: elig {iv['eligible']}/{len(init_sg[sg])} trig {iv['triggered']}/{len(f['t'])} start {iv['started']}/{len(f['s'])} compl {iv['completed']}/{len(f['c'])}")
         # pct checks
-        if iv["pct_started"] != round(100 * len(f["s"]) / elig, 1): do_bad += 1
-        if iv["pct_completed_base"] != round(100 * len(f["c"]) / elig, 1): do_bad += 1
-        exp_pc = round(100 * len(f["c"]) / len(f["s"]), 1) if f["s"] else None
+        if iv["pct_started"] != tsl.r1(100 * len(f["s"]) / elig): do_bad += 1
+        if iv["pct_completed_base"] != tsl.r1(100 * len(f["c"]) / elig): do_bad += 1
+        exp_pc = tsl.r1(100 * len(f["c"]) / len(f["s"])) if f["s"] else None
         if iv["pct_completed"] != exp_pc: do_bad += 1
 chk("dropoff interviews (elig/trig/started/completed/pcts) all subgroups", do_bad == 0, f"{do_bad} bad")
 

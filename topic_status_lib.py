@@ -23,6 +23,7 @@ STATE INDEX ORDER IS APPEND-ONLY. flwMatrix ships these as bare integers, so `co
 and `started-not-completed` must stay 4 — renderers, CSV exports and gates all index on those. New
 states go on the END. Display order is a separate concern (see BAR_ORDER in the render).
 """
+import math
 from datetime import timedelta
 
 # ---- per-cohort grace override -------------------------------------------------------------------
@@ -182,3 +183,16 @@ def interviewed_index(rows):
     for r in rows:
         out.setdefault(r["cohort_id"], set()).add(r["connect_id"])
     return out
+
+
+def r1(x):
+    """Round to 1dp HALF-UP: the published rounding convention for every percentage in the payload.
+
+    Python's round() is banker's rounding (round(0.5) == 0), the browser's Math.round is half-up. Where
+    a value lands exactly on .x5 the two disagree, which put four published percentages 0.1pp away from
+    what recomputing them in the page gives. This is a number FORMAT shared by spec, not a calculation:
+    the gates still recompute every quantity independently, they only agree on how to write it down.
+    """
+    if x is None:
+        return None
+    return math.floor(x * 10 + 0.5) / 10 if x >= 0 else -(math.floor(-x * 10 + 0.5) / 10)

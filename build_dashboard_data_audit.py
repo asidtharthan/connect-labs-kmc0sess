@@ -3,6 +3,7 @@ master (build_master_4src) and vs the audit_e2e-validated payload_agg.json. All 
 Run after build_dashboard_data.py.  UTF-8: run with PYTHONUTF8=1.
 """
 import json
+import topic_status_lib as tsl
 import sys
 from collections import defaultdict
 
@@ -50,7 +51,7 @@ def _avg(pred):
         if r["is_started"] == "Y" and pred(r):
             hw += int(r.get("session_human_words", 0) or 0)
             hm += int(r.get("session_human_msgs", 0) or 0)
-    return round(hw / hm, 1) if hm else None
+    return tsl.r1(hw / hm) if hm else None
 
 
 _abt = ("ABT1-A", "ABT1-B", "ABT2-A", "ABT2-B", "ABT3-A", "ABT3-B")
@@ -253,7 +254,7 @@ for sg in SG_ORDER:
     base = ls[sg]["base"] or 1
     for i, p in enumerate(ls[sg]["pts"]):
         st = fmap[sg][i + 1]["started"]
-        if round(1000 * st / base) / 10 != p:
+        if tsl.r1(100 * st / base) != p:
             xbad += 1
 chk("lineSeries pts == 100*funnel.started/base (recompute)", xbad == 0, f"{xbad} mismatched points")
 
@@ -318,7 +319,7 @@ for sg, info in di.items():
 chk("deimpact: last started_di == started − count; only >=3-interview subgroups", di_bad == 0, f"{di_bad} bad; sgs={sorted(di)}")
 dq_bad = 0
 for f in dd["funnel"]:
-    if f["started_di"] > f["started"] or f["pct_started_di"] != round(100 * f["started_di"] / f["elig"], 1):
+    if f["started_di"] > f["started"] or f["pct_started_di"] != tsl.r1(100 * f["started_di"] / f["elig"]):
         dq_bad += 1
 chk("funnel started_di<=started & pct_started_di consistent (all rows)", dq_bad == 0, f"{dq_bad} bad")
 ldi_bad = 0
@@ -336,7 +337,7 @@ for sg in SG_ORDER:
         f = rows[n]
         denom = rows[n - 1]["started"] if n > 1 else f["elig"]
         num = f.get("prev_num")
-        exp = round(100 * num / denom, 1) if denom else None
+        exp = tsl.r1(100 * num / denom) if denom else None
         if f.get("prev_started") != denom or f.get("pct_started_prev") != exp:
             lp_bad += 1
         # numerator must be a subset count of the denominator -> rate can never exceed 100%
@@ -347,7 +348,7 @@ for sg in SG_ORDER:
             lp_bad += 1
 chk("pct_started_prev = 100*|started(n)∩started(n-1)|/started(n-1) (n=1->elig), bounded ≤100, lineSeries matches",
     lp_bad == 0, f"{lp_bad} bad")
-cb_bad = sum(1 for f in dd["funnel"] if f["pct_completed_base"] != round(100 * f["completed"] / f["elig"], 1))
+cb_bad = sum(1 for f in dd["funnel"] if f["pct_completed_base"] != tsl.r1(100 * f["completed"] / f["elig"]))
 chk("funnel pct_completed_base == 100*completed/eligible (all rows)", cb_bad == 0, f"{cb_bad} bad")
 
 # ---- Cohort Engagement (3-panel): internal consistency + tie-out to canonical started count ----
