@@ -18,17 +18,17 @@ name: Refresh Interviews Dashboard
 
 on:
   schedule:
-    - cron: '37 4 * * *' # 04:37 UTC daily — off-peak, odd minute (avoids top-of-hour scheduler congestion that delayed the '0 6' run by ~4h)
+    - cron: "37 4 * * *" # 04:37 UTC daily — off-peak, odd minute (avoids top-of-hour scheduler congestion that delayed the '0 6' run by ~4h)
   workflow_dispatch: # also runnable on-demand from the Actions tab
     inputs:
       full_resync:
-        description: 'Full OCS re-scan (state+words) to self-heal — slower + many more OCS requests; leave off for normal incremental runs'
+        description: "Full OCS re-scan (state+words) to self-heal — slower + many more OCS requests; leave off for normal incremental runs"
         type: boolean
         default: false
       allow_regression:
         description: 'Regression-guard escape hatch: comma-separated metric names (or "all") to waive for THIS run only. Use when a change legitimately lowers counts (e.g. a new test-account exclusion). Leave blank normally.'
         type: string
-        default: ''
+        default: ""
 
 concurrency:
   group: refresh-interviews
@@ -43,14 +43,14 @@ jobs:
     # matters on the recovery run after a cache miss.
     timeout-minutes: 50
     env:
-      PYTHONUTF8: '1'
-      PYTHONIOENCODING: 'utf-8'
-      INTERVIEWS_CONNECT_SNAPSHOT: '1'
-      INTERVIEWS_STRICT_FRESHNESS: '1' # enforce brutal_verify freshness asserts + regression_guard history tiers (CI always live-pulls)
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+      INTERVIEWS_CONNECT_SNAPSHOT: "1"
+      INTERVIEWS_STRICT_FRESHNESS: "1" # enforce brutal_verify freshness asserts + regression_guard history tiers (CI always live-pulls)
       # Regression-guard escape hatch. Empty on the scheduled run; set only via workflow_dispatch when a
       # deliberate, reviewed change legitimately lowers a monotonic counter. Every use is logged loudly.
       INTERVIEWS_ALLOW_REGRESSION: ${{ inputs.allow_regression }}
-      MCP_URL: 'https://labs.connect.dimagi.com/mcp/'
+      MCP_URL: "https://labs.connect.dimagi.com/mcp/"
       MCP_BEARER: ${{ secrets.MCP_BEARER }}
       HQ_API_KEY: ${{ secrets.HQ_API_KEY }}
       HQ_USERNAME: ${{ secrets.HQ_USERNAME }}
@@ -64,7 +64,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
       - name: Install dependencies
         run: pip install -r requirements-refresh.txt
 
