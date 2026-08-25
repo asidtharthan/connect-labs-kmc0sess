@@ -170,7 +170,7 @@ for sg in SG_PRESENT:
             prev_num = len(f["s"] & prev_set)   # started n AND started n-1
         else:
             prev_started, prev_num = elig, s
-        pct_started_prev = round(100 * prev_num / prev_started, 1) if prev_started else None
+        pct_started_prev = tsl.r1(100 * prev_num / prev_started) if prev_started else None
         funnel.append(
             {
                 "sg": sg,
@@ -181,15 +181,15 @@ for sg in SG_PRESENT:
                 "trig": t,
                 "started": s,
                 "completed": cc,
-                "pct_trig": round(100 * t / elig, 1),
-                "pct_started": round(100 * s / elig, 1),
-                "pct_completed": round(100 * cc / s, 1) if s else None,
+                "pct_trig": tsl.r1(100 * t / elig),
+                "pct_started": tsl.r1(100 * s / elig),
+                "pct_completed": tsl.r1(100 * cc / s) if s else None,
                 # completion as a share of the INITIATED base (retention), not of this interview's
                 # starters — for the "pay per interview" / full retention table (Screenshot 104).
-                "pct_completed_base": round(100 * cc / elig, 1),
+                "pct_completed_base": tsl.r1(100 * cc / elig),
                 # de-impacted started (penult/last artifact removed from the LAST interview only)
                 "started_di": s_di,
-                "pct_started_di": round(100 * s_di / elig, 1),
+                "pct_started_di": tsl.r1(100 * s_di / elig),
                 # %Started vs FLWs who started the previous interview (reached-prev denominator)
                 "prev_started": prev_started,          # denominator = |started(n-1)| (n=1 -> elig)
                 "prev_num": prev_num,                  # numerator = |started(n) ∩ started(n-1)| (n=1 -> started)
@@ -198,8 +198,8 @@ for sg in SG_PRESENT:
                 "status": st,
             }
         )
-        series.append(round(100 * s / elig, 1))
-        series_di.append(round(100 * s_di / elig, 1))
+        series.append(tsl.r1(100 * s / elig))
+        series_di.append(tsl.r1(100 * s_di / elig))
         series_prev.append(pct_started_prev)
         statuses.append(st)
         # median days from when the FLW DID interview 1 (session start) to when they DID interview n.
@@ -212,7 +212,7 @@ for sg in SG_PRESENT:
             if s1 and sn:
                 day_vals.append((sn - s1).total_seconds() / 86400.0)
         med_days = _median(day_vals)
-        days_series.append(round(med_days, 1) if med_days is not None else None)
+        days_series.append(tsl.r1(med_days) if med_days is not None else None)
     line[sg] = series
     line_di[sg] = series_di
     line_prev[sg] = series_prev
@@ -236,24 +236,35 @@ for r in bm.rows:
     _c = r["cohort_id"]
     if _td and (_c not in _cohort_first_trig or _td < _cohort_first_trig[_c]):
         _cohort_first_trig[_c] = _td
+# ONE cohort-end date for the whole payload. Every consumer that needs to know whether a cohort is
+# still running reads this map, so the funnel line, the engagement panel and the drop-off view cannot
+# disagree about it. tsl.cohort_end IS the function the drop-off scoring uses, which is the point.
+# (cohort_info only holds the older cohorts, so the union below keeps the newer subgroups in.)
+COHORT_END = {}
+for _c in set(_cohort_first_trig) | set(bm.cohort_info):
+    _sg = bm.cohort_to_sg(_c)
+    if _sg not in bm.SUBGROUP_DESIGN:
+        continue
+    _cad = bm.SUBGROUP_DESIGN[_sg]["cadence"]
+    # Start date, in the order build_master_4src resolved it: invitation, else the first trigger. A
+    # cohort with neither cannot be dated and stays out of the map.
+    _st = bm.cohort_info.get(_c, {}).get("start_date")
+    if not _st and _c in _cohort_first_trig:
+        _st = _cohort_first_trig[_c].date()
+    if not _st or not _cad:
+        continue
+    COHORT_END[_c] = tsl.cohort_end(bm.SUBGROUP_DESIGN[_sg]["topics"], _st, _cad,
+                                    tsl.GRACE_DAYS.get(_c))
+
+# A subgroup's funnel line stays dotted while ANY of its cohorts is still inside its schedule. A cohort
+# with no invitation and no trigger yet cannot be dated, so it counts as still rolling out, as before.
 line_active = {sg: False for sg in SG_PRESENT}
-# iterate every cohort seen in the data (cohort_info only holds the older cohorts, so the newer
-# subgroups would be missed if we looped over it — the union below keeps them in).
 for _c in set(_cohort_first_trig) | set(bm.cohort_info):
     _sg = bm.cohort_to_sg(_c)
     if _sg not in line_active:
         continue
-    _last_off = _offset(_c, len(bm.SUBGROUP_DESIGN[_sg]["topics"]), _sg)
-    _cad = bm.SUBGROUP_DESIGN[_sg]["cadence"]  # grace: one cadence for the last interview to be taken
-    _train = bm.cohort_info.get(_c, {}).get("training_date")
-    if _train:
-        _end = _train + timedelta(days=LINE_LAG_DAYS + _last_off + _cad)
-    elif _c in _cohort_first_trig:
-        _end = _cohort_first_trig[_c].date() + timedelta(days=_last_off + _cad)
-    else:
-        line_active[_sg] = True  # present but no invitation/trigger date yet -> still rolling out
-        continue
-    if TODAY <= _end:
+    _end = COHORT_END.get(_c)
+    if _end is None or TODAY <= _end:
         line_active[_sg] = True
 
 # Authoritative dotted->solid dates from the program rollout schedule (per the cohort tracker /
@@ -291,8 +302,8 @@ def agg(keyfn, keys):
             "flws": len(a[k]["flw"]),
             "ist": a[k]["ist"],
             "icmp": a[k]["icmp"],
-            "pct": round(100 * a[k]["icmp"] / a[k]["ist"], 1) if a[k]["ist"] else None,
-            "avg_words": round(a[k]["hw"] / a[k]["hm"], 1) if a[k]["hm"] else None,
+            "pct": tsl.r1(100 * a[k]["icmp"] / a[k]["ist"]) if a[k]["ist"] else None,
+            "avg_words": tsl.r1(a[k]["hw"] / a[k]["hm"]) if a[k]["hm"] else None,
         }
         for k in keys
         if k in a
@@ -326,8 +337,8 @@ t2 = [
         "flws": len(t2a[tc]["flw"]),
         "ist": t2a[tc]["ist"],
         "icmp": t2a[tc]["icmp"],
-        "pct": round(100 * t2a[tc]["icmp"] / t2a[tc]["ist"], 1) if t2a[tc]["ist"] else None,
-        "avg_words": round(t2a[tc]["hw"] / t2a[tc]["hm"], 1) if t2a[tc]["hm"] else None,
+        "pct": tsl.r1(100 * t2a[tc]["icmp"] / t2a[tc]["ist"]) if t2a[tc]["ist"] else None,
+        "avg_words": tsl.r1(t2a[tc]["hw"] / t2a[tc]["hm"]) if t2a[tc]["hm"] else None,
     }
     # all applicable topics (not just those with started data) so the By-Topic breakdown shows the
     # full roster incl. not-yet-started ones (10/11/12/13) — zero-activity rows get 0 / None metrics.
@@ -418,11 +429,11 @@ def _iv_blocks(topics, init_set, fget, di_n=None, di_ct=0):
         s_di = s - di_ct if (di_n is not None and n == di_n and di_ct) else s
         out.append({
             "n": n, "topic": tc, "name": bm.TOPIC_NAMES[tc],
-            "eligible": len(init_set), "triggered": t, "pct_trig": round(100 * t / base, 1),
-            "started": s, "pct_started": round(100 * s / base, 1),
-            "completed": c, "pct_completed": round(100 * c / s, 1) if s else None,
-            "pct_completed_base": round(100 * c / base, 1),  # completed / initiated base (retention)
-            "started_di": s_di, "pct_started_di": round(100 * s_di / base, 1),  # de-impacted (item 8)
+            "eligible": len(init_set), "triggered": t, "pct_trig": tsl.r1(100 * t / base),
+            "started": s, "pct_started": tsl.r1(100 * s / base),
+            "completed": c, "pct_completed": tsl.r1(100 * c / s) if s else None,
+            "pct_completed_base": tsl.r1(100 * c / base),  # completed / initiated base (retention)
+            "started_di": s_di, "pct_started_di": tsl.r1(100 * s_di / base),  # de-impacted (item 8)
         })
     return out
 
@@ -595,18 +606,9 @@ def _eng_finished_dates(sg, design_len):
 # Per-subgroup scheduled rollout-end (same signals as the dotted funnel line) so we can mark a cohort
 # "ended" — a started FLW who never finished but whose cohort's window has closed isn't a live dropout.
 _eng_end = {}
-for _c in set(_cohort_first_trig) | set(bm.cohort_info):
+for _c, _ee in COHORT_END.items():          # the same map the funnel line and the drop-off view use
     _esg = bm.cohort_to_sg(_c)
     if _esg not in SG_PRESENT:
-        continue
-    _elo = _offset(_c, len(bm.SUBGROUP_DESIGN[_esg]["topics"]), _esg)
-    _ecad = bm.SUBGROUP_DESIGN[_esg]["cadence"]
-    _etr = bm.cohort_info.get(_c, {}).get("training_date")
-    if _etr:
-        _ee = _etr + timedelta(days=LINE_LAG_DAYS + _elo + _ecad)
-    elif _c in _cohort_first_trig:
-        _ee = _cohort_first_trig[_c].date() + timedelta(days=_elo + _ecad)
-    else:
         continue
     if _esg not in _eng_end or _ee > _eng_end[_esg]:
         _eng_end[_esg] = _ee
@@ -930,7 +932,9 @@ for _c, _inf in sorted(bm.cohort_info.items()):
     _tr, _tr_src = _inf_c.get("start_date"), _inf_c.get("start_src")
     if not _tr or not _cad:
         continue                                     # no start date at all: cannot say when it ended
-    _end = tsl.cohort_end(_tops, _tr, _cad, tsl.GRACE_DAYS.get(_c))
+    _end = COHORT_END.get(_c)                        # the one shared map, not a second computation
+    if _end is None:
+        continue
     _asof = min(_end, TODAY)                         # a cohort still running is scored as it stands
     _closed = _end <= TODAY
     _tally = defaultdict(int)
