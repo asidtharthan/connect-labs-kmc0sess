@@ -523,10 +523,22 @@ if not os.environ.get("AUDIT_SKIP_CLOCK"):
         # it by name; everything else must be frozen.
         _open = {c for c, v in (_now.get("line_active") or {}).items() if v}
         _open |= {r["c"] for r in (_now.get("cohort_dropoff") or []) if r.get("e", "") > str(TODAY)}
+        # A cohort with a deadline still to arrive is NOT finished, whatever its end date says: PANEL
+        # closed on 2 Aug and was still triggering interviews on the 25th. Its numbers will move when
+        # that deadline passes, and a deadline passing is information, not silence accumulating. Only
+        # cohorts where every deadline is already behind us must be frozen - and they are the ones the
+        # requirement is actually about.
+        _open |= {r["c"] for r in (_now.get("cohort_dropoff") or []) if not r.get("settled", True)}
+        _open |= {bm.cohort_to_sg(r["c"]) for r in (_now.get("cohort_dropoff") or [])
+                  if not r.get("settled", True)}
         _today_only = {".today", ".built_at"}
 
         def _is_open(path):
             if path in _today_only:
+                return True
+            # `settled` is a statement ABOUT the current date ("every deadline is behind us"), so it
+            # flips from false to true as the clock advances. That is the flag working, not drift.
+            if path.endswith(".settled"):
                 return True
             # Match on PATH SEGMENTS, not substrings: ".line_status.NPS[0]" has NPS followed by a
             # bracket, so looking for ".NPS." or a trailing ".NPS" missed it. Segment matching also
