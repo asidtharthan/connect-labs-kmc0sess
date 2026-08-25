@@ -653,12 +653,23 @@ for sec in ["A", "B", "C", "D", "E", "F", "G"]:
 # A gate that silently runs FEWER checks is indistinguishable from one that passes. Deleting the
 # interview-schedule file made brutal_verify drop 22 checks with NO failure, because its section is
 # written as "for each entry in this dict" and the dict was empty. Floor the count.
-_MIN_CHECKS = 26
-if (len(results)) < _MIN_CHECKS:
+#
+# The floor is CONDITIONAL, because two sections legitimately skip when their reference files are
+# absent - they are not in git, so in CI this suite really is 23 checks and not 28. A flat floor
+# would either block every CI run or be set so low it proved nothing. Deriving it from which inputs
+# are actually present keeps the check meaningful in both places, and makes the CI shortfall visible
+# instead of implicit: those 5 checks include the only base-vs-live regression detector in the suite,
+# and they do not run on the machine that publishes.
+_MIN_CHECKS = 23
+if os.path.exists("master_v7_2026-06-10.csv"):
+    _MIN_CHECKS += 4
+if os.path.exists(_GW_XLSX):
+    _MIN_CHECKS += 1
+if len(results) < _MIN_CHECKS:
     print("")
     print(
-        f"  *** ONLY {len(results)} CHECKS RAN, EXPECTED >= 26 - a section is silently "
-        f"empty, usually a missing input file. Treating as FAILURE. ***"
+        f"  *** ONLY {len(results)} CHECKS RAN, EXPECTED >= {_MIN_CHECKS} for the inputs present "
+        f"- a section is silently empty. Treating as FAILURE. ***"
     )
     passed = -1
 print(f"\n  TOTAL: {passed}/{len(results)} checks passed")
