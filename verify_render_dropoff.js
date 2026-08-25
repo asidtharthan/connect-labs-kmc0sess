@@ -720,6 +720,39 @@ check(
   );
 })();
 
+// ---------------------------------------------------------------- Data review view
+// Not-yet-reviewed must be ON by default and must be visible in the table. Defaulting it OFF, or
+// leaving it out, would recreate inside our own dashboard the exact confusion the OCS screen caused.
+(function () {
+  const rs = payload.reviewStatus;
+  check('payload carries the OCS review split', !!(rs && rs.overall), rs ? Object.keys(rs.overall || {}).join(', ') : 'absent');
+  if (!rs || !rs.overall) return;
+  // useState indices shift whenever a hook is added above, so find the view hook rather than assume
+  // it - hardcoding 2 is what made this check pass on the button label while the view never rendered.
+  let html = null;
+  for (let i = 2; i <= 60 && !html; i++) {
+    let candidate;
+    try {
+      candidate = build(null, { 1: 'funnels', [i]: 'review' });
+    } catch (e) {
+      continue;
+    }
+    if (candidate.includes('completed interviews match the')) html = candidate;
+  }
+  check('Data review view renders', !!html, html ? '' : 'view never rendered at any hook index');
+  check(
+    'not-yet-reviewed is shown by default, not filtered away',
+    !!html && /Not yet reviewed/.test(html),
+  );
+  const keys = rs.keys || [];
+  const tot = keys.reduce((a, k) => a + (rs.overall[k] || 0), 0);
+  const bySg = Object.values(rs.by_sg || {}).reduce(
+    (a, v) => a + keys.reduce((b, k) => b + (v[k] || 0), 0),
+    0,
+  );
+  check('review split: by-design adds back to the overall', bySg === tot, `${bySg} vs ${tot}`);
+})();
+
 // ---------------------------------------------------------------- size guard
 // The Labs render_code limit is a hard 512 KB and brutal_verify enforces it in CI. This local check
 // UNDER-reports: a local build runs off cached pulls, so its payload is smaller than the live one. On

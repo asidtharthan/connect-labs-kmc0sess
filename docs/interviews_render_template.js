@@ -56,6 +56,12 @@ function WorkflowUI(props) {
   var lsg = React.useState({}); var hidSg = lsg[0], setHidSg = lsg[1];   // funnels line chart: hidden subgroups (custom legend toggle)
   var lineRef = React.useRef(null), lineInst = React.useRef(null);
   var barRef = React.useRef(null), barInst = React.useRef(null);
+  // Data review: which OCS verdicts are included, and whether the split is by design or by topic.
+  // All four start ON, including not-yet-reviewed - the whole reason this view exists is that the OCS
+  // screen filters that bucket away silently, which made 8,6xx look like it disagreed with 9,4xx.
+  var rvi = React.useState({ acceptable: true, unacceptable: true, suspected_ai: true, "not-reviewed": true });
+  var revInc = rvi[0], setRevInc = rvi[1];
+  var rvb = React.useState("sg"); var revBy = rvb[0], setRevBy = rvb[1];
   var fvw = React.useState("retention"); var funView = fvw[0], setFunView = fvw[1];   // funnels tab: retention lines | cohort engagement (3-panel) | drop-off by cohort
   var cdl = React.useState("design"); var cdLevel = cdl[0], setCdLevel = cdl[1];       // drop-off view: by design | every cohort
   var cds = React.useState("drop"); var cdSort = cds[0], setCdSort = cds[1];           // drop-off view: sort by drop-off % | cohort id
@@ -371,12 +377,13 @@ function WorkflowUI(props) {
         reads: ["table1", "table2", "table3", "cohortSG"],
         charts: [["Subgroup and cohort tables", "The same counts as Overview, split by subgroup, arm and individual cohort, with average FLW words per interview."]] },
       { id: "funnels", name: "Interview Completion Funnels", question: "Where do people fall out, and are they still engaged?",
-        reads: ["connectFunnel", "dropoff", "lineSeries", "deimpact", "cohortEngagement", "cohortEngagementLLO", "cohortDropoff"],
+        reads: ["connectFunnel", "dropoff", "lineSeries", "deimpact", "cohortEngagement", "cohortEngagementLLO", "cohortDropoff", "reviewStatus"],
         charts: [
           ["Connect funnel", "Invited → accepted → Learn completed → claimed → initiated. Everything before an interview exists."],
           ["Interview drop-off table", "Per interview slot: eligible, triggered, started, completed, with three percentage bases (see Indicators)."],
           ["Retention lines", "Completion by interview number, with a Denominator toggle and a de-impact toggle."],
           ["Cohort Engagement (3 panels)", "Weekly recruitment, outcome (Finished / Dropped off / Schedule not completed / In progress) plus rhythm (Steady / Inconsistent), and status-now (New / Active / Slow / Quiet / Finished). The outcome lines follow whichever of the three readings of “dropped off” is selected; rhythm and status-now measure gaps between sessions, so no definition of drop-off changes them."],
+          ["Data review", "Every COMPLETED interview split by its OCS review verdict - Acceptable, Unacceptable, Suspected AI, or Not yet reviewed - with a checkbox per verdict and a Design/Topic split. Selecting Acceptable + Unacceptable reproduces the figure the OCS session screen shows; the difference from the full count is the review backlog."],
           ["Drop-off by cohort", "One row per cohort design or per individual cohort, each scored at ITS OWN end date rather than today or a date shared across the design. Five mutually exclusive states, defined on the page itself, plus a table showing what a fixed number of days would have meant in each design. Sortable by drop-off or by name at either level."]
         ] },
       { id: "fullretention", name: "Full Retention Table", question: "Give me every cohort × interview number in one grid.",
@@ -434,6 +441,10 @@ function WorkflowUI(props) {
         how: "Both views offer the same three readings of the same workers, with the same default. (1) STOPPED AND NEVER CAME BACK - default - they let a sent interview pass its deadline AND completed nothing afterwards. (2) MISSED ANY INTERVIEW - they let any sent interview pass its deadline, even if they carried on. (3) NO CONTACT FOR 14 DAYS - not finished and no session for 14 days, the same 14 for every design. A deadline is one interview gap after it was released (that is, after the interview was sent), so 3 days in a 3-day design and 14 in a 14-day one - the same rule the FLW × Topic matrix uses to call a slot missed/overdue.",
         base: "FLWs who started ≥ 1 interview",
         gotcha: "Read MISSED ANY INTERVIEW as data coverage, not retention: a longer schedule offers more chances to slip, so it penalises long designs by construction. NO CONTACT FOR 14 DAYS is kept for continuity only - it is blind to how fast a cohort runs, it climbs on its own as time passes, and it is a reconstruction rather than a replay of the figures published before 21 Aug. Only interviews the bot ACTUALLY SENT can be missed: an FLW who completed everything sent but whose design never finished is SCHEDULE NOT COMPLETED, not dropped. Recoverable on purpose: complete a late interview and the FLW leaves the bucket." },
+      { g: "Quality", name: "OCS review verdict", where: "Funnels -> Data review",
+        how: "The verdict a reviewer applied to the FLW's session in Open Chat Studio, read from the session `tags` field: acceptable, unacceptable, or suspected_ai (checked first, since a session can carry both and \u201cthe FLW pasted an AI answer\u201d is the more important fact). An interview with no verdict reads NOT YET REVIEWED.",
+        base: "COMPLETED interviews. A verdict on an interview nobody finished would not mean anything, and mixing the two bases is how Labs and OCS stopped agreeing.",
+        gotcha: "Reviewing happens long AFTER an interview finishes, so the reviewed share climbs over time on its own and any acceptable rate is a share of what has been looked at, not of the work done. Always quote the not-yet-reviewed count beside it. This is also the whole explanation of the recurring \u201cOCS shows fewer sessions than Labs\u201d question: the OCS screen filters to tagged sessions and drops the unreviewed ones silently. `status` on an OCS session is NOT this field - nearly every session reads pending-review whatever its verdict." },
       { g: "Engagement", name: "Skipped but returned", where: "Funnels → Drop-off by cohort (shown under the default reading)",
         how: "Missed a sent interview, then completed at least one interview after it. Exactly the difference between MISSED ANY INTERVIEW and STOPPED AND NEVER CAME BACK, so the two always add back to it.",
         base: "FLWs who started ≥ 1 interview",
@@ -1729,6 +1740,104 @@ function WorkflowUI(props) {
     });
   }
 
+  // ---------------------------------------------------------------- Data review (OCS verdicts)
+  // Counted over COMPLETED interviews only: a verdict on an interview nobody finished would not mean
+  // anything, and mixing bases is how Labs and OCS stopped agreeing in the first place.
+  var REV_META = [
+    ["acceptable", "Acceptable", "#2E7D32", "A reviewer marked the session acceptable."],
+    ["unacceptable", "Unacceptable", "#C62828", "A reviewer marked the session unacceptable."],
+    ["suspected_ai", "Suspected AI", "#F9A825", "Flagged as the FLW pasting an AI-generated answer rather than the bot failing. Checked first, so a session tagged both ways counts here."],
+    ["not-reviewed", "Not yet reviewed", "#78909C", "Completed, but nobody has given it a verdict yet. Shown by default on purpose: filtering it away silently is what made the OCS session count look smaller than the dashboard's."]
+  ];
+
+  function renderReview() {
+    var RS = DATA.reviewStatus || {};
+    if (!RS.overall) {
+      return <div className="text-sm text-gray-500 px-2 py-6">No OCS review data in this build. The daily job pulls it in step 2t (pull_ocs_tags.py).</div>;
+    }
+    var keys = RS.keys || [];
+    var on = REV_META.filter(function (m) { return revInc[m[0]]; }).map(function (m) { return m[0]; });
+    var src = revBy === "sg" ? (RS.by_sg || {}) : (RS.by_topic || {});
+    var sumOf = function (o, ks) { return ks.reduce(function (a, k) { return a + (o[k] || 0); }, 0); };
+    var grand = sumOf(RS.overall, on), all = sumOf(RS.overall, keys);
+    var rows = Object.keys(src).map(function (k) {
+      var o = src[k], inc = sumOf(o, on), tot = sumOf(o, keys);
+      return { k: k, o: o, inc: inc, tot: tot, pct: tot ? Math.round((1000 * inc) / tot) / 10 : null };
+    }).sort(function (a, b) { return b.inc - a.inc; });
+
+    return (
+      <React.Fragment>
+        <div className="flex flex-wrap items-center gap-2 px-1">
+          <span className="text-xs font-semibold text-gray-700">Include:</span>
+          {REV_META.map(function (m) {
+            return (
+              <label key={m[0]} className="flex items-center gap-1 text-xs cursor-pointer rounded px-1.5 py-0.5 border"
+                     style={{ borderColor: revInc[m[0]] ? m[2] : "#e5e7eb", color: revInc[m[0]] ? m[2] : "#9ca3af" }}
+                     title={m[3]}>
+                <input type="checkbox" checked={!!revInc[m[0]]}
+                       onChange={function () {
+                         var next = Object.assign({}, revInc);
+                         next[m[0]] = !next[m[0]];
+                         setRevInc(next);
+                       }} />
+                {m[1]} ({(RS.overall[m[0]] || 0).toLocaleString()})
+              </label>
+            );
+          })}
+          <span className="mx-1 text-gray-300">|</span>
+          <span className="text-xs font-medium text-gray-600">Split by:</span>
+          {subBtn(revBy, "sg", setRevBy, "Design")}
+          {subBtn(revBy, "topic", setRevBy, "Topic")}
+        </div>
+
+        <div className="text-xs bg-indigo-50 border border-indigo-100 rounded px-3 py-2 text-gray-700 mt-2">
+          <b>{grand.toLocaleString()}</b> of <b>{all.toLocaleString()}</b> completed interviews match the
+          selected verdicts ({all ? Math.round((1000 * grand) / all) / 10 : 0}%). This is the same field
+          OCS filters on, so selecting Acceptable + Unacceptable reproduces the OCS session figure, and
+          the difference from the full count is the <b>review backlog</b>, not missing data.
+        </div>
+
+        <div style={{ overflowX: "auto" }} className="mt-2">
+          <table className="min-w-full text-xs border-collapse">
+            <thead className="bg-gray-50 text-gray-600">
+              <tr>
+                <th className="px-2 py-1 text-left border-b">{revBy === "sg" ? "Design" : "Topic"}</th>
+                {REV_META.map(function (m) {
+                  return <th key={m[0]} className="px-2 py-1 text-right border-b" style={{ color: m[2], opacity: revInc[m[0]] ? 1 : 0.35 }}>{m[1]}</th>;
+                })}
+                <th className="px-2 py-1 text-right border-b">Selected</th>
+                <th className="px-2 py-1 text-right border-b">All completed</th>
+                <th className="px-2 py-1 text-right border-b">% selected</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(function (r) {
+                return (
+                  <tr key={r.k} className="border-b">
+                    <td className="px-2 py-1 font-medium">{revBy === "topic" ? ((DATA.topicNames || {})[r.k] || r.k) : r.k}</td>
+                    {REV_META.map(function (m) {
+                      return <td key={m[0]} className="px-2 py-1 text-right" style={{ opacity: revInc[m[0]] ? 1 : 0.35 }}>{(r.o[m[0]] || 0).toLocaleString()}</td>;
+                    })}
+                    <td className="px-2 py-1 text-right font-semibold">{r.inc.toLocaleString()}</td>
+                    <td className="px-2 py-1 text-right">{r.tot.toLocaleString()}</td>
+                    <td className="px-2 py-1 text-right">{r.pct == null ? "-" : r.pct + "%"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="text-xs mt-2" style={{ color: "#b45309" }}>
+          <b>Read with care:</b> a verdict is applied to a SESSION, and reviewing happens long after the
+          interview finishes, so the reviewed share climbs over time on its own. Quote the
+          not-yet-reviewed count alongside any acceptable rate, otherwise the rate is a share of whatever
+          happens to have been looked at rather than of the work done.
+        </div>
+      </React.Fragment>
+    );
+  }
+
   function renderCohortDropoff() {
     var rows = cohortDropRows();
     if (!rows.length) {
@@ -2931,9 +3040,11 @@ function WorkflowUI(props) {
               {subBtn(funView, "retention", setFunView, "Retention lines")}
               {subBtn(funView, "engagement", setFunView, "Cohort engagement")}
               {subBtn(funView, "dropoff", setFunView, "Drop-off by cohort")}
+              {subBtn(funView, "review", setFunView, "Data review")}
             </div>
             {funView === "engagement" && renderEngagement()}
             {funView === "dropoff" && renderCohortDropoff()}
+            {funView === "review" && renderReview()}
             {funView === "retention" && (
             <React.Fragment>
             <div className="flex flex-wrap items-center gap-2 px-1">
