@@ -5,6 +5,7 @@ workbook. Prints PASS/FAIL per check + a final accuracy summary. No spot checks.
 import csv as _csv
 import glob
 import json
+import re
 import os
 import sys
 from collections import Counter, defaultdict
@@ -516,13 +517,39 @@ if not os.environ.get("AUDIT_SKIP_CLOCK"):
     else:
         _fut = json.load(open("payload_agg.json", encoding="utf-8"))
         _A, _B = dict(_leaves(_now)), dict(_leaves(_fut))
+        # An OPEN cohort is SUPPOSED to move with the clock: push the date past its end and it closes,
+        # its line goes solid, its funnel status changes. The requirement is only that a cohort which
+        # has ALREADY ENDED cannot move. So collect what is still open as of the real today and exempt
+        # it by name; everything else must be frozen.
+        _open = {c for c, v in (_now.get("line_active") or {}).items() if v}
+        _open |= {r["c"] for r in (_now.get("cohort_dropoff") or []) if r.get("e", "") > str(TODAY)}
+        _today_only = {".today", ".built_at"}
+
+        def _is_open(path):
+            if path in _today_only:
+                return True
+            if any("." + o + "." in path or path.endswith("." + o) for o in _open):
+                return True
+            # Positional paths like .funnel[50].status carry no name, so resolve the row and read it.
+            _m = re.match(r"^\.([A-Za-z_]+)\[(\d+)\]", path)
+            if _m and isinstance(_now.get(_m.group(1)), list):
+                _row = _now[_m.group(1)][int(_m.group(2))]
+                if isinstance(_row, dict):
+                    return any(_row.get(f) in _open for f in ("sg", "c", "cohort", "subgroup", "key"))
+            return False
+
         _diff = [k for k in set(_A) | set(_B)
-                 if _A.get(k, "<absent>") != _B.get(k, "<absent>") and k not in (".today", ".built_at")]
-        chk("G", "closed cohorts are invariant to the build date "
-                 "(no silent-FLW drift on ended opportunities)",
+                 if _A.get(k, "<absent>") != _B.get(k, "<absent>") and not _is_open(k)]
+        _moved_open = sum(1 for k in set(_A) | set(_B)
+                          if _A.get(k, "<absent>") != _B.get(k, "<absent>") and _is_open(k)
+                          and k not in _today_only)     # the two date stamps are not a cohort
+        chk("G", "ENDED cohorts are invariant to the build date "
+                 "(no silent-FLW drift on opportunities that are over)",
             not _diff,
-            f"{len(_A):,} leaves compared, {len(_diff)} moved"
-            + (": " + ", ".join(sorted(_diff)[:4]) if _diff else ""))
+            f"{len(_A):,} leaves compared, {len(_diff)} moved on ended cohorts; "
+            f"{_moved_open} moved on still-open cohorts ({', '.join(sorted(_open)) or 'none'}), "
+            f"which is expected"
+            + ("; OFFENDERS: " + ", ".join(sorted(_diff)[:4]) if _diff else ""))
         json.dump(_now, open("payload_agg.json", "w", encoding="utf-8"))   # restore the real build
 
 
