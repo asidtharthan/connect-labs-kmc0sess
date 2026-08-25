@@ -39,6 +39,7 @@ Everything, in the order the daily job does it, plus the checks that only exist 
 
 Exit code 0 means it is safe to push. Anything else means CI would have failed.
 """
+
 import os
 import shutil
 import subprocess
@@ -76,8 +77,10 @@ def step(label, cmd, *, cwd=ROOT, env=None, timeout=2400, must_contain=None, for
     if ok and forbid and forbid in out:
         ok, detail = False, f"forbidden text present: {forbid!r}"
     for line in out.splitlines():
-        if any(k in line for k in ("TOTAL:", "[FAIL]", "ONLY ", "ABORT", "Traceback",
-                                   "[render]", "fixtures pass", "checks pass")):
+        if any(
+            k in line
+            for k in ("TOTAL:", "[FAIL]", "ONLY ", "ABORT", "Traceback", "[render]", "fixtures pass", "checks pass")
+        ):
             print("  " + line.strip()[:160])
     results.append((label, ok, detail))
     print(f"  -> {'OK' if ok else 'FAILED'}  {detail}")
@@ -96,20 +99,19 @@ def pipeline_scripts():
 # and a partial HQ tree, so a fixed set of families fail here and pass on the runner. Muting them would
 # hide a regression, so instead: count them, and fail if the count rises or an unknown family appears.
 BRUTAL_LOCAL_FAMILIES = (
-    "raw snapshot",                 # Connect snapshot is older here than the live pull in CI
-    "topicStatus 7-state counts",   # depends on the same snapshot for its universe
-    "flwMatrix rows ==",            #   "
-    "substring present verbatim",   # compares against a render built from the fuller CI payload
-    "no day-over-day regression",   # _run_history.json lives in the CI cache, not here
+    "raw snapshot",  # Connect snapshot is older here than the live pull in CI
+    "topicStatus 7-state counts",  # depends on the same snapshot for its universe
+    "flwMatrix rows ==",  # same
+    "substring present verbatim",  # compares against a render built from the fuller CI payload
+    "no day-over-day regression",  # _run_history.json lives in the CI cache, not here
 )
-BRUTAL_LOCAL_BUDGET = 39            # measured 2026-08-25; raise ONLY with a reason
+BRUTAL_LOCAL_BUDGET = 39  # measured 2026-08-25; raise ONLY with a reason
 
 
 def brutal_baseline():
     """Fail on a RISE in local failures, or on any failure outside the known local-only families."""
     print("\n=== 3c. brutal_verify (7b), against the known local-only baseline ===", flush=True)
-    r = subprocess.run([PY, "brutal_verify.py"], cwd=ROOT, capture_output=True, text=True,
-                       timeout=1800)
+    r = subprocess.run([PY, "brutal_verify.py"], cwd=ROOT, capture_output=True, text=True, timeout=1800)
     out = (r.stdout or "") + (r.stderr or "")
     fails = [ln.split("[FAIL]", 1)[1].strip() for ln in out.splitlines() if "[FAIL]" in ln]
     unknown = [f for f in fails if not any(k in f for k in BRUTAL_LOCAL_FAMILIES)]
@@ -140,20 +142,55 @@ def precommit_runnable():
             for h in repo.get("hooks", []):
                 if h.get("id") and h["id"] not in PRECOMMIT_BLOCKED:
                     ids.append(h["id"])
-    except Exception as e:                                    # noqa: BLE001 - config shape varies
+    except Exception as e:  # noqa: BLE001 - config shape varies
         results.append(("5. pre-commit", False, f"could not read config: {e}"))
         return False
     bad = []
+    # pre-commit --all-files means "every file in the git INDEX". A new file is invisible to it until
+    # it is staged - which is how preflight.py itself shipped unformatted and failed the CI linter on
+    # the commit that added it. `git add` your new files BEFORE running preflight and they are covered;
+    # preflight warns below if it sees new source files that are not staged.
+    #
+    # It deliberately does NOT lint every untracked file: there are 93 abandoned scratch scripts in
+    # this tree that CI has never linted and never will, and failing on them would make preflight
+    # useless.
+    unstaged_new = [
+        f
+        for f in subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        ).stdout.split()
+        if f.endswith((".py", ".js")) and "/" not in f and not f.startswith("_")
+    ]
+    bad = []
     for hid in ids:
-        r = subprocess.run([PY, "-m", "pre_commit", "run", hid, "--all-files"], cwd=ROOT,
-                           capture_output=True, text=True, timeout=600)
+        r = subprocess.run(
+            [PY, "-m", "pre_commit", "run", hid, "--all-files"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
         if r.returncode != 0:
             bad.append(hid)
             print(f"  FAILED hook: {hid}")
+        if r.returncode != 0:
+            bad.append(hid)
+            print(f"  FAILED hook: {hid}")
+    if unstaged_new:
+        print(
+            f"  NOTE: {len(unstaged_new)} new source file(s) are NOT staged, so the hooks did not "
+            f"see them: {', '.join(unstaged_new[:6])}"
+        )
+        print("        `git add` them and re-run, or CI will lint what preflight did not.")
     ok = not bad
-    detail = (f"{len(ids)} hooks run, {len(bad)} failed"
-              + (f" ({', '.join(bad)})" if bad else "")
-              + f"; skipped (blocked by Application Control): {', '.join(PRECOMMIT_BLOCKED)}")
+    detail = (
+        f"{len(ids)} hooks over the staged tree, {len(bad)} failed"
+        + (f" ({', '.join(bad)})" if bad else "")
+        + f"; skipped (blocked by Application Control): {', '.join(PRECOMMIT_BLOCKED)}"
+    )
     results.append(("5. pre-commit (runnable hooks)", ok, detail))
     print(f"  -> {'OK' if ok else 'FAILED'}  {detail}")
     return ok
@@ -167,10 +204,16 @@ def io_open_text(rel):
 def main():
     # ---- 0. syntax and config -----------------------------------------------------------------
     step("0a. compile every pipeline script", [PY, "-m", "py_compile", *pipeline_scripts()])
-    step("0b. workflow YAML parses", [PY, "-c",
-         "import yaml,io;y=yaml.safe_load(io.open('.github/workflows/refresh-interviews.yml',"
-         "encoding='utf-8'));assert y['jobs']['refresh']['steps'];print('steps',"
-         "len(y['jobs']['refresh']['steps']))"])
+    step(
+        "0b. workflow YAML parses",
+        [
+            PY,
+            "-c",
+            "import yaml,io;y=yaml.safe_load(io.open('.github/workflows/refresh-interviews.yml',"
+            "encoding='utf-8'));assert y['jobs']['refresh']['steps'];print('steps',"
+            "len(y['jobs']['refresh']['steps']))",
+        ],
+    )
 
     # ---- 1. unit fixtures ---------------------------------------------------------------------
     step("1. reading-rule fixtures", [PY, "test_topic_status_lib.py"], must_contain="fixtures pass")
@@ -179,16 +222,18 @@ def main():
     if not FAST:
         env = dict(os.environ, PYTHONIOENCODING="utf-8")
         env.pop("INTERVIEWS_TODAY", None)
-        if step("2a. build_payload_agg (MUST run before build_dashboard_data)",
-                [PY, "build_payload_agg.py"], env=env):
+        if step("2a. build_payload_agg (MUST run before build_dashboard_data)", [PY, "build_payload_agg.py"], env=env):
             step("2b. build_dashboard_data", [PY, "build_dashboard_data.py"], env=env)
 
     # ---- 3. the four gate suites --------------------------------------------------------------
     step("3a. audit_e2e (6a)", [PY, "audit_e2e.py"], forbid="CHECKS RAN")
     step("3b. dashboard_data audit (6b)", [PY, "build_dashboard_data_audit.py"], forbid="CHECKS RAN")
     brutal_baseline()
-    step("3d. render harness (7c) - the one that is easy to forget",
-         ["node", "verify_render_dropoff.js"], must_contain="ALL PASS")
+    step(
+        "3d. render harness (7c) - the one that is easy to forget",
+        ["node", "verify_render_dropoff.js"],
+        must_contain="ALL PASS",
+    )
 
     # ---- 4. CI SIMULATION ---------------------------------------------------------------------
     # The runner does not have these files. Sections that need them skip, which changes the check
@@ -207,8 +252,7 @@ def main():
                 print(f"  hidden: {rel}")
         try:
             step("4a. audit_e2e AS CI SEES IT", [PY, "audit_e2e.py"], forbid="CHECKS RAN")
-            step("4b. dashboard_data audit AS CI SEES IT", [PY, "build_dashboard_data_audit.py"],
-                 forbid="CHECKS RAN")
+            step("4b. dashboard_data audit AS CI SEES IT", [PY, "build_dashboard_data_audit.py"], forbid="CHECKS RAN")
         finally:
             for src, dst in moved:
                 os.makedirs(os.path.dirname(src), exist_ok=True)
