@@ -365,10 +365,20 @@ for r in bm.rows:
 _rs = dd.get("reviewStatus") or {}
 if _rs:
     _rk = _rs.get("keys") or []
-    _completed = sum(1 for r in bm.rows if r.get("is_completed") == "Y")
+    # TIE OUT TO THE OVERVIEW, not to this block's own basis. The first version of this check counted
+    # master ROWS, which is what the payload was doing too - so both were wrong in the same direction
+    # and the check passed while the view read 9,480 against the Overview's 9,459. A gate that shares
+    # the bug it is meant to catch is worse than no gate. counts.completed is the published headline,
+    # so that is the number the split has to add up to.
+    _cells = {(r["connect_id"], r["cohort_id"], r["interview_n"])
+              for r in bm.rows if r.get("is_completed") == "Y"}
     _tot = sum(_rs["overall"].get(k, 0) for k in _rk)
-    chk("reviewStatus: verdicts account for every completed interview, once",
-        _tot == _completed, f"{_tot} vs {_completed} completed")
+    chk("reviewStatus: verdicts add up to the OVERVIEW completed count, exactly",
+        _tot == len(_cells) == dd["counts"]["completed"],
+        f"split {_tot} | unique interviews {len(_cells)} | Overview {dd['counts']['completed']}")
+    chk("reviewStatus: duplicate bot triggers are not double-counted",
+        _tot <= sum(1 for r in bm.rows if r.get("is_completed") == "Y"),
+        f"{sum(1 for r in bm.rows if r.get('is_completed') == 'Y') - _tot} duplicate row(s) collapsed")
     _bysg = sum(v.get(k, 0) for v in _rs.get("by_sg", {}).values() for k in _rk)
     chk("reviewStatus: by-design breakdown adds back to the overall", _bysg == _tot,
         f"{_bysg} vs {_tot}")
@@ -376,11 +386,19 @@ if _rs:
     chk("reviewStatus: by-topic breakdown adds back to the overall", _bytop == _tot,
         f"{_bytop} vs {_tot}")
     # Independent recompute of the verdict itself, straight off the master rows.
-    _own = {}
+    _RANK = {"suspected_ai": 0, "unacceptable": 1, "acceptable": 2, "not-reviewed": 3}
+    _best = {}
     for r in bm.rows:
         if r.get("is_completed") != "Y":
             continue
         _v = r.get("review_status") or "not-reviewed"
+        if _v not in _RANK:
+            _v = "not-reviewed"
+        _k2 = (r["connect_id"], r["cohort_id"], r["interview_n"])
+        if _k2 not in _best or _RANK[_v] < _RANK[_best[_k2]]:
+            _best[_k2] = _v
+    _own = {}
+    for _v in _best.values():
         _own[_v] = _own.get(_v, 0) + 1
     _bad = [k for k in _rk if _own.get(k, 0) != _rs["overall"].get(k, 0)]
     chk("reviewStatus: payload == independent recompute from master rows", not _bad,
