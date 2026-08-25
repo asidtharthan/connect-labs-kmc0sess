@@ -21,6 +21,7 @@ absence IS the "not yet reviewed" signal, and storing thousands of empty lists w
 
 OCS bearer key from env OCS_API_KEY (CI secret) or untracked .ocs_creds.json locally.
 """
+
 import collections
 import json
 import os
@@ -53,8 +54,12 @@ def ocs_key():
 
 
 def fetch_all(key):
-    out, url, params, page = [], f"{BASE}/api/sessions/", {"experiment": EXP, "page_size": PAGE,
-                                                           "ordering": "created_at"}, 0
+    out, url, params, page = (
+        [],
+        f"{BASE}/api/sessions/",
+        {"experiment": EXP, "page_size": PAGE, "ordering": "created_at"},
+        0,
+    )
     with httpx.Client(headers={"Authorization": f"Bearer {key}"}, timeout=90.0) as c:
         while url:
             for attempt in range(4):
@@ -79,16 +84,18 @@ def main():
     tags = {s["id"]: s["tags"] for s in rows if s.get("id") and s.get("tags")}
     CACHE.write_text(json.dumps(tags, separators=(",", ":")))
     n_verdict = sum(1 for t in tags.values() if set(t) & set(VERDICTS))
-    print(f"[ocs-tags] {len(rows):,} sessions scanned, {len(tags):,} carry tags, "
-          f"{n_verdict:,} carry a review verdict -> {CACHE}", flush=True)
+    print(
+        f"[ocs-tags] {len(rows):,} sessions scanned, {len(tags):,} carry tags, "
+        f"{n_verdict:,} carry a review verdict -> {CACHE}",
+        flush=True,
+    )
 
     if "--report" in sys.argv:
         c = collections.Counter(t for ts in tags.values() for t in ts)
         print("[ocs-tags] every tag:")
         for k, v in c.most_common():
             print(f"           {k:26} {v:>6}")
-        comp = [s for s in rows
-                if (s.get("state") or {}).get("interview_status") == "interview_complete"]
+        comp = [s for s in rows if (s.get("state") or {}).get("interview_status") == "interview_complete"]
         rev = collections.Counter()
         for s in comp:
             hit = set(s.get("tags") or []) & {"acceptable", "unacceptable"}

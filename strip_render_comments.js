@@ -45,5 +45,7 @@ fs.writeFileSync(outPath, out.code.replace(TOKEN, '/*__DATA__*/'), 'utf8');
 const a = Buffer.byteLength(src) / 1024,
   b = Buffer.byteLength(out.code) / 1024;
 console.log(
-  `[strip] ${a.toFixed(1)} KB -> ${b.toFixed(1)} KB code (comments removed for shipping, source untouched)`,
+  `[strip] ${a.toFixed(1)} KB -> ${b.toFixed(
+    1,
+  )} KB code (comments removed for shipping, source untouched)`,
 );

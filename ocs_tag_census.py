@@ -3,6 +3,7 @@
 Purpose: settle what OCS's 'acceptable / not acceptable' figure actually counts, and whether it is the
 same universe as the dashboard's 'completed interviews'. Reads only the session LIST endpoint.
 """
+
 import collections
 import json
 import os
@@ -51,7 +52,7 @@ for k, v in collections.Counter(r.get("status") for r in rows).most_common():
 print("\n`tags` (every distinct tag, with how many sessions carry it):")
 tg = collections.Counter()
 for r in rows:
-    for t in (r.get("tags") or []):
+    for t in r.get("tags") or []:
         tg[t] += 1
 for k, v in tg.most_common(40):
     print(f"  {k:42} {v:>6}")

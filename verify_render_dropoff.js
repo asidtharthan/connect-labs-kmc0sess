@@ -51,7 +51,9 @@ try {
   );
   src = fs.readFileSync(stripped, 'utf8');
 } catch (e) {
-  console.log('  NOTE  comment strip unavailable, verifying the commented source instead');
+  console.log(
+    '  NOTE  comment strip unavailable, verifying the commented source instead',
+  );
 }
 const data = fs.readFileSync(DATA, 'utf8');
 check(
@@ -588,7 +590,8 @@ Object.keys(CEp).forEach(function (sg) {
       return;
     }
     const ip = st - c.finished[last] - dv - wv;
-    if (ip < 0) badOutcome.push(sg + ':' + m[0] + '=negative in-progress ' + ip);
+    if (ip < 0)
+      badOutcome.push(sg + ':' + m[0] + '=negative in-progress ' + ip);
     const o = Math.round((100 * (c.finished[last] + dv + wv + ip)) / st);
     if (o < 99 || o > 101) badOutcome.push(sg + ':' + m[0] + '=' + o);
   });
@@ -716,7 +719,9 @@ check(
   check(
     'weekly "stopped and never came back" never exceeds "missed any interview"',
     bad.length === 0,
-    bad.length ? bad.slice(0, 4).join(', ') : 'C <= B at every week in every series',
+    bad.length
+      ? bad.slice(0, 4).join(', ')
+      : 'C <= B at every week in every series',
   );
 })();
 
@@ -725,7 +730,11 @@ check(
 // leaving it out, would recreate inside our own dashboard the exact confusion the OCS screen caused.
 (function () {
   const rs = payload.reviewStatus;
-  check('payload carries the OCS review split', !!(rs && rs.overall), rs ? Object.keys(rs.overall || {}).join(', ') : 'absent');
+  check(
+    'payload carries the OCS review split',
+    !!(rs && rs.overall),
+    rs ? Object.keys(rs.overall || {}).join(', ') : 'absent',
+  );
   if (!rs || !rs.overall) return;
   // useState indices shift whenever a hook is added above, so find the view hook rather than assume
   // it - hardcoding 2 is what made this check pass on the button label while the view never rendered.
@@ -739,7 +748,11 @@ check(
     }
     if (candidate.includes('completed interviews match the')) html = candidate;
   }
-  check('Data review view renders', !!html, html ? '' : 'view never rendered at any hook index');
+  check(
+    'Data review view renders',
+    !!html,
+    html ? '' : 'view never rendered at any hook index',
+  );
   check(
     'not-yet-reviewed is shown by default, not filtered away',
     !!html && /Not yet reviewed/.test(html),
@@ -750,7 +763,11 @@ check(
     (a, v) => a + keys.reduce((b, k) => b + (v[k] || 0), 0),
     0,
   );
-  check('review split: by-design adds back to the overall', bySg === tot, `${bySg} vs ${tot}`);
+  check(
+    'review split: by-design adds back to the overall',
+    bySg === tot,
+    `${bySg} vs ${tot}`,
+  );
 })();
 
 // ---------------------------------------------------------------- size guard
