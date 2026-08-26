@@ -884,6 +884,58 @@ check(
   );
 })();
 
+// Reading A ignores the per-cohort deadline entirely - it returns purely on 14 days of silence - so
+// the table must not print 3d/7d/4d beside its numbers as though that rule applied to them.
+(function () {
+  if (viewHook == null) {
+    check(
+      'deadline column follows the selected reading',
+      false,
+      'view hook not found',
+    );
+    return;
+  }
+  let modeHook = null,
+    aHtml = null,
+    cHtml = null;
+  const base = build(null, { 1: 'funnels', [viewHook]: 'dropoff' });
+  for (let j = 2; j <= 60 && !modeHook; j++) {
+    if (j === viewHook) continue;
+    let a;
+    try {
+      a = build(null, { 1: 'funnels', [viewHook]: 'dropoff', [j]: 'A' });
+    } catch (e) {
+      continue;
+    }
+    if (a !== base && /method used before 21 August/.test(a)) {
+      modeHook = j;
+      aHtml = a;
+    }
+  }
+  if (modeHook)
+    cHtml = build(null, {
+      1: 'funnels',
+      [viewHook]: 'dropoff',
+      [modeHook]: 'C',
+    });
+  check(
+    'reading-A view names the column Silence, not Deadline',
+    !!aHtml && />Silence<\/th>|>\s*Silence\s*</.test(aHtml),
+    aHtml ? '' : 'could not render reading A',
+  );
+  check(
+    'reading-C view still names it Deadline',
+    !!cHtml && /Deadline/.test(cHtml),
+  );
+  check(
+    'reading-A does not claim the deadline is one interview gap',
+    !!aHtml && !/deadline for one interview is one interview gap/.test(aHtml),
+    aHtml && /flat 14 days of silence/.test(aHtml)
+      ? 'says flat 14 days instead'
+      : '',
+  );
+})();
+
 // ---------------------------------------------------------------- size guard
 // The Labs render_code limit is a hard 512 KB and brutal_verify enforces it in CI. This local check
 // UNDER-reports: a local build runs off cached pulls, so its payload is smaller than the live one. On

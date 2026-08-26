@@ -2038,8 +2038,13 @@ function WorkflowUI(props) {
         <div className="rounded border border-gray-200 bg-gray-50 p-3 text-xs leading-relaxed text-gray-700">
           <b>What this shows.</b> Every cohort measured at <b>its own end date</b> - the day its last
           interview stopped being open - rather than today or a date shared across its whole design.
-          A worker&apos;s <b>deadline for one interview is one interview gap after it was sent</b>, so it is
-          3 days in a 3-day design and 14 in a 14-day one, and means the same thing in both.
+          {cdMode === "A"
+            ? <React.Fragment>This reading uses a <b>flat 14 days of silence</b>, the same for every design,
+                and ignores the schedule entirely - so the per-design deadline does not apply to these
+                numbers, and they climb on their own as time passes.</React.Fragment>
+            : <React.Fragment>A worker&apos;s <b>deadline for one interview is one interview gap after it
+                was sent</b>, so it is 3 days in a 3-day design and 14 in a 14-day one, and means the same
+                thing in both.</React.Fragment>}
           <div className="mt-2">
             <b>Why there is no day-count control.</b> {rows.length - openN} of {rows.length} cohorts have
             finished. Once a cohort is over, &quot;did they complete it?&quot; needs no waiting period, so
@@ -2136,7 +2141,12 @@ function WorkflowUI(props) {
                 {cdLevel === "cohort" && <th className="px-2 py-1 text-left">Design</th>}
                 <th className="px-2 py-1 text-right">Ivs</th>
                 <th className="px-2 py-1 text-right">Gap</th>
-                <th className="px-2 py-1 text-right">Deadline</th>
+                <th className="px-2 py-1 text-right"
+                    title={cdMode === "A"
+                      ? "A flat 14 days of silence, the same for every design. The per-design deadline does not apply to this reading."
+                      : "One interview gap after the interview was sent - 3 days in a 3-day design, 14 in a 14-day one."}>
+                  {cdMode === "A" ? "Silence" : "Deadline"}
+                </th>
                 <th className="px-2 py-1 text-left">{cdLevel === "design" ? "Own end dates" : "Started"}</th>
                 <th className="px-2 py-1 text-left">{cdLevel === "design" ? "Spread" : "Its own end"}</th>
                 <th className="px-2 py-1 text-right">Workers</th>
@@ -2163,8 +2173,13 @@ function WorkflowUI(props) {
                     <td className="px-2 py-1 text-right">{r.ivs || "-"}</td>
                     <td className="px-2 py-1 text-right">{r.gap ? r.gap + "d" : "-"}</td>
                     <td className="px-2 py-1 text-right">
-                      {isD ? (r.gap ? r.gap + "d" : "-")
-                           : <span className={r.graceOverridden ? "font-semibold text-amber-700" : ""}>{r.grace ? r.grace + "d" : "-"}</span>}
+                      {/* Reading A does not use the per-cohort deadline at ALL - it returns purely on
+                          14 days of silence - so showing 3d/7d/4d beside its numbers described a rule
+                          that was not being applied to them. */}
+                      {cdMode === "A"
+                        ? <span className="text-gray-500">14d</span>
+                        : isD ? (r.gap ? r.gap + "d" : "-")
+                              : <span className={r.graceOverridden ? "font-semibold text-amber-700" : ""}>{r.grace ? r.grace + "d" : "-"}</span>}
                     </td>
                     <td className="px-2 py-1 text-gray-600">{isD ? r.endFirst : r.start}</td>
                     <td className="px-2 py-1 text-gray-600">
@@ -2332,8 +2347,15 @@ function WorkflowUI(props) {
           <div className="text-sm text-gray-500 px-2 py-6">No engagement data for {scope} yet{engLlo !== "all" ? " (this cohort has no " + engLlo + " FLWs)" : ""}.</div>
         ) : (function () {
           // KPIs + banner numbers = current state (from the FULL series); the CHARTS use the windowed view.
-          var nf = full.weeks.length - 1;
-          var started = full.total_started, finished = full.finished_pct[nf], drop = full.drop_pct[nf];
+          // The Window choice scopes the TILES too, not just the chart. Reading the full series here
+          // regardless meant Active window and Full timeline produced identical tiles while the chart
+          // below moved - PANEL showed 39% on a tile and 9% on the chart on the same screen, and the
+          // banner underneath explained the contradiction rather than removing it.
+          var nf = (engWin === "active" && aEnd != null && aEnd < full.weeks.length - 1)
+            ? aEnd
+            : full.weeks.length - 1;
+          var started = full.started ? full.started[nf] : full.total_started;
+          var finished = full.finished_pct[nf], drop = full.drop_pct[nf];
           var activeNow = full.active[nf];
           var endTxt = full.weeks[aEnd] ? fmtWk(full.weeks[aEnd]) : "";   // guarded; was an inline copy of fmtWk
           // These four tiles are CURRENT STATE (full series). The charts below may be windowed to an
