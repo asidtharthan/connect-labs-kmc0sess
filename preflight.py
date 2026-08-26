@@ -75,6 +75,12 @@ def step(label, cmd, *, cwd=ROOT, env=None, timeout=2400, must_contain=None, for
     t0 = time.time()
     print(f"\n=== {label} ===", flush=True)
     try:
+        # CI runs UTF-8 on Linux; this console is cp1252, so a gate printing a Sigma in a check
+        # name died with UnicodeEncodeError and preflight announced "CI would fail too. Do not
+        # push." That is the worst false alarm available: it blames the code for a console limit.
+        env = dict(env or os.environ)
+        env.setdefault("PYTHONIOENCODING", "utf-8")
+        env.setdefault("PYTHONUTF8", "1")
         r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         results.append((label, False, f"TIMEOUT after {timeout}s"))
