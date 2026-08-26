@@ -82,6 +82,9 @@ function WorkflowUI(props) {
   var ethr = React.useState(2); var engThr = ethr[0], setEngThr = ethr[1];             // active-window threshold: % of started FLWs newly active/week (1 tight | 2 std | 5 loose)
   var eng1Ref = React.useRef(null), eng1Inst = React.useRef(null);
   var eng2Ref = React.useRef(null), eng2Inst = React.useRef(null);
+  // Outcome chart: "chart" = as before; "values" = drop only the labels that would collide and put
+  // every number in a table underneath, so a screenshot of the panel carries its own data.
+  var evm = React.useState("chart"); var engVals = evm[0], setEngVals = evm[1];
   var eng3Ref = React.useRef(null), eng3Inst = React.useRef(null);
 
   // Design + topic names come from the build (DATA.subgroupDesign / topicNames), derived from the
@@ -1445,6 +1448,10 @@ function WorkflowUI(props) {
     // drawn whenever a label has been moved, so a nudged value is never silently detached from the
     // point it belongs to.
     var MIN_GAP = 12;
+    // In "values" mode the table below carries every number, so a label that cannot sit at its own
+    // point without colliding is DROPPED rather than nudged. Silence beats a smear; the reader looks
+    // down at the table instead. In "chart" mode the nudging behaviour is kept.
+    var dropColliding = arguments.length > 0 && arguments[0] === "values";
     return { afterDatasetsDraw: function (chart) {
       var ctx = chart.ctx;
       ctx.save();
@@ -1467,11 +1474,15 @@ function WorkflowUI(props) {
         var lastY = -Infinity;
         group.forEach(function (g) {
           var want = g.y - 6;
-          if (want - lastY < MIN_GAP) want = lastY + MIN_GAP;            // nudge down to clear
+          if (want - lastY < MIN_GAP) {
+            if (dropColliding) { g.skip = true; return; }                // table has it; stay quiet
+            want = lastY + MIN_GAP;                                      // else nudge down to clear
+          }
           g.labelY = want;
           lastY = want;
         });
         group.forEach(function (g) {
+          if (g.skip) return;
           if (Math.abs(g.labelY - (g.y - 6)) > 2) {
             ctx.strokeStyle = g.c;
             ctx.globalAlpha = 0.35;
@@ -1687,7 +1698,7 @@ function WorkflowUI(props) {
             title: { display: true, text: "Outcome (of all starters) and rhythm (of those with 2+ interviews)" },
             tooltip: { callbacks: { label: function (c) { return c.dataset.label.split(":")[0] + ": " + c.parsed.y + "%"; } } } },
           scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: "% of started FLWs" }, ticks: { callback: function (v) { return v + "%"; } } } } },
-        plugins: [linePointLabels(), whiteBg, apm]
+        plugins: [linePointLabels(engVals), whiteBg, apm]
       });
     }
     if (eng3Ref.current) {
@@ -1709,7 +1720,7 @@ function WorkflowUI(props) {
       });
     }
     return function () { [eng1Inst, eng2Inst, eng3Inst].forEach(function (r) { if (r.current) { r.current.destroy(); r.current = null; } }); };
-  }, [activeTab, funView, engSg, engLlo, engWin, engThr, engMark, engMode]);
+  }, [activeTab, funView, engSg, engLlo, engWin, engThr, engMark, engMode, engVals]);
 
   // ---- Drop-off by cohort (cross-cohort comparison) ----------------------------------------------
   // Each cohort is scored at ITS OWN end date, not at today and not at a date shared across its whole
@@ -2370,7 +2381,72 @@ function WorkflowUI(props) {
                 })}
               </div>
               <div style={{ height: "260px" }}><canvas ref={eng1Ref}></canvas></div>
+              {/* The toggle sits WITH the chart, not at the top of the page, so the control, the
+                  chart and the table are one screenshot. */}
+              <div className="flex flex-wrap items-center gap-2 px-1 pt-1">
+                <span className="text-xs font-medium text-gray-600">Values:</span>
+                {subBtn(engVals, "chart", setEngVals, "On the chart")}
+                {subBtn(engVals, "values", setEngVals, "In a table below")}
+                <span className="text-gray-500" style={{ fontSize: "11px" }}>
+                  {engVals === "values"
+                    ? "Crowded labels are dropped from the chart and every value is listed underneath, so a screenshot carries its own numbers."
+                    : "Every value is drawn on the chart. Where lines run close together the labels can crowd - switch to the table for those."}
+                </span>
+              </div>
               <div style={{ height: "300px" }}><canvas ref={eng2Ref}></canvas></div>
+              {engVals === "values" ? (
+                <div className="px-1 pb-2">
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="text-xs border-collapse" style={{ minWidth: "100%" }}>
+                      <thead>
+                        <tr className="text-gray-500">
+                          <th className="px-2 py-1 text-left font-medium" style={{ whiteSpace: "nowrap" }}>
+                            % of started FLWs
+                          </th>
+                          {ce.weeks.map(function (w) {
+                            return (
+                              <th key={w} className="px-1 py-1 text-right font-medium"
+                                  style={{ whiteSpace: "nowrap", fontSize: "10px" }}>
+                                {fmtWk(w)}
+                              </th>
+                            );
+                          })}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[["Finished", "#5E35B1", ce.finished_pct],
+                          ["Dropped off", "#C62828", ce.drop_pct],
+                          ["Schedule not completed", "#0277BD", ce.waiting_pct],
+                          ["Still in progress", "#607D8B", ce.inprog_pct],
+                          ["Rhythm - steady", "#2E7D32", ce.steady_pct],
+                          ["Rhythm - inconsistent", "#F9A825", ce.incons_pct]].map(function (row) {
+                          return (
+                            <tr key={row[0]} className="border-t border-gray-100">
+                              <td className="px-2 py-1" style={{ whiteSpace: "nowrap" }}>
+                                <span style={{ color: row[1], fontWeight: 700 }}>&#9679;</span>{" "}
+                                <span className="text-gray-700">{row[0]}</span>
+                              </td>
+                              {ce.weeks.map(function (w, i) {
+                                var v = (row[2] || [])[i];
+                                return (
+                                  <td key={w} className="px-1 py-1 text-right"
+                                      style={{ color: row[1], fontVariantNumeric: "tabular-nums" }}>
+                                    {v == null ? "" : v + "%"}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="text-gray-400 mt-1" style={{ fontSize: "10px" }}>
+                    Same numbers the chart draws. The first four rows sum to 100% in every column;
+                    the two rhythm rows sum to 100% on their own base (starters with 2+ interviews).
+                  </div>
+                </div>
+              ) : null}
               <div style={{ height: "300px" }}><canvas ref={eng3Ref}></canvas></div>
               <Legend title="How to read these three panels">
                 <div><b>Panel 1 - recruitment:</b> cumulative FLWs who have started interviewing (appeared in the interview data). Not invited counts.</div>
@@ -2763,14 +2839,6 @@ function WorkflowUI(props) {
           <span><b>{c.started}</b> interviews started</span>
           <span><b>{c.completed}</b> completed</span>
         </div>
-        {(DATA.retiredCohorts && DATA.retiredCohorts.length) ? (
-          <div className="mt-3 text-xs bg-gray-50 border border-gray-200 text-gray-600 rounded-md px-3 py-2">
-            {DATA.retiredCohorts.length} cohort{DATA.retiredCohorts.length === 1 ? " is" : "s are"}{" "}
-            <b>withdrawn from this dashboard on purpose</b> and excluded from every figure above. The
-            underlying data is untouched and still searchable in the session view:{" "}
-            <span className="font-mono">{DATA.retiredCohorts.join(", ")}</span>
-          </div>
-        ) : null}
         {(DATA.unmappedCohorts && DATA.unmappedCohorts.length) ? (
           <div className="mt-3 text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-md px-3 py-2">
             ⚠ {DATA.unmappedCohorts.length} cohort{DATA.unmappedCohorts.length === 1 ? "" : "s"} not yet mapped
