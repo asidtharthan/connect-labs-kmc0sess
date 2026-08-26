@@ -389,6 +389,9 @@ master_4src.csv
 dashboard_data.json
 render_data.json
 payload_agg.json
+# build provenance: which legs ran live vs degraded. Regenerated every build,
+# read by brutal_verify. An artifact, like the two above.
+_provenance.json
 topic_status_long.csv
 docs/interviews_master_v3_render.js
 .hq_creds.json
