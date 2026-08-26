@@ -68,8 +68,28 @@ check(
   })(),
 );
 
-const injected = src.replace('/*__DATA__*/', data);
+let injected = src.replace('/*__DATA__*/', data);
 check('DATA placeholder was substituted', !injected.includes('/*__DATA__*/'));
+
+// LIVE MODE. Point INTERVIEWS_LIVE_RENDER at a render pulled back off Labs and every check below runs
+// against the code that is actually serving the dashboard, not the copy about to be published. Without
+// this the harness could only ever certify an intention - a publish that silently truncated, stripped
+// wrong, or landed an older build would pass every check while the live page was broken.
+const LIVE = process.env.INTERVIEWS_LIVE_RENDER;
+let liveRecovered = false;
+if (LIVE) {
+  injected = fs.readFileSync(LIVE, 'utf8');
+  check(
+    'live render was read',
+    injected.length > 100000,
+    injected.length + ' chars',
+  );
+  check(
+    'live render carries no unsubstituted placeholder',
+    !injected.includes('/*__DATA__*/'),
+  );
+  console.log('  MODE  verifying LIVE render from ' + LIVE);
+}
 
 let code;
 try {
@@ -160,7 +180,57 @@ check('the new view button exists', funnelsHtml.includes('Drop-off by cohort'));
 
 // ---------------------------------------------------------------- render WITH the new view selected
 // Hook order in the template: 1 tab, ... find the funView hook by rendering with each candidate.
-const payload = JSON.parse(data);
+let payload = JSON.parse(data);
+if (LIVE) {
+  // Recover the DATA literal the live render carries, so every numeric expectation below is derived
+  // from the same dataset the live DOM was rendered from.
+  // The published render declares `var DATA`, not `const` - matching only `const` meant this quietly
+  // fell through to the LOCAL payload and still reported PASS, which is the failure mode this whole
+  // mode exists to catch.
+  const m = injected.match(/(?:const|var|let)\s+DATA\s*=\s*/);
+  if (m) {
+    const start = injected.indexOf('{', m.index);
+    let depth = 0,
+      end = -1,
+      inStr = false,
+      esc = false;
+    for (let i = start; i < injected.length; i++) {
+      const ch = injected[i];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (ch.charCodeAt(0) === 92) esc = true;
+        else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') inStr = true;
+      else if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+    if (end > 0) {
+      try {
+        payload = JSON.parse(injected.slice(start, end));
+        liveRecovered = true;
+      } catch (e) {
+        console.log('  ERROR live DATA found but did not parse: ' + e.message);
+      }
+    }
+  }
+  check(
+    'live payload was recovered from the live render (not silently the local one)',
+    liveRecovered && (payload.cohortDropoff || []).length > 0,
+    liveRecovered
+      ? (payload.cohortDropoff || []).length +
+          ' cohort rows, built ' +
+          payload.built_at
+      : 'FELL BACK TO LOCAL - every numeric check below would grade live output against local data',
+  );
+}
 const CD = payload.cohortDropoff || [];
 check('payload carries cohortDropoff', CD.length > 0, `${CD.length} cohorts`);
 
@@ -952,9 +1022,13 @@ const LIVE_SCALE = 1.075; // MEASURED on the 2026-08-21 publish: 252.4 KB live /
 const IS_FULL_BUILD = (payload.counts && payload.counts.master_rows) > 9000;
 const LIVE_FACTOR = IS_FULL_BUILD ? 1.0 : LIVE_SCALE;
 const MIN_HEADROOM = 4 * 1024; // fail before the wall, not at it - CI's own gate is the backstop
-const projected =
-  Buffer.byteLength(src, 'utf8') +
-  (liveBytes - Buffer.byteLength(src, 'utf8')) * LIVE_FACTOR;
+// In LIVE mode there is nothing to project: the bytes in hand ARE the live render, so scaling them
+// by the local-to-live payload factor a second time would invent ~22 KB that does not exist and fail
+// a render that actually fits.
+const projected = LIVE
+  ? liveBytes
+  : Buffer.byteLength(src, 'utf8') +
+    (liveBytes - Buffer.byteLength(src, 'utf8')) * LIVE_FACTOR;
 check(
   'injected render fits the 512 KB Labs cap (local)',
   liveBytes < CAP,
@@ -963,14 +1037,183 @@ check(
   )} KB`,
 );
 check(
-  'projected LIVE render fits the cap with headroom to spare',
+  LIVE
+    ? 'LIVE render fits the 512 KB Labs cap (measured, not projected)'
+    : 'projected LIVE render fits the cap with headroom to spare',
   projected + MIN_HEADROOM < CAP,
-  `~${Math.round(projected / 1024)} KB at ${LIVE_FACTOR}x payload (${
-    IS_FULL_BUILD
-      ? 'full build - measured, not scaled'
-      : 'local build - scaled up to estimate live'
-  }), headroom ~${Math.round((CAP - projected) / 1024)} KB`,
+  LIVE
+    ? `${Math.round(
+        projected / 1024,
+      )} KB of 512 measured on the live render, headroom ${Math.round(
+        (CAP - projected) / 1024,
+      )} KB`
+    : `~${Math.round(projected / 1024)} KB at ${LIVE_FACTOR}x payload (${
+        IS_FULL_BUILD
+          ? 'full build - measured, not scaled'
+          : 'local build - scaled up to estimate live'
+      }), headroom ~${Math.round((CAP - projected) / 1024)} KB`,
 );
+
+// ---------------------------------------------------------------- the Window scopes the whole panel
+// The tiles used to read the last point of the FULL series whatever the Window said, so Active window
+// and Full timeline produced identical tiles while the chart beneath moved. These checks are
+// BEHAVIOURAL - they force the two window states and require the numbers to differ - because the
+// earlier version of this file selected views by button label, which is present whether or not the
+// state ever took effect.
+(function () {
+  function tilesOf(html) {
+    const out = {};
+    const re =
+      /<div class="text-lg font-bold"[^>]*>([^<]{1,18})<\/div><div class="text-xs font-medium text-gray-700">([^<]{1,60})<\/div>/g;
+    let m;
+    while ((m = re.exec(html))) out[m[2].trim()] = m[1].trim();
+    return out;
+  }
+  let engIdx = null,
+    baseHtmlEng = null;
+  for (let i = 2; i <= 60 && !baseHtmlEng; i++) {
+    let h;
+    try {
+      h = build(null, { 1: 'funnels', [i]: 'engagement' });
+    } catch (e) {
+      continue;
+    }
+    if (/Read this as recruitment|Program-wide roll-up/.test(h)) {
+      engIdx = i;
+      baseHtmlEng = h;
+    }
+  }
+  check(
+    'cohort engagement view renders',
+    !!baseHtmlEng,
+    engIdx ? 'hook ' + engIdx : 'never mounted',
+  );
+  if (!baseHtmlEng) return;
+
+  let sgIdx = null;
+  for (let i = 2; i <= 60 && !sgIdx; i++) {
+    if (i === engIdx) continue;
+    let h;
+    try {
+      h = build(null, { 1: 'funnels', [engIdx]: 'engagement', [i]: 'PANEL' });
+    } catch (e) {
+      continue;
+    }
+    if (h !== baseHtmlEng && /PANEL/.test(h)) sgIdx = i;
+  }
+  if (!sgIdx) {
+    check('engagement subgroup selector found', false);
+    return;
+  }
+
+  let winIdx = null,
+    ta = null,
+    tf = null;
+  for (let i = 2; i <= 60 && !winIdx; i++) {
+    if (i === engIdx || i === sgIdx) continue;
+    let a, f;
+    try {
+      a = build(null, {
+        1: 'funnels',
+        [engIdx]: 'engagement',
+        [sgIdx]: 'PANEL',
+        [i]: 'active',
+      });
+      f = build(null, {
+        1: 'funnels',
+        [engIdx]: 'engagement',
+        [sgIdx]: 'PANEL',
+        [i]: 'full',
+      });
+    } catch (e) {
+      continue;
+    }
+    const A = tilesOf(a),
+      F = tilesOf(f);
+    if (Object.keys(A).length && JSON.stringify(A) !== JSON.stringify(F)) {
+      winIdx = i;
+      ta = A;
+      tf = F;
+      check(
+        'the Window choice moves the KPI tiles, not just the chart',
+        A['Dropped off'] !== F['Dropped off'],
+        'active ' + A['Dropped off'] + ' vs full ' + F['Dropped off'],
+      );
+      const aHtml = a;
+      check(
+        'the active-window note no longer claims the tiles are as of today',
+        !/tiles above are as of/.test(aHtml),
+        /tiles above are as of/.test(aHtml)
+          ? 'stale sentence still shipping'
+          : '',
+      );
+      check(
+        'the active-window note says the whole panel is windowed',
+        /Everything on this panel/.test(aHtml),
+      );
+    }
+  }
+  check(
+    'engagement Window selector found',
+    !!winIdx,
+    winIdx ? 'hook ' + winIdx : 'not found',
+  );
+
+  if (winIdx) {
+    let modeIdx = null;
+    for (let i = 2; i <= 60 && !modeIdx; i++) {
+      if (i === engIdx || i === sgIdx || i === winIdx) continue;
+      let a, c;
+      try {
+        a = build(null, {
+          1: 'funnels',
+          [engIdx]: 'engagement',
+          [sgIdx]: 'PANEL',
+          [winIdx]: 'full',
+          [i]: 'A',
+        });
+        c = build(null, {
+          1: 'funnels',
+          [engIdx]: 'engagement',
+          [sgIdx]: 'PANEL',
+          [winIdx]: 'full',
+          [i]: 'C',
+        });
+      } catch (e) {
+        continue;
+      }
+      const x = tilesOf(a)['Dropped off'],
+        y = tilesOf(c)['Dropped off'];
+      if (x && y && x !== y) modeIdx = i;
+    }
+    check('engagement reading selector found', !!modeIdx);
+    if (modeIdx) {
+      const aH = build(null, {
+        1: 'funnels',
+        [engIdx]: 'engagement',
+        [sgIdx]: 'PANEL',
+        [winIdx]: 'full',
+        [modeIdx]: 'A',
+      });
+      check(
+        'engagement drop-off wording follows the reading (A does not cite a deadline)',
+        /14 days with no interview/.test(aH) &&
+          !/went past its deadline/.test(aH),
+      );
+      const cH = build(null, {
+        1: 'funnels',
+        [engIdx]: 'engagement',
+        [sgIdx]: 'PANEL',
+        [winIdx]: 'full',
+        [modeIdx]: 'C',
+      });
+      check(
+        'engagement reading C still cites the deadline rule',
+        /went past its deadline/.test(cH),
+      );
+    }
+  }
+})();
 
 // ---------------------------------------------------------------- no em/en dashes (house style)
 // Checked on the SOURCE: that is the file people edit and the one the rule is about.
