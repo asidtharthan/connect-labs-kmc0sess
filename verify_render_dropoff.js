@@ -827,6 +827,63 @@ check(
   /&gt;Asked&lt;\/th&gt;/.test(injected) || />Asked<\/th>/.test(injected),
 );
 
+// The outcome chart's "values in a table" mode exists so a SCREENSHOT carries its own numbers - the
+// chart alone could not, because four of six series live between 5% and 19% and their labels collide.
+// So assert the table actually renders with values, not just that the toggle exists.
+(function () {
+  let viewHook = null;
+  for (let i = 2; i <= 60 && !viewHook; i++) {
+    try {
+      if (
+        build(null, { 1: 'funnels', [i]: 'engagement' }).includes(
+          'Panel 1 - recruitment',
+        )
+      )
+        viewHook = i;
+    } catch (e) {}
+  }
+  let html = null;
+  for (let j = 2; j <= 60 && !html && viewHook; j++) {
+    if (j === viewHook) continue;
+    let h;
+    try {
+      h = build(null, {
+        1: 'funnels',
+        [viewHook]: 'engagement',
+        [j]: 'values',
+      });
+    } catch (e) {
+      continue;
+    }
+    if (
+      h.includes('% of started FLWs') &&
+      h.includes('Rhythm - inconsistent') &&
+      h.includes('</table>')
+    )
+      html = h;
+  }
+  check(
+    'outcome value table renders',
+    !!html,
+    html ? '' : 'never rendered at any hook index',
+  );
+  if (!html) return;
+  const rows = html
+    .split('<tr')
+    .filter((r) => r.includes('&#9679;') || r.includes('\u25cf'));
+  check(
+    'value table carries all six series',
+    rows.length === 6,
+    `${rows.length} rows`,
+  );
+  const pcts = (html.match(/\d+%/g) || []).length;
+  check(
+    'value table is populated, not empty',
+    pcts > 50,
+    `${pcts} percentage values`,
+  );
+})();
+
 // ---------------------------------------------------------------- size guard
 // The Labs render_code limit is a hard 512 KB and brutal_verify enforces it in CI. This local check
 // UNDER-reports: a local build runs off cached pulls, so its payload is smaller than the live one. On
