@@ -44,6 +44,27 @@ failure. When one attempt fails, stop retrying and go enumerate all of them at o
 connectFunnel.NPS.*}` is. Reasoning about a category and enumerating its members are different
   acts and only the second prevents the failure. `python impact_diff.py` produces the list in
   seconds; preflight step 2c now refuses to pass without it.
+- **A check that can pass on ABSENT text is not a check.** Four times now a render assertion has
+  passed while the thing it tested never rendered: a hardcoded hook index that matched a button
+  label, a reading selected by a label present in every render, and three docs assertions written
+  against a section that only mounts after a sub-tab click. Select on text that ONLY exists when the
+  state is active, find hooks BY BEHAVIOUR (render twice and require the numbers to move), and assert
+  the section mounted before asserting anything inside it.
+- **Verify the LIVE artifact, not the one you are about to publish.** `INTERVIEWS_LIVE_RENDER=<file>
+node verify_render_dropoff.js` runs every check against the render pulled back off Labs. Without it
+  a publish that truncated, stripped wrong or landed an older build passes every check while the live
+  page is broken. Two traps it exposed: the published render declares `var DATA` (a `const`-only match
+  silently graded live output against the LOCAL payload and still said PASS), and a size projection
+  applied to already-live bytes invents ~22 KB.
+- **A degraded leg must DECLARE itself.** A fallback that works is indistinguishable from a live pull
+  in the output, so the only way to catch one is to make the build say what it did. `_provenance.json`
+  records every leg; `brutal_verify` fails rather than publish a degraded build. Note which case was
+  silent: the fallback warning only fired for subgroups PRESENT in the schedule file, so a TOTAL pull
+  failure warned about nothing at all and the design gate asserted nothing over an empty dict.
+- **The embedded payload is not the whole dashboard.** Four live pipeline aliases feed the render
+  (triggers/welcome/sessions/connect). "It is absent from the payload" does not mean "it is absent
+  from the page" - the Granular sessions table reads the live OCS pipeline, whose SQL has no cohort
+  filter at all. Check the pipeline before claiming something was removed.
 - **One failed attempt means STOP and enumerate.** Three retries each surfacing one more instance of
   the same root cause is the tell that CI is doing the thinking. Go find all of them at once.
 - **Try to break your own claim before publishing it.** The "4-5x the largest corpus" claim failed
