@@ -1663,27 +1663,28 @@ function WorkflowUI(props) {
           // so it means the same thing in a 3-day-gap design and a 14-day-gap one.
           { label: "Dropped off: " + (engMode === "C" ? "stopped and never came back"
               : engMode === "B" ? "missed any interview" : "no contact for 14 days"),
-            data: ce.drop_pct, borderColor: "#C62828", backgroundColor: "#C62828", pointStyle: "rect", pointRadius: 5 },
-          { label: "Schedule not completed: did all sent, nothing more sent", data: ce.waiting_pct, borderColor: "#0277BD", backgroundColor: "#0277BD", pointStyle: "star", pointRadius: 5 },
-          { label: "Still in progress", data: ce.inprog_pct, borderColor: "#607D8B", backgroundColor: "#607D8B", pointStyle: "cross", pointRadius: 5 },
+            data: ce.drop_pct, borderColor: "#C62828", backgroundColor: "#C62828" },
+          { label: "Schedule not completed: did all sent, nothing more sent", data: ce.waiting_pct, borderColor: "#0277BD", backgroundColor: "#0277BD" },
+          { label: "Still in progress", data: ce.inprog_pct, borderColor: "#607D8B", backgroundColor: "#607D8B" },
           // ---- RHYTHM: a SEPARATE reading over starters with 2+ interviews. These two sum to 100 on
           // their own base, which is why they are dashed - they are not part of the stack above. They
           // used to be the leftover of it, so they emptied to 0% the moment every cohort closed.
-          { label: "Rhythm - steady: never a gap > " + gt + " days", data: ce.steady_pct, borderColor: "#2E7D32", backgroundColor: "#2E7D32", pointStyle: "triangle", pointRadius: 5 },
-          { label: "Rhythm - inconsistent: one " + (gt + 1) + "+ day gap", data: ce.incons_pct, borderColor: "#F9A825", backgroundColor: "#F9A825", pointStyle: "rectRot", pointRadius: 5 }
+          { label: "Rhythm - steady: never a gap > " + gt + " days", data: ce.steady_pct, borderColor: "#2E7D32", backgroundColor: "#2E7D32" },
+          { label: "Rhythm - inconsistent: one " + (gt + 1) + "+ day gap", data: ce.incons_pct, borderColor: "#F9A825", backgroundColor: "#F9A825" }
         ].map(function (d) { return Object.assign({ fill: false, tension: 0.2, borderWidth: 3, pointRadius: 3, pointHoverRadius: 6 }, d); }) },
         options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 16 } },
-          // Every line is solid now. The rhythm pair used to be dashed to flag that it answers a
-          // different question on a different base; the legend and the axis title say so in words, and
-          // the dashes cost more in legibility than they bought. Distinct point SHAPES carry the
-          // distinction instead, and survive overlap in a way dashes did not.
+          // Every line is solid and every point is a plain circle - the chart looks exactly as it
+          // did. The rhythm pair used to be dashed to flag that it answers a different question on a
+          // different base; the legend and the axis title say so in words. Varied point shapes were
+          // tried to replace the dashes and made a clean chart look busy for no gain: the values are
+          // separated by the label placement below, not by decorating the markers.
           plugins: { legend: { position: "bottom", labels: { boxWidth: 14, font: { size: 11 },
                 generateLabels: function (chart) {
                   var items = window.Chart.defaults.plugins.legend.labels.generateLabels(chart);
                   items.forEach(function (it) { it.lineDash = []; it.lineDashOffset = 0; });
                   return items;
                 } } },
-            title: { display: true, text: "Outcome (of all starters) and rhythm (of those with 2+ interviews) - shapes identify each series where lines overlap" },
+            title: { display: true, text: "Outcome (of all starters) and rhythm (of those with 2+ interviews)" },
             tooltip: { callbacks: { label: function (c) { return c.dataset.label.split(":")[0] + ": " + c.parsed.y + "%"; } } } },
           scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: "% of started FLWs" }, ticks: { callback: function (v) { return v + "%"; } } } } },
         plugins: [linePointLabels(), whiteBg, apm]
