@@ -817,6 +817,79 @@ update is a human editing the panel. For ~8 figures that is a few minutes.
 chip for all three would silently make the report wrong, and with no visible pill the error would be
 invisible.
 
+## 5u. THE SCALE SUPERLATIVE IS DEAD - verified 2026-08-26. Do not claim it again.
+
+I have now made a version of this claim THREE times and it has failed twice under adversarial search.
+My own rule in section 1 already said "try to break your own claim before publishing it" and cited the
+first failure. I wrote the rule and then drifted back into the claim. **Stop claiming it.**
+
+### The decisive fact is internal, not in the literature
+
+**Our LLM-driven analysis covers 6,712 sessions, not ~9,880.** Counted by unioning the distinct
+`session_id` values across every `typology_classifications*.csv` and `answers_scored*.csv` in the
+Dimagi Outputs pack (typology 6,494; answers_scored 6,712; union 6,712).
+
+The corpus is ~10,000 interviews. **The interpretive LLM analysis covered 6,712 of them.** Those are
+different numbers and only the second one supports an "LLM-analysed corpus" claim.
+
+Separately, the LLM **evaluator** (rubric scoring) reviewed **8,464** of 9,382 completed interviews,
+918 never reviewed. That is a different task class - and it is the SAME task class as micro1's, so it
+buys no distinction.
+
+### micro1 is 6,500, not 300,000 - and it IS LLM analysis
+
+Verified from the full text of arXiv:2507.16835 myself:
+
+- Analysed sample is **6,500** (5,000 for Google x GPT-4.1 x OpenAI, plus 500 each for three other
+  stacks). **The 300,000 is the production pool sampled FROM**, not the analysed set.
+- They used **Claude 3.5 Sonnet as an LLM judge** scoring transcripts on Question Quality,
+  Conversational Flow and Answer Assessment, explicitly "to reduce human grading costs".
+- Their interviews are adaptive audio, with follow-ups generated from prior turns. **Calling them
+  "structured screening" is a stretch.**
+
+**So: ours 6,712 vs micro1 6,500 = 1.03x.** Not orders of magnitude. Three percent.
+
+⚠️ **Two supporting sentences I published are FALSE and must come out:**
+
+- "one to two orders of magnitude smaller than this corpus" - there is no order-of-magnitude gap to
+  anything.
+- "the largest comparable corpora are 1,000 to 1,600 documents" - micro1 sits at 6,500.
+
+### The comparator baseline, now verified (I had carried both unverified through three documents)
+
+| Corpus                                                              | n                                       | What the LLM did                                                                 | Status                                                                                        |
+| ------------------------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Open-text survey answers, Mellon et al. 2024, _Research & Politics_ | **81,266**                              | assigned one of **50 fixed categories** to one short answer                      | **peer-reviewed**; excluded as closed-set classification of a survey question, not interviews |
+| InterviewSim, arXiv:2602.20294                                      | 23,000 transcripts                      | personality simulation, not analysis of content                                  | preprint                                                                                      |
+| Displaced Karelians, arXiv:2602.15436                               | 89,339 in archive                       | classified **71,874 extracted entity names**; **the LLM never saw an interview** | preprint; cleanest exclusion                                                                  |
+| CallCenterEN, arXiv:2507.02958                                      | 91,706 call transcripts                 | **no LLM analysis in the paper**; dataset release only                           | preprint                                                                                      |
+| **micro1**, arXiv:2507.16835                                        | **6,500**                               | Claude 3.5 Sonnet judge on 3 dimensions                                          | preprint; **the true peer**                                                                   |
+| Holocaust testimonies, arXiv:2605.21623                             | **1,668** (1,000 Shoah + 668 Fortunoff) | ChatGPT labelled **every Q/A pair**, full corpus                                 | preprint; genuinely LLM-driven                                                                |
+| JAIOH oral histories, arXiv:2508.06729                              | **1,002** (92,191 sentences)            | full-corpus LLM semantic + sentiment annotation                                  | preprint                                                                                      |
+
+Both figures I had been carrying unverified turned out **real** - 1,600 is 1,668, and 1,002 is exact.
+But I should have retrieved them before publishing them three times.
+
+### Which distinctions hold
+
+- **Open-ended multi-turn vs closed-set classification: HOLDS, and it is now load-bearing.** It is the
+  only thing standing between us and Mellon's 81,266. State it up front rather than burying it.
+- **Collection vs analysis: DOES NOT HOLD. Abandon it.** micro1 did analyse content with an LLM. We
+  no longer need the technicality because 6,500 < 6,712 on the plain numbers.
+- ⚠️ **New exposure:** if our own LLM work is mostly rubric-style classification rather than
+  interpretive thematic analysis, micro1 is a true peer and the distinction collapses to "3% more".
+
+### The only claim worth making
+
+Not a size record. **Design novelty:** no published study analyses _repeated_ interviews with the
+_same workforce_ in a _low-resource language_. That is harder to refute and more interesting.
+
+And if a scale sentence is wanted, name the bigger non-interview corpora ourselves - that reads as
+diligence. "That we are aware of" with no stated search reads as weasel wording, because one Scholar
+query surfaces Mellon.
+
+⚠️ **Live counts moved again during this check: completed 9,464 (19:18 UTC 25 Aug) -> 9,382.**
+
 ## 6. Known defects not yet fixed
 
 - `TOPIC_QUESTIONS["99"] = 1` should be 9.

@@ -1369,6 +1369,8 @@ payload = {
     "topics": APPLICABLE,
     "sg_order": SG_PRESENT,
     "unmapped_cohorts": sorted(bm.unmapped_cohorts),
+    # Withdrawn on purpose. Shipped separately so the page can say so instead of implying an oversight.
+    "retired_cohorts": sorted(getattr(bm, "retired_seen", set())),
 }
 out = json.dumps(payload, separators=(",", ":"))
 open("payload_agg.json", "w", encoding="utf-8").write(out)

@@ -255,6 +255,7 @@ out = {
     # Small (four counts per subgroup and per topic), so it survives the render prune.
     "reviewStatus": payload.get("review_status", {}),
     "unmappedCohorts": payload.get("unmapped_cohorts", []),
+    "retiredCohorts": payload.get("retired_cohorts", []),
 }
 s = json.dumps(out, separators=(",", ":"))
 open("dashboard_data.json", "w", encoding="utf-8").write(s)

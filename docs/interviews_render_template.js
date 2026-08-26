@@ -882,7 +882,7 @@ function WorkflowUI(props) {
     var referenced = {};
     DOCS.tabs.forEach(function (t) { (t.reads || []).forEach(function (k) { referenced[k] = 1; }); });
     var META = { today: 1, built_at: 1, counts: 1, subgroupDesign: 1, topicNames: 1, topicQuestions: 1,
-                 unmappedCohorts: 1, connectPendingSubgroups: 1, flwMatrixCohorts: 1, flwMatrixOrder: 1,
+                 unmappedCohorts: 1, retiredCohorts: 1, connectPendingSubgroups: 1, flwMatrixCohorts: 1, flwMatrixOrder: 1,
                  flwMatrixOrderW: 1, cohortSG: 1 };
     var unreferenced = Object.keys(DATA).filter(function (k) { return !referenced[k] && !META[k]; });
     var ghosts = Object.keys(referenced).filter(function (k) {
@@ -1439,11 +1439,51 @@ function WorkflowUI(props) {
     } };
   }
   function linePointLabels() {
+    // Six series often sit within a few points of each other - on 21 July every one of them does - so
+    // drawing each label at its own y produced an unreadable smear. Collect the labels per x, sort by
+    // value, and push apart any that would collide until each clears the last. A short leader line is
+    // drawn whenever a label has been moved, so a nudged value is never silently detached from the
+    // point it belongs to.
+    var MIN_GAP = 12;
     return { afterDatasetsDraw: function (chart) {
-      var ctx = chart.ctx; ctx.save(); ctx.font = "bold 10px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+      var ctx = chart.ctx;
+      ctx.save();
+      ctx.font = "bold 10px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      var byX = {};
       chart.data.datasets.forEach(function (ds, di) {
-        var meta = chart.getDatasetMeta(di); if (meta.hidden) return; ctx.fillStyle = ds.borderColor;
-        meta.data.forEach(function (el, i) { var v = ds.data[i]; if (v == null) return; ctx.fillText(v + "%", el.x, el.y - 6); });
+        var meta = chart.getDatasetMeta(di);
+        if (meta.hidden) return;
+        meta.data.forEach(function (el, i) {
+          var v = ds.data[i];
+          if (v == null) return;
+          var k = Math.round(el.x);
+          (byX[k] = byX[k] || []).push({ x: el.x, y: el.y, v: v, c: ds.borderColor });
+        });
+      });
+      Object.keys(byX).forEach(function (k) {
+        var group = byX[k].sort(function (a, b) { return a.y - b.y; });   // topmost first
+        var lastY = -Infinity;
+        group.forEach(function (g) {
+          var want = g.y - 6;
+          if (want - lastY < MIN_GAP) want = lastY + MIN_GAP;            // nudge down to clear
+          g.labelY = want;
+          lastY = want;
+        });
+        group.forEach(function (g) {
+          if (Math.abs(g.labelY - (g.y - 6)) > 2) {
+            ctx.strokeStyle = g.c;
+            ctx.globalAlpha = 0.35;
+            ctx.beginPath();
+            ctx.moveTo(g.x, g.y);
+            ctx.lineTo(g.x, g.labelY - 2);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+          }
+          ctx.fillStyle = g.c;
+          ctx.fillText(g.v + "%", g.x, g.labelY);
+        });
       });
       ctx.restore();
     } };
@@ -1623,27 +1663,27 @@ function WorkflowUI(props) {
           // so it means the same thing in a 3-day-gap design and a 14-day-gap one.
           { label: "Dropped off: " + (engMode === "C" ? "stopped and never came back"
               : engMode === "B" ? "missed any interview" : "no contact for 14 days"),
-            data: ce.drop_pct, borderColor: "#C62828", backgroundColor: "#C62828" },
-          { label: "Schedule not completed: did all sent, nothing more sent", data: ce.waiting_pct, borderColor: "#0277BD", backgroundColor: "#0277BD" },
-          { label: "Still in progress", data: ce.inprog_pct, borderColor: "#607D8B", backgroundColor: "#607D8B" },
+            data: ce.drop_pct, borderColor: "#C62828", backgroundColor: "#C62828", pointStyle: "rect", pointRadius: 5 },
+          { label: "Schedule not completed: did all sent, nothing more sent", data: ce.waiting_pct, borderColor: "#0277BD", backgroundColor: "#0277BD", pointStyle: "star", pointRadius: 5 },
+          { label: "Still in progress", data: ce.inprog_pct, borderColor: "#607D8B", backgroundColor: "#607D8B", pointStyle: "cross", pointRadius: 5 },
           // ---- RHYTHM: a SEPARATE reading over starters with 2+ interviews. These two sum to 100 on
           // their own base, which is why they are dashed - they are not part of the stack above. They
           // used to be the leftover of it, so they emptied to 0% the moment every cohort closed.
-          { label: "Rhythm - steady: never a gap > " + gt + " days", data: ce.steady_pct, borderColor: "#2E7D32", backgroundColor: "#2E7D32", borderDash: [6, 4] },
-          { label: "Rhythm - inconsistent: one " + (gt + 1) + "+ day gap", data: ce.incons_pct, borderColor: "#F9A825", backgroundColor: "#F9A825", borderDash: [6, 4] }
+          { label: "Rhythm - steady: never a gap > " + gt + " days", data: ce.steady_pct, borderColor: "#2E7D32", backgroundColor: "#2E7D32", pointStyle: "triangle", pointRadius: 5 },
+          { label: "Rhythm - inconsistent: one " + (gt + 1) + "+ day gap", data: ce.incons_pct, borderColor: "#F9A825", backgroundColor: "#F9A825", pointStyle: "rectRot", pointRadius: 5 }
         ].map(function (d) { return Object.assign({ fill: false, tension: 0.2, borderWidth: 3, pointRadius: 3, pointHoverRadius: 6 }, d); }) },
         options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 16 } },
-          // Chart.js copies each dataset's borderDash into its legend swatch, which turned the two
-          // dashed rhythm entries into a row of specks that read as noise next to the solid ones. The
-          // LINES stay dashed - that distinction is the point - but every legend swatch is drawn solid
-          // so the key stays legible.
+          // Every line is solid now. The rhythm pair used to be dashed to flag that it answers a
+          // different question on a different base; the legend and the axis title say so in words, and
+          // the dashes cost more in legibility than they bought. Distinct point SHAPES carry the
+          // distinction instead, and survive overlap in a way dashes did not.
           plugins: { legend: { position: "bottom", labels: { boxWidth: 14, font: { size: 11 },
                 generateLabels: function (chart) {
                   var items = window.Chart.defaults.plugins.legend.labels.generateLabels(chart);
                   items.forEach(function (it) { it.lineDash = []; it.lineDashOffset = 0; });
                   return items;
                 } } },
-            title: { display: true, text: "Outcome (solid lines, of all starters) and rhythm (dashed lines, of those with 2+ interviews)" },
+            title: { display: true, text: "Outcome (of all starters) and rhythm (of those with 2+ interviews) - shapes identify each series where lines overlap" },
             tooltip: { callbacks: { label: function (c) { return c.dataset.label.split(":")[0] + ": " + c.parsed.y + "%"; } } } },
           scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: "% of started FLWs" }, ticks: { callback: function (v) { return v + "%"; } } } } },
         plugins: [linePointLabels(), whiteBg, apm]
@@ -2722,6 +2762,14 @@ function WorkflowUI(props) {
           <span><b>{c.started}</b> interviews started</span>
           <span><b>{c.completed}</b> completed</span>
         </div>
+        {(DATA.retiredCohorts && DATA.retiredCohorts.length) ? (
+          <div className="mt-3 text-xs bg-gray-50 border border-gray-200 text-gray-600 rounded-md px-3 py-2">
+            {DATA.retiredCohorts.length} cohort{DATA.retiredCohorts.length === 1 ? " is" : "s are"}{" "}
+            <b>withdrawn from this dashboard on purpose</b> and excluded from every figure above. The
+            underlying data is untouched and still searchable in the session view:{" "}
+            <span className="font-mono">{DATA.retiredCohorts.join(", ")}</span>
+          </div>
+        ) : null}
         {(DATA.unmappedCohorts && DATA.unmappedCohorts.length) ? (
           <div className="mt-3 text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-md px-3 py-2">
             ⚠ {DATA.unmappedCohorts.length} cohort{DATA.unmappedCohorts.length === 1 ? "" : "s"} not yet mapped

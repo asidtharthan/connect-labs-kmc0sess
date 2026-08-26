@@ -179,7 +179,16 @@ COHORT_TYPE_MAP = {
 
 # Cohorts seen in the data whose id doesn't map to any known subgroup design. Collected (not dropped
 # silently) so a newly-launched program type is SURFACED on the dashboard instead of vanishing.
+# Cohorts deliberately withdrawn from the dashboard. They keep arriving from Connect - it does not know
+# we retired them - so without this they land in `unmapped_cohorts` and trigger a warning that says
+# "new program type? add a design", which is the opposite of what happened. Their raw data is untouched
+# and still reachable in the live session view.
+RETIRED_COHORTS = {
+    "1NPS1",  # NPS (Net Promoter Score), removed 2026-08-26 at the project lead's request
+}
+
 unmapped_cohorts = set()
+retired_seen = set()
 
 
 def cohort_to_sg(c):
@@ -361,7 +370,10 @@ for cohort, rows in _iter_connect_sources():
     sg = cohort_to_sg(cohort)
     if sg is None:
         if cohort and not is_test_cohort(cohort):
-            unmapped_cohorts.add(cohort)
+            if cohort in RETIRED_COHORTS:
+                retired_seen.add(cohort)          # withdrawn on purpose, not a missing design
+            else:
+                unmapped_cohorts.add(cohort)
         continue
     training_date = None
     for row in rows:
