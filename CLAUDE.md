@@ -174,14 +174,43 @@ A local MCP server (`tools/commcare_mcp/`) gives Claude access to CommCare appli
 
 ## Interviews dashboard: run preflight before you push
 
+**Start at [PROJECT_LEARNINGS.md](PROJECT_LEARNINGS.md) section 0** - a six-line pre-push checklist,
+kept short so there is no excuse for skipping it. The rest of that file is the running record of
+every rule, trap and settled fact on this project.
+
 `python preflight.py` reproduces the CI publish job locally and is the difference between anticipating
 a failure and discovering it. On 2026-08-25 the job failed seven times in one day; every failure was
 reproducible on a developer machine in under two minutes.
 
 ```bash
-python preflight.py          # compile, fixtures, rebuild, 4 gates, CI simulation, formatters
+python preflight.py          # compile, fixtures, rebuild, impact diff, 4 gates, CI sim, formatters
 python preflight.py --fast   # gates only, against the existing build
 ```
+
+### The rule that matters more than any single check
+
+**If you can name the risk, you can measure it. Measure it BEFORE you push, not after CI tells you.**
+
+On 2026-08-26 a one-cohort removal failed CI three times running. The cause was identical each time -
+a cumulative counter that had included the removed cohort went down, and the regression guard blocked
+it, exactly as designed. That outcome was written down in advance and still discovered one failed run
+at a time, because "I know this class of thing will happen" was substituted for "here is the list".
+
+Anything that REMOVES data must be measured with `impact_diff.py` first:
+
+```bash
+python impact_diff.py --snapshot before          # 1. BEFORE the change, off the current build
+# ...make the change, then rebuild in order...
+python build_payload_agg.py && python build_dashboard_data.py
+python impact_diff.py                            # 2. prints every drop + the exact waiver string
+```
+
+It prints the `allow_regression` value ready to paste. Metric names are dotted and matched with
+fnmatch, so `connectFunnel` matches nothing - it must be `connectFunnel.*` or the exact name.
+Preflight step 2c runs this automatically and FAILS if a counter falls unwaived, or if a
+count-changing file was touched with no baseline snapshot taken.
+
+`brutal_verify.py` keeps its OWN copy of the cohort mapping. Removing a cohort means editing it too.
 
 Five traps it exists to catch:
 

@@ -20,6 +20,13 @@ unforeseeable; every one was reproducible on this machine in under two minutes. 
 Two of those (2 and 6) were the gates working correctly on data my stale local build did not contain.
 The rest were me not running what CI runs.
 
+Then on 2026-08-26 it failed three more times, and preflight caught NONE of them, because they were
+a different question. Removing one cohort lowered cumulative counters and the regression guard
+blocked it, correctly. preflight answers "will this CODE pass CI?"; it did not answer "will this
+CHANGE trip the guard?". For anything that REMOVES data only the second question matters. Step 2c
+now answers it by measurement - see impact_diff.py - and REFUSES to pass if a counter falls that
+has not been deliberately waived, or if a count-changing file was touched with no baseline taken.
+
 WHAT IT DOES
 ------------
 Everything, in the order the daily job does it, plus the checks that only exist here:
@@ -29,6 +36,9 @@ Everything, in the order the daily job does it, plus the checks that only exist 
   2. rebuild in the CORRECT ORDER - build_payload_agg BEFORE build_dashboard_data. They are separate
      programs and the second does NOT re-run the first; running them the other way round compares a
      fresh dashboard against a stale aggregate and produces phantom mismatches.
+  2c. REGRESSION-GUARD IMPACT: diff this build's counters against a before-snapshot and print the
+     exact allow_regression list. Fails if a counter falls unwaived, or if a count-changing file
+     was touched without a baseline. This is the step that would have saved 2026-08-26.
   3. the four gate suites, including the render harness that is easy to forget
   4. CI SIMULATION: hide the files that are not in git, re-run the gates, and confirm they still pass.
      This is the step that would have caught failure 5 on its own.
@@ -40,6 +50,7 @@ Everything, in the order the daily job does it, plus the checks that only exist 
 Exit code 0 means it is safe to push. Anything else means CI would have failed.
 """
 
+import fnmatch
 import os
 import shutil
 import subprocess
@@ -254,6 +265,98 @@ def io_open_text(rel):
         return f.read()
 
 
+# Touching any of these can change what the pipeline COUNTS, not just how it runs - which is the
+# only class of change the regression guard can block. Every 2026-08-26 failure was in this class.
+SHAPE_FILES = (
+    "build_payload_agg.py",
+    "build_dashboard_data.py",
+    "topic_status_lib.py",
+    "audit_e2e.py",
+    "brutal_verify.py",
+    "regression_guard.py",
+    "build_render_data.py",
+)
+SNAP = os.path.join(ROOT, ".impact_snapshots", "before.json")
+
+
+def changed_files():
+    """Staged, UNSTAGED, and anything differing from main.
+
+    The plain `git diff --name-only` is not optional here: an edit sitting in the working tree is
+    exactly the state you are in when you run preflight, and leaving it out made this check blind to
+    the change it exists to catch.
+    """
+    out = set()
+    for args in (
+        ["diff", "--name-only"],
+        ["diff", "--name-only", "--cached"],
+        ["diff", "--name-only", "origin/main..."],
+    ):
+        r = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True)
+        out.update(r.stdout.split())
+    return out
+
+
+def impact_check():
+    """Answer "will this CHANGE trip the regression guard?" - the question preflight used to skip.
+
+    preflight validates the CODE. It has never validated the CONSEQUENCES, so on 2026-08-26 a
+    single cohort removal failed CI three times in a row while the exact list of counters that had
+    dropped was discovered one run at a time. That list is computable here in seconds.
+    """
+    print("\n=== 2c. regression-guard impact ===", flush=True)
+    touched = sorted(f for f in changed_files() if os.path.basename(f) in SHAPE_FILES)
+
+    if not os.path.exists(SNAP):
+        if not touched:
+            results.append(
+                ("2c. regression-guard impact", True, "no shape-changing files touched; no baseline needed")
+            )
+            print("  -> OK  no shape-changing files touched")
+            return True
+        detail = f"NO BASELINE SNAPSHOT, but {', '.join(os.path.basename(t) for t in touched)} changed"
+        results.append(("2c. regression-guard impact", False, detail))
+        print(f"  -> FAILED  {detail}")
+        print("  These files can change what the pipeline COUNTS. Without a before/after you are")
+        print("  guessing at the waiver list, and CI will enumerate it for you one failure at a time.")
+        print("  Fix: `git stash`, `python build_payload_agg.py && python build_dashboard_data.py`,")
+        print("       `python impact_diff.py --snapshot before`, `git stash pop`, rebuild, re-run.")
+        return False
+
+    r = subprocess.run([PY, "impact_diff.py"], cwd=ROOT, capture_output=True, text=True, timeout=600)
+    out = (r.stdout or "") + (r.stderr or "")
+    print("  " + "\n  ".join(out.splitlines()[-24:]))
+    if r.returncode == 0:
+        results.append(("2c. regression-guard impact", True, "no metric falls; guard will not object"))
+        print("  -> OK  nothing falls")
+        return True
+    if r.returncode != 2:
+        results.append(("2c. regression-guard impact", False, f"impact_diff failed rc={r.returncode}"))
+        return False
+
+    # Something fell. That is allowed ONLY if it was deliberate and is already waived here.
+    dropped = []
+    for i, ln in enumerate(out.splitlines()):
+        if "VERBATIM" in ln:
+            nxt = [x.strip() for x in out.splitlines()[i:] if x.strip() and "," in x]
+            dropped = nxt[1].split(",") if len(nxt) > 1 else []
+            break
+    allow = [p.strip() for p in os.environ.get("INTERVIEWS_ALLOW_REGRESSION", "").split(",") if p.strip()]
+    unwaived = [m for m in dropped if not any(p == "all" or p == m or fnmatch.fnmatch(m, p) for p in allow)]
+    if allow and not unwaived:
+        detail = f"{len(dropped)} drop(s), ALL waived by your INTERVIEWS_ALLOW_REGRESSION - pass the same value to CI"
+        results.append(("2c. regression-guard impact", True, detail))
+        print(f"  -> OK  {detail}")
+        return True
+    detail = f"{len(unwaived)} of {len(dropped)} drop(s) NOT waived"
+    results.append(("2c. regression-guard impact", False, detail))
+    print(f"  -> FAILED  {detail}")
+    print("  Either they are a BUG (fix the code), or they are INTENDED - in which case export the")
+    print("  printed list as INTERVIEWS_ALLOW_REGRESSION, re-run preflight, and pass the SAME string")
+    print("  to the workflow_dispatch `allow_regression` input. Do not discover this list in CI.")
+    return False
+
+
 def main():
     # ---- 0. syntax and config -----------------------------------------------------------------
     step("0a. compile every pipeline script", [PY, "-m", "py_compile", *pipeline_scripts()])
@@ -277,6 +380,9 @@ def main():
         env.pop("INTERVIEWS_TODAY", None)
         if step("2a. build_payload_agg (MUST run before build_dashboard_data)", [PY, "build_payload_agg.py"], env=env):
             step("2b. build_dashboard_data", [PY, "build_dashboard_data.py"], env=env)
+
+    # ---- 2c. REGRESSION-GUARD IMPACT ----------------------------------------------------------
+    impact_check()
 
     # ---- 3. the four gate suites --------------------------------------------------------------
     step("3a. audit_e2e (6a)", [PY, "audit_e2e.py"], forbid="CHECKS RAN")
