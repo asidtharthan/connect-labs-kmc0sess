@@ -1273,6 +1273,133 @@ check(
   check('docs carry no retired-cohort name', !/1NPS1/.test(indHtml));
 })();
 
+// ------------------------------------------- retired-cohort rows are filterable in Sessions ONLY
+// The Sessions table renders the LIVE OCS pipeline, which has no cohort filter and so still carries a
+// retired cohort's sessions. Its dropdowns were built from the FLW matrix, so those rows were visible
+// but not selectable. This injects a synthetic row for a cohort the matrix does not know and requires
+// it to reach the Sessions dropdown and NOT the matrix one.
+(function () {
+  const withRow = JSON.parse(data);
+  withRow.granular = (withRow.granular || []).concat([
+    {
+      connect_id: 'zzsynthetic000000001',
+      cohort_id: 'ZZRETIRED',
+      subgroup: 'ZZ',
+      interview_n: 1,
+      topic_code: '999',
+      is_triggered: true,
+      is_initiated: true,
+      is_started: true,
+      is_completed: true,
+      session_id: 'synthetic-sid',
+    },
+  ]);
+  let Comp2;
+  try {
+    const inj = src.replace('/*__DATA__*/', JSON.stringify(withRow));
+    const c2 = babel.transform(inj, {
+      presets: [['@babel/preset-react', {}]],
+      filename: 'r2.js',
+      compact: false,
+    }).code;
+    Comp2 = new Function(
+      'React',
+      'window',
+      'document',
+      c2 + ';return WorkflowUI;',
+    )(React, dom.window, dom.window.document);
+  } catch (e) {
+    check(
+      'synthetic retired-cohort render builds',
+      false,
+      String(e.message).slice(0, 90),
+    );
+    return;
+  }
+  function build2(tweaks) {
+    const real = React.useState;
+    let call = 0;
+    React.useState = function (init) {
+      call++;
+      const f = tweaks && tweaks[call];
+      return real(f !== undefined ? f : init);
+    };
+    try {
+      return ReactDOMServer.renderToStaticMarkup(
+        React.createElement(Comp2, {}),
+      );
+    } finally {
+      React.useState = real;
+    }
+  }
+  let tabIdx = null;
+  for (let i = 1; i <= 3 && !tabIdx; i++) {
+    let h;
+    try {
+      h = build2({ [i]: 'table' });
+    } catch (e) {
+      continue;
+    }
+    if (/Granular view/.test(h)) tabIdx = i;
+  }
+  if (!tabIdx) {
+    check('granular table tab mounts', false);
+    return;
+  }
+  let ddIdx = null;
+  for (let i = 2; i <= 60 && !ddIdx; i++) {
+    let h;
+    try {
+      h = build2({ [tabIdx]: 'table', [i]: 'co' });
+    } catch (e) {
+      continue;
+    }
+    if ((h.match(/type="checkbox"/g) || []).length > 20) ddIdx = i;
+  }
+  check(
+    'the Cohort dropdown can be opened',
+    !!ddIdx,
+    ddIdx ? 'hook ' + ddIdx : 'never opened',
+  );
+  if (!ddIdx) return;
+  // Counting OPTIONS, not searching for the name: the synthetic row also renders in the table below
+  // the dropdown, so a substring search anywhere after the first checkbox matched the ROW and passed
+  // even with the fix reverted. The option count cannot be spoofed that way.
+  const optCount = (h) => (h.match(/type="checkbox"/g) || []).length;
+  const sessH = build2({ [tabIdx]: 'table', [ddIdx]: 'co' });
+  const sessOpts = optCount(sessH);
+  // 'FLW x Topic' is a BUTTON LABEL in both views - select on text only the matrix BODY renders.
+  let matH = null;
+  for (let i = 2; i <= 60 && !matH; i++) {
+    if (i === ddIdx || i === tabIdx) continue;
+    let m;
+    try {
+      m = build2({ [tabIdx]: 'table', [ddIdx]: 'co', [i]: 'matrix' });
+    } catch (e) {
+      continue;
+    }
+    if (/FLW.cohort rows/.test(m)) matH = m;
+  }
+  check(
+    'matrix view mounts',
+    !!matH,
+    matH ? '' : 'never mounted - the check below would be vacuous',
+  );
+  if (matH) {
+    const matOpts = optCount(matH);
+    check(
+      'Sessions cohort filter offers MORE cohorts than the matrix knows',
+      sessOpts > matOpts,
+      `sessions ${sessOpts} vs matrix ${matOpts} options`,
+    );
+    check(
+      'the extra option is exactly the session-only cohort',
+      sessOpts === matOpts + 1,
+      `+${sessOpts - matOpts}`,
+    );
+  }
+})();
+
 // ---------------------------------------------------------------- no em/en dashes (house style)
 // Checked on the SOURCE: that is the file people edit and the one the rule is about.
 const dashes = (injected.match(/[–—]/g) || []).length;
