@@ -475,7 +475,7 @@ function WorkflowUI(props) {
       { g: "Engagement", name: "Active window vs Full timeline", where: "Funnels → Cohort Engagement",
         how: "Active window trims trailing weeks once fewer than the cutoff share of a cohort is newly starting or finishing, so a completed cohort does not read as a long flat drop-off. Full timeline shows every week.",
         base: "-",
-        gotcha: "For ALL COHORTS the window runs as long as ANY cohort is still active, because a percentage of the whole population is a bar a small late cohort could never reach. Where there is nothing to trim the toggle is hidden. The KPI tiles are always CURRENT; a trimmed chart can legitimately end earlier, and the page states both numbers when they differ." },
+        gotcha: "For ALL COHORTS the window runs as long as ANY cohort is still active, because a percentage of the whole population is a bar a small late cohort could never reach. Where there is nothing to trim the toggle is hidden. The choice scopes the WHOLE panel: the KPI tiles read the same week the charts end on, so Active window and Full timeline give different tiles for the same cohort. Until 2026-08-26 the tiles were always as of today whatever the toggle said, which put 39% on a tile above a chart reading 9%." },
       { g: "Slots", name: "The 7 slot states", where: "Overview, Breakdowns matrix",
         how: "Each FLW × topic cell is exactly one of: completed, started-not-completed, available-not-started, available-missed-overdue, not-available-yet, not-triggered, not-applicable. A slot is missed/overdue one interview gap after it was sent.",
         base: "Claimed slots",
@@ -2823,6 +2823,27 @@ function WorkflowUI(props) {
   var MTOPICS = MATRIX_TOPIC_ORDER.filter(function (t) {
     return fSubgroups.some(function (sg) { return (SUBGROUP_DESIGN[sg] || []).indexOf(t) >= 0; });
   });
+  // The Sessions table renders the LIVE OCS rows, which include cohorts the aggregates deliberately
+  // leave out (a retired cohort still has its sessions on the API). Its filter options were taken from
+  // the FLW matrix, so those rows were visible and searchable but could not be picked from the Cohort
+  // or Topic dropdown. Options for this view are therefore the union of the matrix's and whatever the
+  // session rows actually contain - additive, so nothing that used to be listed stops being listed.
+  var sessCohortOpts = fCohorts.slice();
+  var sessTopicOpts = MTOPICS.slice();
+  (function () {
+    var haveC = {}, haveT = {};
+    sessCohortOpts.forEach(function (c) { haveC[c] = 1; });
+    sessTopicOpts.forEach(function (t) { haveT[t] = 1; });
+    sessSource.forEach(function (r) {
+      var c = sessionCohort(r);
+      if (c && !haveC[c]) { haveC[c] = 1; sessCohortOpts.push(c); }
+      var t = (r.interview == null || r.interview === "") ? "" : String(r.interview);
+      if (t && !haveT[t]) { haveT[t] = 1; sessTopicOpts.push(t); }
+    });
+    sessCohortOpts.sort();
+    sessTopicOpts.sort();
+  })();
+
   var anyFilter = !!(fSg.length || fCo.length || fSt.length || fTr.length || fTopic.length || gq);
   function clearFilters() { setGSearch(""); setFSg([]); setFCo([]); setFSt([]); setFTr([]); setFTopic([]); setGPage(0); }
   // Sessions table: the cohort/subgroup filters match the SESSION'S OWN resolved cohort (sessionCohort),
@@ -3034,8 +3055,8 @@ function WorkflowUI(props) {
                     onChange={function (e) { setGSearch(e.target.value); setGPage(0); }}
                     className="border border-gray-300 rounded-md px-3 py-1.5 text-sm" style={{ width: "18rem" }} />
                   {filterDropdown("sg", "Subgroup", fSubgroups, fSg, setFSg)}
-                  {filterDropdown("co", "Cohort", fCohorts, fCo, setFCo)}
-                  {filterDropdown("topic", "Topic", MTOPICS.map(function (t) { return { value: t, label: t + " · " + (TOPIC_NAMES[t] || t) }; }), fTopic, setFTopic)}
+                  {filterDropdown("co", "Cohort", gView === "sessions" ? sessCohortOpts : fCohorts, fCo, setFCo)}
+                  {filterDropdown("topic", "Topic", (gView === "sessions" ? sessTopicOpts : MTOPICS).map(function (t) { return { value: t, label: t + " · " + (TOPIC_NAMES[t] || t) }; }), fTopic, setFTopic)}
                   {filterDropdown("st", "Status", STATES5.map(function (s) { return { value: s, label: STATE_LABEL[s] }; }), fSt, setFSt)}
                   {filterDropdown("tr", "FLW", [{ value: "trained", label: "Trained" }, { value: "untrained", label: "Untrained" }], fTr, setFTr)}
                   {anyFilter ? <button onClick={clearFilters} className="px-2 py-1.5 text-xs text-indigo-600 hover:underline">Clear</button> : null}

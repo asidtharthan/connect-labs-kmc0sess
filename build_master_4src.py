@@ -265,6 +265,11 @@ CONNECT_COHORT_OVERRIDE = {("6c1ff0cb57e27e780339", "1ABT1EA1"): "1ABT1EB1"}
 # We derive SUBGROUP_DESIGN (topics + cadence) per subgroup from it, falling back to _FALLBACK_DESIGN
 # for any subgroup the lookup doesn't cover (e.g. ABT3 before launch). cohort_schedule keeps the
 # per-cohort offsets (for accurate, cohort-specific release dates / "not yet offered" logic).
+# Every leg of the build records here whether it ran LIVE or degraded to something stored. Written to
+# _provenance.json at the end and gated by brutal_verify: a leg that quietly falls back to a cache,
+# a snapshot or a hardcoded guess is how stale numbers reach the dashboard looking authoritative.
+PROVENANCE = {}
+
 cohort_schedule = {}
 _sched_path = ROOT / "_interview_schedule.json"
 if _sched_path.exists():
@@ -289,7 +294,18 @@ def _derive_subgroup_design():
     # the guesses drift: PANEL's fallback still lists 11 topics while its real schedule has 13. Silently
     # redefining a design changes both the denominator and every deadline, so say so loudly instead.
     _live = {cohort_to_sg(c) for c in cohort_schedule if not is_test_cohort(c)}
-    _fellback = sorted(sg for sg in design if sg not in seen and sg in _live)
+    # When the schedule pull fails outright the file is absent, cohort_schedule is empty, _live is
+    # empty - and the intersection below is empty too, so the loudest possible failure produced the
+    # quietest possible output: every subgroup silently on the hardcoded guess, no warning at all.
+    if not cohort_schedule:
+        _fellback = sorted(design)
+        print(
+            "[1!] WARNING: NO CCHQ schedule at all - every subgroup is on the FALLBACK design. "
+            "PANEL's fallback lists 11 interviews against a real 13, so this silently redefines "
+            "denominators and every deadline. Check pull_hq_interview_schedule.py ran."
+        )
+    else:
+        _fellback = sorted(sg for sg in design if sg not in seen and sg in _live)
     if _fellback:
         print(
             f"[1!] WARNING: no CCHQ schedule for {_fellback} - using the FALLBACK design, which may be "
@@ -303,6 +319,8 @@ def _derive_subgroup_design():
                 f"schedule has {len(_v['topics'])}. The live one is in use; the fallback is stale and "
                 f"would silently redefine the design if the schedule pull ever failed."
             )
+    PROVENANCE["design_fellback"] = _fellback
+    PROVENANCE["design_from_lookup"] = sorted(seen)
     return design
 
 
@@ -359,8 +377,10 @@ def _iter_connect_sources():
             c = CONNECT_COHORT_OVERRIDE.get((u, c), c)  # cross-arm mis-tag correction
             by_cohort[c].append(row)
         print(f"[1] Connect: consolidated snapshot {SNAPSHOT.name} ({len(by_cohort)} cohorts)")
+        PROVENANCE["connect_source"] = "snapshot"
         yield from by_cohort.items()
     else:
+        PROVENANCE["connect_source"] = "folders"
         for d in folders:
             yield d.replace("_audit", ""), clean_csv(ROOT / d / "user_data.csv")
 
@@ -592,13 +612,16 @@ if not _ocs_tags:
     print(
         "[4t] NOTE: no OCS review-tag cache - every row will read 'not-reviewed'. " "Run pull_ocs_tags.py.", flush=True
     )
+    PROVENANCE["ocs_tags"] = 0
 else:
     print(f"[4t] OCS review tags: {len(_ocs_tags):,} tagged sessions", flush=True)
+    PROVENANCE["ocs_tags"] = len(_ocs_tags)
 print(f"[4] OCS live: {len(sessions)} sessions, {len(ocs_by_key)} (pid,iv) keys")
 
 # ---------------- OCS message word counts (per session; from pull_ocs_words.py) ----------------
 words = json.loads(WORDS_CACHE.read_text()) if WORDS_CACHE.exists() else {}
 print(f"[4b] OCS words cache: {len(words)} sessions")
+PROVENANCE["ocs_words"] = len(words)
 
 # ---------------- match ----------------
 matched = {}
@@ -742,3 +765,29 @@ for sg in ["TRS", "TRE", "ABT1-A", "ABT1-B", "ABT2-A", "ABT2-B"]:
     print(
         f"  {sg:<8} {len(u['invited']):>7} {len(u['accepted']):>7} {len(u['learn_completed']):>7} {len(u['claimed']):>7} {len(init):>22}"
     )
+
+
+# ---------------- provenance: what ran live, what degraded ----------------
+# brutal_verify reads this and refuses to publish when a leg degraded under strict freshness. The
+# point is narrow and important: a fallback that works is indistinguishable from a live pull in the
+# output, so the only way to catch one is to have the build say which it did.
+PROVENANCE["untrained_flw"] = (ROOT / "_untrained_flw.json").exists()
+PROVENANCE["schedule_file"] = (ROOT / "_interview_schedule.json").exists()
+PROVENANCE["cohorts_in_schedule"] = len(cohort_schedule)
+PROVENANCE["retired_cohorts"] = sorted(retired_seen)
+PROVENANCE["unmapped_cohorts"] = sorted(unmapped_cohorts)
+try:
+    _snap_newest = ""
+    if SNAPSHOT.exists():
+        import csv as _pcsv
+
+        with open(SNAPSHOT, encoding="utf-8", errors="replace") as _pf:
+            for _pr in _pcsv.DictReader(_pf):
+                _pi = (_pr.get("invited_date") or "")[:10]
+                if _pi > _snap_newest:
+                    _snap_newest = _pi
+    PROVENANCE["connect_newest_invited"] = _snap_newest
+except OSError:
+    PROVENANCE["connect_newest_invited"] = ""
+(ROOT / "_provenance.json").write_text(json.dumps(PROVENANCE, indent=2), encoding="utf-8")
+print("[prov] " + json.dumps(PROVENANCE, sort_keys=True))

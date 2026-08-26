@@ -1215,6 +1215,64 @@ check(
   }
 })();
 
+// ---------------------------------------------------------------- the Documentation tab is not stale
+// The docs tab describes behaviour, so a behaviour change silently turns it into a wrong answer that
+// reads authoritatively. This one said "The KPI tiles are always CURRENT" for as long as that was
+// true and for one commit after it stopped being true.
+(function () {
+  // The docs tab defaults to the data-flow section, so asserting on indicator text at the default
+  // state passed on ABSENT text - the three checks here were vacuous on the first attempt. Both the
+  // tab hook and the section hook are found by behaviour: render, and require the text that only
+  // exists once the Indicators section is actually mounted.
+  let docsHtml = null,
+    tabIdx = null;
+  for (let i = 1; i <= 3 && !tabIdx; i++) {
+    let h;
+    try {
+      h = build(null, { [i]: 'docs' });
+    } catch (e) {
+      continue;
+    }
+    if (/Indicator/i.test(h)) {
+      tabIdx = i;
+      docsHtml = h;
+    }
+  }
+  check('documentation tab renders', !!docsHtml);
+  if (!docsHtml) return;
+
+  let indHtml = null;
+  for (let i = 1; i <= 60 && !indHtml; i++) {
+    if (i === tabIdx) continue;
+    let h;
+    try {
+      h = build(null, { [tabIdx]: 'docs', [i]: 'metrics' });
+    } catch (e) {
+      continue;
+    }
+    if (/gap multiples, not fixed days/.test(h)) indHtml = h;
+  }
+  check(
+    'documentation Indicators section renders (not just the tab)',
+    !!indHtml,
+    indHtml ? '' : 'never mounted - any assertion on its text would be vacuous',
+  );
+  if (!indHtml) return;
+  check(
+    'docs carry the Active window entry',
+    /Active window vs Full timeline/.test(indHtml),
+  );
+  check(
+    'docs do not claim the KPI tiles ignore the Window choice',
+    !/tiles are always CURRENT/i.test(indHtml),
+  );
+  check(
+    'docs state that the Window scopes the whole panel',
+    /scopes the WHOLE panel/i.test(indHtml),
+  );
+  check('docs carry no retired-cohort name', !/1NPS1/.test(indHtml));
+})();
+
 // ---------------------------------------------------------------- no em/en dashes (house style)
 // Checked on the SOURCE: that is the file people edit and the one the rule is about.
 const dashes = (injected.match(/[–—]/g) || []).length;

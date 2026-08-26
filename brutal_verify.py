@@ -248,6 +248,45 @@ chk(
     f"newest invitation {_snap_newest or 'none'} is {_snap_age}d old; " f"{len(_snap_dates)} dated rows",
 )
 
+# ---------------- no silent degradation ----------------
+# A fallback that works looks exactly like a live pull in the output, so the only way to catch one is
+# to make the build declare what it did. build_master_4src writes _provenance.json; these checks fail
+# the run rather than let a cached, snapshotted or hardcoded leg reach the dashboard as if it were live.
+_prov = {}
+try:
+    _prov = json.loads((ROOT / "_provenance.json").read_text(encoding="utf-8"))
+except (OSError, ValueError):
+    pass
+chk(
+    "build wrote a provenance record",
+    bool(_prov),
+    f"{len(_prov)} legs declared" if _prov else "missing _provenance.json - cannot prove any leg ran live",
+)
+if _prov:
+    # The dangerous one. PANEL's hardcoded guess lists 11 interviews against a real 13; running on it
+    # would change the denominator and every deadline while every number still looked plausible.
+    chk(
+        "NO subgroup is running on the hardcoded fallback design",
+        not _prov.get("design_fellback"),
+        f"on fallback: {_prov.get('design_fellback')}" if _prov.get("design_fellback") else
+        f"{len(_prov.get('design_from_lookup') or [])} subgroups from the CCHQ lookup",
+    )
+    chk(
+        "the CCHQ interview_schedule pull produced a file with cohorts in it",
+        _prov.get("schedule_file") and (_prov.get("cohorts_in_schedule") or 0) > 0,
+        f"schedule_file={_prov.get('schedule_file')} cohorts={_prov.get('cohorts_in_schedule')}",
+    )
+    chk(
+        "OCS review tags are present (absent means every row reads not-reviewed)",
+        (_prov.get("ocs_tags") or 0) > 0,
+        f"{_prov.get('ocs_tags')} tagged sessions",
+    )
+    freshchk(
+        "the untrained_flw pull ran (absent means everyone defaults to trained)",
+        bool(_prov.get("untrained_flw")),
+        str(_prov.get("untrained_flw")),
+    )
+
 # ============================================================ B. DESIGN grounding
 sec("B. DESIGN — subgroupDesign grounded to CCHQ interview_schedule lookup")
 sched = (
