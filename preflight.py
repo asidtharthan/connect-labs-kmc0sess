@@ -165,6 +165,7 @@ def precommit_runnable():
         if f.endswith((".py", ".js")) and "/" not in f and not f.startswith("_")
     ]
     bad = []
+    blocked = []
     for hid in ids:
         r = subprocess.run(
             [PY, "-m", "pre_commit", "run", hid, "--all-files"],
@@ -173,12 +174,18 @@ def precommit_runnable():
             text=True,
             timeout=900,
         )
+        out = (r.stdout or "") + (r.stderr or "")
         if r.returncode != 0:
-            bad.append(hid)
-            print(f"  FAILED hook: {hid}")
-        if r.returncode != 0:
-            bad.append(hid)
-            print(f"  FAILED hook: {hid}")
+            # Detect the block DYNAMICALLY. Which hooks Application Control refuses varies between
+            # machines and over time - black and django-upgrade started being blocked partway through
+            # 2026-08-25 - so a hardcoded list silently turns into a hardcoded lie. A blocked hook is
+            # reported as blocked and still runs in CI; only a genuine failure counts.
+            if "WinError 4551" in out or "Application Control" in out:
+                blocked.append(hid)
+                print(f"  BLOCKED by this machine (runs in CI): {hid}")
+            else:
+                bad.append(hid)
+                print(f"  FAILED hook: {hid}")
     if unstaged_new:
         print(
             f"  NOTE: {len(unstaged_new)} new source file(s) are NOT staged, so the hooks did not "
@@ -187,9 +194,9 @@ def precommit_runnable():
         print("        `git add` them and re-run, or CI will lint what preflight did not.")
     ok = not bad
     detail = (
-        f"{len(ids)} hooks over the staged tree, {len(bad)} failed"
+        f"{len(ids) - len(blocked)} hooks ran, {len(bad)} failed"
         + (f" ({', '.join(bad)})" if bad else "")
-        + f"; skipped (blocked by Application Control): {', '.join(PRECOMMIT_BLOCKED)}"
+        + f"; blocked by this machine (run in CI): {', '.join(sorted(set(blocked))) or 'none'}"
     )
     results.append(("5. pre-commit (runnable hooks)", ok, detail))
     print(f"  -> {'OK' if ok else 'FAILED'}  {detail}")
