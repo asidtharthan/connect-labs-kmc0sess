@@ -96,8 +96,7 @@ function WorkflowUI(props) {
       "ABT2-A": ["1", "2"], "ABT2-B": ["1", "2", "5", "6", "7", "8", "9", "3"],
       "PANEL": ["7", "1", "2", "12", "3", "4", "5", "6", "C", "10", "11", "8", "13"],
       "ABT3-A": ["8", "9", "10", "11"], "ABT3-B": ["8", "9", "10", "11"],
-      "EXT": ["11", "C", "99"],
-      "NPS": ["101"]
+      "EXT": ["11", "C", "99"]
     };
   }
   var TOPIC_NAMES = DATA.topicNames || { A: "Community Demographics", B: "Malaria", C: "Nutrition Prevalance and Programs",
@@ -106,8 +105,8 @@ function WorkflowUI(props) {
     "5": "Family Planning", "6": "Vitamin A Supplementation", "7": "Vaccines",
     "8": "Antibiotics and ACT Use", "9": "Medicine Quality & Counterfeiting",
     "10": "Malaria 2", "11": "Water & Diarrhea 2", "12": "Community & FLW Profile 2", "13": "Medicine Quality & Counterfeiting 2", "14": "Malaria 5",
-    "8S": "Antibiotics and ACT Use 2", "8L": "Antibiotics and ACT Use 3", "10S": "Malaria 3", "10L": "Malaria 4", "11S": "Water & Diarrhea 3", "11L": "Water & Diarrhea 4", "13L": "Medicine Quality & Counterfeiting 3", "101": "NPS" };
-  var SG_ORDER = ["TRS", "TRE", "ABT1-A", "ABT1-B", "ABT2-A", "ABT2-B", "PANEL", "ABT3-A", "ABT3-B", "2WT", "EXT", "NPS"];
+    "8S": "Antibiotics and ACT Use 2", "8L": "Antibiotics and ACT Use 3", "10S": "Malaria 3", "10L": "Malaria 4", "11S": "Water & Diarrhea 3", "11L": "Water & Diarrhea 4", "13L": "Medicine Quality & Counterfeiting 3" };
+  var SG_ORDER = ["TRS", "TRE", "ABT1-A", "ABT1-B", "ABT2-A", "ABT2-B", "PANEL", "ABT3-A", "ABT3-B", "2WT", "EXT"];
   // Subgroups whose Connect funnel (Invited/Accepted/Claimed) hasn't been pulled yet (cohorts present
   // in the interview data but missing from the Connect snapshot). Their Invited=0 means "not pulled",
   // not "nobody invited" - flagged in the UI so the 0s aren't misread.
@@ -148,7 +147,7 @@ function WorkflowUI(props) {
     );
   }
   // Maximally-distinct categorical palette (D3 category10) so every subgroup line is unambiguous.
-  var SG_COLOR = { "TRS": "#1f77b4", "TRE": "#17becf", "ABT1-A": "#2ca02c", "ABT1-B": "#d62728", "ABT2-A": "#9467bd", "ABT2-B": "#8c564b", "PANEL": "#e377c2", "ABT3-A": "#f58231", "ABT3-B": "#bcbd22", "2WT": "#334155", "EXT": "#c51b8a", "NPS": "#0f766e" };
+  var SG_COLOR = { "TRS": "#1f77b4", "TRE": "#17becf", "ABT1-A": "#2ca02c", "ABT1-B": "#d62728", "ABT2-A": "#9467bd", "ABT2-B": "#8c564b", "PANEL": "#e377c2", "ABT3-A": "#f58231", "ABT3-B": "#bcbd22", "2WT": "#334155", "EXT": "#c51b8a" };
   // FLW × Topic matrix cell glyphs, indexed by STATES order (0 not-applicable … 5 completed)
   var CELL_GLYPH = ["", "·", "○", "!", "◐", "✓", "-"];   // index 6 = not-triggered (never sent)
   var MATRIX_TOPIC_ORDER = ["A", "B", "C", "D", "E", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "8S", "8L", "10S", "10L", "11S", "11L", "13L", "99", "101"];

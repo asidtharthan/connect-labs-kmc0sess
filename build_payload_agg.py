@@ -52,7 +52,7 @@ _CANON_TOPICS = [
     "G",
 ]
 TOPICS = [t for t in _CANON_TOPICS if any(t in bm.SUBGROUP_DESIGN[sg]["topics"] for sg in bm.SUBGROUP_DESIGN)]
-SG_ORDER = ["TRS", "TRE", "ABT1-A", "ABT1-B", "ABT2-A", "ABT2-B", "PANEL", "ABT3-A", "ABT3-B", "2WT", "EXT", "NPS"]
+SG_ORDER = ["TRS", "TRE", "ABT1-A", "ABT1-B", "ABT2-A", "ABT2-B", "PANEL", "ABT3-A", "ABT3-B", "2WT", "EXT"]
 ROLL = {
     "TRS": "TRS",
     "TRE": "TRE",
@@ -65,7 +65,6 @@ ROLL = {
     "ABT3-B": "ABT3",
     "2WT": "2WT",
     "EXT": "EXT",
-    "NPS": "NPS",
 }
 
 # ---- cells: unique (flw,cohort,interview_n) ----

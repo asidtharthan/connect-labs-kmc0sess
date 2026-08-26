@@ -128,6 +128,29 @@ def brutal_baseline():
 
 # Four hooks cannot execute under this machine's Application Control policy (WinError 4551). They run
 # in CI. Run everything else, and name what was skipped rather than silently passing.
+# Hooks Application Control refuses that ARE runnable as plain modules. Checked directly so a genuine
+# failure cannot hide behind the block. Anything not listed here is reported as blocked and left to CI.
+DIRECT_FALLBACK = {
+    "black": ["black", "--check"],
+    "flake8": ["flake8"],
+    "isort": ["isort", "--check-only"],
+}
+
+
+def changed_python():
+    """The .py files this push would actually change - staged, plus anything differing from main.
+
+    NOT the whole tree: `black --check .` sweeps 93 untracked scratch scripts that CI has never linted,
+    so it could never pass and the check would become noise. CI lints the tracked tree and main is
+    green, so what matters before a push is what this change touches.
+    """
+    out = set()
+    for args in (["diff", "--name-only", "--cached"], ["diff", "--name-only", "origin/main..."]):
+        r = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True)
+        out.update(f for f in r.stdout.split() if f.endswith(".py") and os.path.exists(f))
+    return sorted(out)
+
+
 PRECOMMIT_BLOCKED = ("check-yaml", "trailing-whitespace", "end-of-file-fixer", "check-case-conflict")
 
 
@@ -165,6 +188,7 @@ def precommit_runnable():
         if f.endswith((".py", ".js")) and "/" not in f and not f.startswith("_")
     ]
     bad = []
+    blocked = []
     for hid in ids:
         r = subprocess.run(
             [PY, "-m", "pre_commit", "run", hid, "--all-files"],
@@ -173,12 +197,41 @@ def precommit_runnable():
             text=True,
             timeout=900,
         )
+        out = (r.stdout or "") + (r.stderr or "")
         if r.returncode != 0:
-            bad.append(hid)
-            print(f"  FAILED hook: {hid}")
-        if r.returncode != 0:
-            bad.append(hid)
-            print(f"  FAILED hook: {hid}")
+            # Detect the block DYNAMICALLY. Which hooks Application Control refuses varies between
+            # machines and over time - black and django-upgrade started being blocked partway through
+            # 2026-08-25 - so a hardcoded list silently turns into a hardcoded lie. A blocked hook is
+            # reported as blocked and still runs in CI; only a genuine failure counts.
+            if "WinError 4551" in out or "Application Control" in out:
+                # Blocked as a pre-commit hook - but several of these are plain Python tools that run
+                # fine when invoked directly, so FALL BACK rather than shrug. Reporting "blocked" and
+                # moving on is how a real black failure hid behind an environment quirk and reached CI
+                # anyway: false confidence is worse than no check.
+                direct = DIRECT_FALLBACK.get(hid)
+                if direct:
+                    targets = changed_python()
+                    if not targets:
+                        print(f"  ok, nothing changed for: {hid}")
+                        continue
+                    r2 = subprocess.run(
+                        [PY, "-m", *direct, *targets],
+                        cwd=ROOT,
+                        capture_output=True,
+                        text=True,
+                        timeout=900,
+                    )
+                    if r2.returncode != 0:
+                        bad.append(hid)
+                        print(f"  FAILED (hook blocked, ran directly): {hid}")
+                    else:
+                        print(f"  ok via direct run (hook itself is blocked): {hid}")
+                    continue
+                blocked.append(hid)
+                print(f"  BLOCKED by this machine, no direct fallback (runs in CI): {hid}")
+            else:
+                bad.append(hid)
+                print(f"  FAILED hook: {hid}")
     if unstaged_new:
         print(
             f"  NOTE: {len(unstaged_new)} new source file(s) are NOT staged, so the hooks did not "
@@ -187,9 +240,9 @@ def precommit_runnable():
         print("        `git add` them and re-run, or CI will lint what preflight did not.")
     ok = not bad
     detail = (
-        f"{len(ids)} hooks over the staged tree, {len(bad)} failed"
+        f"{len(ids) - len(blocked)} hooks ran, {len(bad)} failed"
         + (f" ({', '.join(bad)})" if bad else "")
-        + f"; skipped (blocked by Application Control): {', '.join(PRECOMMIT_BLOCKED)}"
+        + f"; blocked by this machine (run in CI): {', '.join(sorted(set(blocked))) or 'none'}"
     )
     results.append(("5. pre-commit (runnable hooks)", ok, detail))
     print(f"  -> {'OK' if ok else 'FAILED'}  {detail}")

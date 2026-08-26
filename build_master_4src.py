@@ -11,6 +11,7 @@ Reconciles every column reproducible from live state (excludes session_human_msg
 which need message content not on the OCS list payload). is_released uses TODAY=2026-06-10
 to match the baseline snapshot.
 """
+
 import csv as _csv
 import json
 import os
@@ -25,7 +26,7 @@ import pandas as pd
 ROOT = Path(__file__).parent
 HQ_DIR = ROOT / "hq_pull_full"
 CACHE = ROOT / "_ocs_state_cache.json"
-TAGS_CACHE = ROOT / "_ocs_tags_cache.json"   # {sid: [tags]} from pull_ocs_tags.py (full daily scan)
+TAGS_CACHE = ROOT / "_ocs_tags_cache.json"  # {sid: [tags]} from pull_ocs_tags.py (full daily scan)
 
 # OCS review verdicts, most specific first. `suspected_ai` is checked BEFORE acceptable/unacceptable
 # because a session can carry both, and "we think the FLW pasted an AI answer" is the more important
@@ -49,6 +50,8 @@ def _review_status(sid, tags_by_sid):
         if v in ts:
             return v
     return "not-reviewed"
+
+
 WORDS_CACHE = ROOT / "_ocs_words_cache.json"  # {sid: {human_words, human_msgs}} from pull_ocs_words.py
 BASELINE = ROOT / "master_v7_2026-06-10.csv"
 TODAY = date.today()  # dynamic: is_released / time-gating reflect the real run date
@@ -71,8 +74,6 @@ ALL_DOMAINS = [
     # Extension cohorts — separate domains, cohorts 1ECC1 (COWACDI) / 1ECE1 (EHA).
     "connect-int-ng-cowac-ext",
     "connect-int-ng-eha-ext",
-    # NPS (Net Promoter Score) - single-interview cohort 1NPS1, COWACDI only (no EHA domain exists).
-    "connect-int-ng-cowac-nps",
 ]
 
 # FALLBACK only — the live SUBGROUP_DESIGN is derived from the CommCare HQ `interview_schedule`
@@ -90,9 +91,14 @@ _FALLBACK_DESIGN = {
     "PANEL": {"topics": ["7", "1", "2", "3", "4", "5", "6", "8", "9", "10", "11"], "cadence": 4},
     "ABT3-A": {"topics": ["8S", "13", "10S", "11S"], "cadence": 3},
     "ABT3-B": {"topics": ["8L", "13L", "10L", "11L"], "cadence": 3},
-    "2WT": {"topics": ["14"], "cadence": 14},  # 2-Week Test: single interview on topic 14; live design from CCHQ lookup
-    "NPS": {"topics": ["101"], "cadence": 9},  # NPS: single terminal interview on topic 101 (cohort window 2026-08-21..2026-08-30); live design from CCHQ lookup
-    "EXT": {"topics": ["11", "C", "99"], "cadence": 3},  # Extension: 3 interviews (Water & Diarrhea 2, Nutrition, Qualitative); live design from CCHQ lookup
+    "2WT": {
+        "topics": ["14"],
+        "cadence": 14,
+    },  # 2-Week Test: single interview on topic 14; live design from CCHQ lookup
+    "EXT": {
+        "topics": ["11", "C", "99"],
+        "cadence": 3,
+    },  # Extension: 3 interviews (Water & Diarrhea 2, Nutrition, Qualitative); live design from CCHQ lookup
 }
 # Authoritative map locked to master_v7_2026-06-10 (incl. the 'Prevalance' typo in C).
 TOPIC_NAMES = {
@@ -126,16 +132,36 @@ TOPIC_NAMES = {
     "F": "Care Seeking Behavior",
     "G": "Trust, Beliefs & Health Perceptions",
     "99": "Qualitative Interview",  # Extension cohort's 3rd interview (open-ended experience/feedback)
-    "101": "NPS",  # NPS cohort's single terminal interview (literal interview_topic value OCS returns)
 }
 # Question count per topic (Cohort Tracker → Topics_Master). Design metadata for Breakdowns → By Topic.
 TOPIC_QUESTIONS = {
-    "A": 7, "B": 9, "C": 8, "D": 6, "E": 8,
-    "1": 9, "2": 10, "3": 19, "4": 16, "5": 5, "6": 13, "7": 7,
-    "8": 10, "9": 5, "10": 8, "11": 10, "12": 13, "13": 7, "14": 20,
-    "8S": 7, "8L": 20, "10S": 7, "10L": 20, "11S": 7, "11L": 20, "13L": 20,
+    "A": 7,
+    "B": 9,
+    "C": 8,
+    "D": 6,
+    "E": 8,
+    "1": 9,
+    "2": 10,
+    "3": 19,
+    "4": 16,
+    "5": 5,
+    "6": 13,
+    "7": 7,
+    "8": 10,
+    "9": 5,
+    "10": 8,
+    "11": 10,
+    "12": 13,
+    "13": 7,
+    "14": 20,
+    "8S": 7,
+    "8L": 20,
+    "10S": 7,
+    "10L": 20,
+    "11S": 7,
+    "11L": 20,
+    "13L": 20,
     "99": 1,  # Extension qualitative interview: 1 multi-part question
-    "101": 9,  # OCS state reports total_questions=1, but that Q1 block holds 9 concatenated sub-questions
 }
 COHORT_TYPE_MAP = {
     "TRS": "Standard",
@@ -149,7 +175,6 @@ COHORT_TYPE_MAP = {
     "ABT3-B": "ABT3 B",
     "2WT": "2WT (2-Week Test)",
     "EXT": "Extension",
-    "NPS": "NPS (Net Promoter Score)",
 }
 
 # Cohorts seen in the data whose id doesn't map to any known subgroup design. Collected (not dropped
@@ -173,11 +198,13 @@ def cohort_to_sg(c):
         return "ABT3-A" if "A" in c[5:] else "ABT3-B"
     if re.search(r"2WT[CE]\d", c):  # 2-Week Test cohorts: 2WTC1 (COWACDI), 2WTE1 (EHA)
         return "2WT"
-    if re.search(r"EC[CE]\d", c):  # Extension cohorts: 1ECC1 (COWACDI), 1ECE1 (EHA) — COWACDI+EHA share one EXT subgroup
+    if re.search(
+        r"EC[CE]\d", c
+    ):  # Extension cohorts: 1ECC1 (COWACDI), 1ECE1 (EHA) — COWACDI+EHA share one EXT subgroup
         return "EXT"
-    if re.search(r"NPS\d", c):  # NPS cohorts: 1NPS1 (COWACDI only) - tested before the P[CE]\d Panel pattern
-        return "NPS"
-    if re.search(r"P[CE]\d", c):  # Panel cohorts: 1PC1 (COWACDI), 1PE1 (EHA) — tight pattern, not a loose "PE" substring
+    if re.search(
+        r"P[CE]\d", c
+    ):  # Panel cohorts: 1PC1 (COWACDI), 1PE1 (EHA) — tight pattern, not a loose "PE" substring
         return "PANEL"
 
 
@@ -197,13 +224,25 @@ def is_test_cohort(c):
 # FLWs. Explicit list (NOT a blanket "no-Connect -> drop" rule) so a snapshot-timing gap can't silently
 # drop a real FLW. See brutal-revalidation-2026-06-25 memory.
 EXCLUDE_FLWS = {
-    "10wcuh1u3s6595okhmfd", "5ej4jqjha0x1f3tbc08y", "7xhpeda8ipsouip6ynyk", "b6vt2wzi8slth6mlag1g",
-    "m0i5azsqk7mzixp1bzib", "m33dn33c5vyf8es9kagq", "m6svr4qy3gemxuj2inoe", "rfxkcx7nbom2whml8mbb",
-    "sqaktdfxupepdvt90t3f", "v3urwjuzqjxp3njyb5uz", "va7vh76am0m83h0rzu01", "wwnvw4diurrzuy32vba7",
-    "xo1n01inul0ofr9z32fa", "y6xjjw4xilga8d1qvaab",
+    "10wcuh1u3s6595okhmfd",
+    "5ej4jqjha0x1f3tbc08y",
+    "7xhpeda8ipsouip6ynyk",
+    "b6vt2wzi8slth6mlag1g",
+    "m0i5azsqk7mzixp1bzib",
+    "m33dn33c5vyf8es9kagq",
+    "m6svr4qy3gemxuj2inoe",
+    "rfxkcx7nbom2whml8mbb",
+    "sqaktdfxupepdvt90t3f",
+    "v3urwjuzqjxp3njyb5uz",
+    "va7vh76am0m83h0rzu01",
+    "wwnvw4diurrzuy32vba7",
+    "xo1n01inul0ofr9z32fa",
+    "y6xjjw4xilga8d1qvaab",
     # 2WT/ABT3 pre-launch QA accounts (literal test ids; HQ interview activity but never Connect-enrolled
     # — absent from the live claimed set and the render; verified 2026-07-06).
-    "test_34", "test_abt3", "test_abt3_eha",
+    "test_34",
+    "test_abt3",
+    "test_abt3_eha",
 }
 # Cross-arm cohort mis-tag fix (1 FLW): 6c1ff0cb… was Connect-enrolled in 1ABT1EA1 (ABT1-A) but
 # HQ-triggered + completed ALL interviews under 1ABT1EB1 (ABT1-B). ABT1-A/B share identical topics so
@@ -243,14 +282,18 @@ def _derive_subgroup_design():
     _live = {cohort_to_sg(c) for c in cohort_schedule if not is_test_cohort(c)}
     _fellback = sorted(sg for sg in design if sg not in seen and sg in _live)
     if _fellback:
-        print(f"[1!] WARNING: no CCHQ schedule for {_fellback} - using the FALLBACK design, which may be "
-              f"stale. Check pull_hq_interview_schedule.py ran.")
+        print(
+            f"[1!] WARNING: no CCHQ schedule for {_fellback} - using the FALLBACK design, which may be "
+            f"stale. Check pull_hq_interview_schedule.py ran."
+        )
     for _sg, _v in design.items():
         _fb = _FALLBACK_DESIGN.get(_sg)
         if _sg in seen and _fb and len(_fb["topics"]) != len(_v["topics"]):
-            print(f"[1!] NOTE: {_sg} fallback lists {len(_fb['topics'])} interviews but the live CCHQ "
-                  f"schedule has {len(_v['topics'])}. The live one is in use; the fallback is stale and "
-                  f"would silently redefine the design if the schedule pull ever failed.")
+            print(
+                f"[1!] NOTE: {_sg} fallback lists {len(_fb['topics'])} interviews but the live CCHQ "
+                f"schedule has {len(_v['topics'])}. The live one is in use; the fallback is stale and "
+                f"would silently redefine the design if the schedule pull ever failed."
+            )
     return design
 
 
@@ -361,14 +404,18 @@ print(f"[1] Connect: {len(cohort_info)} cohorts, {sum(len(v) for v in cohort_flw
 welcome_flws_by_key = defaultdict(set)
 triggers_by_flw_iv = defaultdict(list)
 flw_registered = set()  # connect_ids that submitted an HQ FLW-registration form (for "FLW Reg (HQ)" funnel column)
-flw_demographics = {}   # connect_id -> {name,gender,state,lga,settlement,type_of_flw,native_language,education,experience_years,training_batch} from the Learn flw_registration form (for the FLW-level retention analysis)
+flw_demographics = (
+    {}
+)  # connect_id -> {name,gender,state,lga,settlement,type_of_flw,native_language,education,experience_years,training_batch} from the Learn flw_registration form (for the FLW-level retention analysis)
 
 
 def _flw_demo(form):
     """Extract demographics from an flw_registration form (settlement key varies by LGA)."""
     loc = form.get("location") if isinstance(form.get("location"), dict) else {}
     setl = form.get("settlement") if isinstance(form.get("settlement"), dict) else {}
-    settlement = (setl.get("settlements") or next((v for k, v in setl.items() if k.endswith("_settlement") and v), "") or "")
+    settlement = (
+        setl.get("settlements") or next((v for k, v in setl.items() if k.endswith("_settlement") and v), "") or ""
+    )
     exp = form.get("years_of_experience_as_flw")
     try:
         exp = int(float(exp)) if exp not in (None, "") else None
@@ -386,6 +433,8 @@ def _flw_demo(form):
         "experience_years": exp,
         "training_batch": (form.get("training_batch") or "").strip(),
     }
+
+
 # Each HQ domain is LLO-specific (…cowac… = COWACDI, …eha… = EHA). Tally each cohort's trigger forms by
 # the domain's LLO, then assign the cohort to its MAJORITY LLO — robust to a few stray cross-posted forms
 # (e.g. 1ECE1 had 73 EHA vs 1 COWACDI). Drives the render's per-LLO retention comparison.
@@ -447,8 +496,10 @@ for k in triggers_by_flw_iv:
     triggers_by_flw_iv[k].sort(key=lambda tb: tb["received_on"])
 # cohort_id -> LLO (COWACDI / EHA) by majority of trigger-form domains
 cohort_llo = {c: ct.most_common(1)[0][0] for c, ct in _cohort_llo_ct.items() if ct}
-print(f"[2/3] welcome keys={len(welcome_flws_by_key)}, trigger (flw,iv) keys={len(triggers_by_flw_iv)}, "
-      f"cohort_llo={Counter(cohort_llo.values())}")
+print(
+    f"[2/3] welcome keys={len(welcome_flws_by_key)}, trigger (flw,iv) keys={len(triggers_by_flw_iv)}, "
+    f"cohort_llo={Counter(cohort_llo.values())}"
+)
 
 # ---- union in cohorts present in the CommCare interview data but MISSING from the Connect snapshot ----
 # cohort_info is otherwise Connect-only, so when the Connect pull is stale/failed for a subgroup
@@ -494,11 +545,15 @@ for _c, _inf in cohort_info.items():
         _inf["start_src"] = "first trigger" if _ft else None
 _n_fb = sum(1 for _i in cohort_info.values() if _i.get("start_src") == "first trigger")
 _n_none = sum(1 for _i in cohort_info.values() if not _i.get("start_date"))
-print(f"[1+] cohort start dates: {len(cohort_info) - _n_fb - _n_none} from invitation, {_n_fb} from "
-      f"first trigger, {_n_none} unknown")
+print(
+    f"[1+] cohort start dates: {len(cohort_info) - _n_fb - _n_none} from invitation, {_n_fb} from "
+    f"first trigger, {_n_none} unknown"
+)
 if _conn_pending:
-    print(f"[1+] {len(_conn_pending)} cohort(s) in CommCare data but missing from the Connect snapshot "
-          f"(Connect funnel PENDING until next successful Connect pull): {_conn_pending}")
+    print(
+        f"[1+] {len(_conn_pending)} cohort(s) in CommCare data but missing from the Connect snapshot "
+        f"(Connect funnel PENDING until next successful Connect pull): {_conn_pending}"
+    )
 
 # ---------------- 4. OCS live ----------------
 ocs_by_key = defaultdict(list)
@@ -522,8 +577,9 @@ if TAGS_CACHE.exists():
     except (ValueError, OSError):
         _ocs_tags = {}
 if not _ocs_tags:
-    print("[4t] NOTE: no OCS review-tag cache - every row will read 'not-reviewed'. "
-          "Run pull_ocs_tags.py.", flush=True)
+    print(
+        "[4t] NOTE: no OCS review-tag cache - every row will read 'not-reviewed'. " "Run pull_ocs_tags.py.", flush=True
+    )
 else:
     print(f"[4t] OCS review tags: {len(_ocs_tags):,} tagged sessions", flush=True)
 print(f"[4] OCS live: {len(sessions)} sessions, {len(ocs_by_key)} (pid,iv) keys")
@@ -609,10 +665,14 @@ with out.open("w", newline="", encoding="utf-8") as f:
     w.writeheader()
     w.writerows(rows)
 print(f"\nwrote {out.name}: {len(rows)} rows, {len({r['connect_id'] for r in rows})} FLWs")
-print(f"  [cleanup] excluded {len(EXCLUDE_FLWS)} non-enrolled FLWs; re-tagged {len(CONNECT_COHORT_OVERRIDE)} cross-arm Connect record(s)")
+print(
+    f"  [cleanup] excluded {len(EXCLUDE_FLWS)} non-enrolled FLWs; re-tagged {len(CONNECT_COHORT_OVERRIDE)} cross-arm Connect record(s)"
+)
 if unmapped_cohorts:
-    print(f"[!] {len(unmapped_cohorts)} UNMAPPED cohort(s) (new program type? add a SUBGROUP_DESIGN entry): "
-          f"{sorted(unmapped_cohorts)}")
+    print(
+        f"[!] {len(unmapped_cohorts)} UNMAPPED cohort(s) (new program type? add a SUBGROUP_DESIGN entry): "
+        f"{sorted(unmapped_cohorts)}"
+    )
 
 # ---------------- reconcile vs baseline (optional; absent server-side where the participant baseline isn't shipped) ----------------
 if BASELINE.exists():
