@@ -93,8 +93,6 @@ def cohort_to_sg(c):
         return "2WT"
     if re.search(r"EC[CE]\d", c):
         return "EXT"  # Extension cohorts: 1ECC1 (COWACDI), 1ECE1 (EHA)
-    if re.search(r"NPS\d", c):
-        return "NPS"  # NPS cohorts: 1NPS1 (COWACDI only) - before the Panel pattern
     if re.search(r"P[CE]\d", c):
         return "PANEL"
     return None
@@ -443,7 +441,6 @@ ROLL = {
     "ABT3-B": "ABT3",
     "2WT": "2WT",
     "EXT": "EXT",
-    "NPS": "NPS",
 }
 
 
