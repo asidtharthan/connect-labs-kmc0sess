@@ -84,7 +84,12 @@ function WorkflowUI(props) {
   var eng2Ref = React.useRef(null), eng2Inst = React.useRef(null);
   // Outcome chart: "chart" = as before; "values" = drop only the labels that would collide and put
   // every number in a table underneath, so a screenshot of the panel carries its own data.
-  var evm = React.useState("chart"); var engVals = evm[0], setEngVals = evm[1];
+  // Defaults to the table: the chart-only view is the crowded one, and it should not be what people
+  // land on when the usual thing they do with this panel is screenshot it.
+  var evm = React.useState("values"); var engVals = evm[0], setEngVals = evm[1];
+  // Series hidden via the chart legend, by dataset index. The table reads this too, so a filtered
+  // chart and its table always agree.
+  var ehd = React.useState({}); var engHidden = ehd[0], setEngHidden = ehd[1];
   var eng3Ref = React.useRef(null), eng3Inst = React.useRef(null);
 
   // Design + topic names come from the build (DATA.subgroupDesign / topicNames), derived from the
@@ -1472,15 +1477,32 @@ function WorkflowUI(props) {
       Object.keys(byX).forEach(function (k) {
         var group = byX[k].sort(function (a, b) { return a.y - b.y; });   // topmost first
         var lastY = -Infinity;
-        group.forEach(function (g) {
-          var want = g.y - 6;
-          if (want - lastY < MIN_GAP) {
-            if (dropColliding) { g.skip = true; return; }                // table has it; stay quiet
-            want = lastY + MIN_GAP;                                      // else nudge down to clear
-          }
-          g.labelY = want;
-          lastY = want;
-        });
+        if (dropColliding) {
+          // Keep the labels that were readable anyway. Score each by how far its nearest neighbour
+          // sits, place them most-isolated first, and drop whatever no longer fits. Previously the
+          // lower label always lost, so the same series went silent every week for no better reason
+          // than its position.
+          group.forEach(function (g, i) {
+            var above = i > 0 ? g.y - group[i - 1].y : Infinity;
+            var below = i < group.length - 1 ? group[i + 1].y - g.y : Infinity;
+            g.clear = Math.min(above, below);
+          });
+          var placed = [];
+          group.slice().sort(function (a, b) { return b.clear - a.clear; }).forEach(function (g) {
+            var want = g.y - 6;
+            var clash = placed.some(function (p) { return Math.abs(p - want) < MIN_GAP; });
+            if (clash) { g.skip = true; return; }
+            g.labelY = want;
+            placed.push(want);
+          });
+        } else {
+          group.forEach(function (g) {
+            var want = g.y - 6;
+            if (want - lastY < MIN_GAP) want = lastY + MIN_GAP;          // nudge down to clear
+            g.labelY = want;
+            lastY = want;
+          });
+        }
         group.forEach(function (g) {
           if (g.skip) return;
           if (Math.abs(g.labelY - (g.y - 6)) > 2) {
@@ -1689,7 +1711,21 @@ function WorkflowUI(props) {
           // different base; the legend and the axis title say so in words. Varied point shapes were
           // tried to replace the dashes and made a clean chart look busy for no gain: the values are
           // separated by the label placement below, not by decorating the markers.
-          plugins: { legend: { position: "bottom", labels: { boxWidth: 14, font: { size: 11 },
+          plugins: { legend: { position: "bottom",
+              // Chart.js hides the line itself; this mirrors the choice into React so the value table
+              // drops the same row. Without it, hiding a series left it listed underneath and the
+              // screenshot contradicted itself.
+              onClick: function (e, item, legend) {
+                var ci = legend.chart, idx = item.datasetIndex;
+                ci.setDatasetVisibility(idx, !ci.isDatasetVisible(idx));
+                ci.update();
+                setEngHidden(function (prev) {
+                  var next = Object.assign({}, prev);
+                  if (next[idx]) { delete next[idx]; } else { next[idx] = true; }
+                  return next;
+                });
+              },
+              labels: { boxWidth: 14, font: { size: 11 },
                 generateLabels: function (chart) {
                   var items = window.Chart.defaults.plugins.legend.labels.generateLabels(chart);
                   items.forEach(function (it) { it.lineDash = []; it.lineDashOffset = 0; });
@@ -2419,7 +2455,10 @@ function WorkflowUI(props) {
                           ["Schedule not completed", "#0277BD", ce.waiting_pct],
                           ["Still in progress", "#607D8B", ce.inprog_pct],
                           ["Rhythm - steady", "#2E7D32", ce.steady_pct],
-                          ["Rhythm - inconsistent", "#F9A825", ce.incons_pct]].map(function (row) {
+                          ["Rhythm - inconsistent", "#F9A825", ce.incons_pct]]
+                          // Same order as the chart datasets, so the legend index maps straight across.
+                          .filter(function (row, di) { return !engHidden[di]; })
+                          .map(function (row) {
                           return (
                             <tr key={row[0]} className="border-t border-gray-100">
                               <td className="px-2 py-1" style={{ whiteSpace: "nowrap" }}>
@@ -2442,8 +2481,10 @@ function WorkflowUI(props) {
                     </table>
                   </div>
                   <div className="text-gray-400 mt-1" style={{ fontSize: "10px" }}>
-                    Same numbers the chart draws. The first four rows sum to 100% in every column;
-                    the two rhythm rows sum to 100% on their own base (starters with 2+ interviews).
+                    Same numbers the chart draws.{" "}
+                    {Object.keys(engHidden).length
+                      ? "Some series are hidden from the chart and from this table, so the columns will not sum to 100%."
+                      : "The first four rows sum to 100% in every column; the two rhythm rows sum to 100% on their own base (starters with 2+ interviews)."}
                   </div>
                 </div>
               ) : null}
