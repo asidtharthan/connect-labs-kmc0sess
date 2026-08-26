@@ -128,6 +128,29 @@ def brutal_baseline():
 
 # Four hooks cannot execute under this machine's Application Control policy (WinError 4551). They run
 # in CI. Run everything else, and name what was skipped rather than silently passing.
+# Hooks Application Control refuses that ARE runnable as plain modules. Checked directly so a genuine
+# failure cannot hide behind the block. Anything not listed here is reported as blocked and left to CI.
+DIRECT_FALLBACK = {
+    "black": ["black", "--check"],
+    "flake8": ["flake8"],
+    "isort": ["isort", "--check-only"],
+}
+
+
+def changed_python():
+    """The .py files this push would actually change - staged, plus anything differing from main.
+
+    NOT the whole tree: `black --check .` sweeps 93 untracked scratch scripts that CI has never linted,
+    so it could never pass and the check would become noise. CI lints the tracked tree and main is
+    green, so what matters before a push is what this change touches.
+    """
+    out = set()
+    for args in (["diff", "--name-only", "--cached"], ["diff", "--name-only", "origin/main..."]):
+        r = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True)
+        out.update(f for f in r.stdout.split() if f.endswith(".py") and os.path.exists(f))
+    return sorted(out)
+
+
 PRECOMMIT_BLOCKED = ("check-yaml", "trailing-whitespace", "end-of-file-fixer", "check-case-conflict")
 
 
@@ -181,8 +204,31 @@ def precommit_runnable():
             # 2026-08-25 - so a hardcoded list silently turns into a hardcoded lie. A blocked hook is
             # reported as blocked and still runs in CI; only a genuine failure counts.
             if "WinError 4551" in out or "Application Control" in out:
+                # Blocked as a pre-commit hook - but several of these are plain Python tools that run
+                # fine when invoked directly, so FALL BACK rather than shrug. Reporting "blocked" and
+                # moving on is how a real black failure hid behind an environment quirk and reached CI
+                # anyway: false confidence is worse than no check.
+                direct = DIRECT_FALLBACK.get(hid)
+                if direct:
+                    targets = changed_python()
+                    if not targets:
+                        print(f"  ok, nothing changed for: {hid}")
+                        continue
+                    r2 = subprocess.run(
+                        [PY, "-m", *direct, *targets],
+                        cwd=ROOT,
+                        capture_output=True,
+                        text=True,
+                        timeout=900,
+                    )
+                    if r2.returncode != 0:
+                        bad.append(hid)
+                        print(f"  FAILED (hook blocked, ran directly): {hid}")
+                    else:
+                        print(f"  ok via direct run (hook itself is blocked): {hid}")
+                    continue
                 blocked.append(hid)
-                print(f"  BLOCKED by this machine (runs in CI): {hid}")
+                print(f"  BLOCKED by this machine, no direct fallback (runs in CI): {hid}")
             else:
                 bad.append(hid)
                 print(f"  FAILED hook: {hid}")

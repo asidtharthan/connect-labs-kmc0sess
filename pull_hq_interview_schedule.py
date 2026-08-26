@@ -16,6 +16,7 @@ Usage:
     python pull_hq_interview_schedule.py
     python pull_hq_interview_schedule.py --domain ccc-interview-panel-cowac
 """
+
 import argparse
 import json
 import os

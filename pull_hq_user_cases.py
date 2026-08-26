@@ -15,6 +15,7 @@ Usage:
     python pull_hq_user_cases.py                 # all _DEFAULT_DOMAINS
     python pull_hq_user_cases.py --domain ccc-interview-panel-cowac
 """
+
 import argparse
 import json
 import os
