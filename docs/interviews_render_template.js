@@ -68,13 +68,13 @@ function WorkflowUI(props) {
   var cdw = React.useState(false); var cdWhy = cdw[0], setCdWhy = cdw[1];               // drop-off view: the fixed-days explainer, collapsed by default
   // Which of the three readings of "dropped off" is on show. C is the default because it is the one
   // that answers the question people actually mean; B and A are kept for comparison and continuity.
-  var cdm = React.useState("C"); var cdMode = cdm[0], setCdMode = cdm[1];
+  var cdm = React.useState("A"); var cdMode = cdm[0], setCdMode = cdm[1];
   var esg = React.useState("ALL"); var engSg = esg[0], setEngSg = esg[1];              // cohort-engagement: selected cohort (default ALL - meaningful first view)
   var ell = React.useState("all"); var engLlo = ell[0], setEngLlo = ell[1];            // cohort-engagement: LLO filter (all | COWACDI | EHA)
   var ewin = React.useState("active"); var engWin = ewin[0], setEngWin = ewin[1];      // cohort-engagement: active window | full timeline
   // Which of the three readings of "dropped off" the OUTCOME lines use. Same three as the Drop-off by
   // cohort view and the same default, so the two views cannot tell different stories about one worker.
-  var edm = React.useState("C"); var engMode = edm[0], setEngMode = edm[1];
+  var edm = React.useState("A"); var engMode = edm[0], setEngMode = edm[1];
   var emk = React.useState(false); var engMark = emk[0], setEngMark = emk[1];
   var dsc = React.useState("flow"); var docSec = dsc[0], setDocSec = dsc[1];          // Documentation tab: which section
   var dnd = React.useState(null); var docNode = dnd[0], setDocNode = dnd[1];          // Documentation tab: selected lineage node
@@ -1795,6 +1795,8 @@ function WorkflowUI(props) {
         start: r.s, end: r.e, closed: r.e <= (DATA.today || ""),
         n: r.n, onTime: r.f, late: late, done: r.f + late,
         drop: dropped, skipped: skipped, notSent: r.w, never: never, prog: prog,
+        dAo: r.dAo || 0, dAc: r.dAc || 0,   // the 14-day count split by whether anything was outstanding
+
         sent: r.ts || 0, sentDone: r.tc || 0,
         sentDonePct: r.ts ? Math.round(1000 * r.tc / r.ts) / 10 : null,
         donePct: pc(r.f + late), onTimePct: pc(r.f),
@@ -1943,9 +1945,10 @@ function WorkflowUI(props) {
       a.n += r.n; a.onTime += r.onTime; a.late += r.late; a.done += r.done;
       a.drop += r.drop; a.skipped += r.skipped; a.notSent += r.notSent; a.never += r.never;
       a.prog += r.prog; a.sent += r.sent; a.sentDone += r.sentDone;
-      a.asked += r.asked; return a;                 // tiles must divide by the same base as the table
+      a.asked += r.asked; a.dAo += r.dAo; a.dAc += r.dAc;
+      return a;                                 // tiles must divide by the same base as the table
     }, { n: 0, onTime: 0, late: 0, done: 0, drop: 0, skipped: 0, notSent: 0, never: 0, prog: 0,
-         asked: 0, sent: 0, sentDone: 0 });
+         asked: 0, sent: 0, sentDone: 0, dAo: 0, dAc: 0 });
     // Sorting applies to BOTH levels. By id sorts designs alphabetically and cohorts by cohort id.
     function sortRows(list, isDesign) {
       var out = list.slice();
@@ -2014,17 +2017,43 @@ function WorkflowUI(props) {
               coverage measure rather than retention: someone who completed 12 of 13 and skipped one
               counts here. Long schedules score worse simply because they offer more chances to miss one.</span>
             ) : (
-              <span><b>The method used before 21 August: no interview for more than 14 days.</b>{" "}
-              <b style={{ color: "#b45309" }}>This measures silence, not leaving.</b> Most of the workers
-              it counts did not stop: they either completed every interview they were sent and then went
-              quiet because nothing more arrived, or skipped one and came straight back. It also cannot
-              see workers who never replied even once, because it needs a session to measure silence
-              from. Same 14 days for every design whether interviews are 3 or 14 days apart, and it
-              climbs on its own as time passes. Use it only to compare with figures published before
-              21 August.</span>
+              <span><b>No interview for more than 14 days.</b>{" "}
+              <b style={{ color: "#b45309" }}>This measures silence, not leaving.</b> It counts anyone who
+              went quiet, whether or not anything was waiting for them. That is deliberate: a worker the
+              bot stopped sending to still counts as not retained, and taking our own gaps out of the
+              figure would flatter it. Same 14 days for every design whether interviews are 3 or 14 days
+              apart. It cannot see workers who never replied even once, because it needs a session to
+              measure silence from. Each cohort is scored at its own close plus 14 days, so the number
+              settles once a cohort is finished rather than drifting with the calendar.</span>
             )}
           </div>
         </div>
+
+        {/* Under the 14-day reading, roughly half the workers counted did everything that was sent to
+            them. Counting them is the deliberate choice; presenting the total with nothing beside it
+            would describe those people as having dropped out, which is not what happened. */}
+        {cdMode === "A" && (tot.dAo + tot.dAc) > 0 ? (
+          <div className="mx-1 rounded border border-amber-200 bg-amber-50 px-3 py-2">
+            <div className="text-xs font-semibold text-amber-900">
+              What the {(tot.dAo + tot.dAc).toLocaleString()} counted as dropped off are made of
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-4 text-xs text-gray-800">
+              <span>
+                <b>{tot.dAo.toLocaleString()}</b>{" "}
+                ({Math.round((100 * tot.dAo) / (tot.dAo + tot.dAc))}%) left an interview we sent unanswered
+              </span>
+              <span>
+                <b>{tot.dAc.toLocaleString()}</b>{" "}
+                ({Math.round((100 * tot.dAc) / (tot.dAo + tot.dAc))}%) answered every interview we sent,
+                and were never sent the rest
+              </span>
+            </div>
+            <div className="mt-1 text-xs text-gray-600">
+              The second group did nothing wrong. They are counted because the schedule stopped, not
+              because they did.
+            </div>
+          </div>
+        ) : null}
 
         <div className="flex flex-wrap items-center gap-2 px-1">
           <span className="text-xs font-semibold text-gray-700">Show:</span>

@@ -283,8 +283,8 @@ if (dropHtml) {
     /no day-count control/i.test(dropHtml),
   );
   check(
-    'states the deadline is one interview gap',
-    /one interview gap/i.test(dropHtml),
+    'the default view explains what the 14-day rule measures',
+    /measures silence, not leaving/i.test(dropHtml),
   );
   check(
     'keeps Schedule-not-completed separate from Dropped',
@@ -365,12 +365,13 @@ if (dropHtml) {
     }),
     { n: 0, f: 0, dA: 0, dB: 0, dC: 0, sk: 0, w: 0 },
   );
+  // The default is reading A (the team settled on it 28 Aug), so the tiles must show dA, not dC.
   check(
     'KPI totals present verbatim, for the DEFAULT reading',
     dropHtml.includes(tot.f.toLocaleString()) &&
-      dropHtml.includes(tot.dC.toLocaleString()) &&
+      dropHtml.includes(tot.dA.toLocaleString()) &&
       dropHtml.includes(tot.w.toLocaleString()),
-    `finished=${tot.f} dropped(C)=${tot.dC} schedule-n/c=${tot.w}`,
+    `finished=${tot.f} dropped(A)=${tot.dA} schedule-n/c=${tot.w}`,
   );
   // C and "skipped but returned" must together be exactly B - they are one split of the same people.
   check(
@@ -973,21 +974,17 @@ check(
     if (j === viewHook) continue;
     let a;
     try {
-      a = build(null, { 1: 'funnels', [viewHook]: 'dropoff', [j]: 'A' });
+      a = build(null, { 1: 'funnels', [viewHook]: 'dropoff', [j]: 'C' });
     } catch (e) {
       continue;
     }
-    if (a !== base && /method used before 21 August/.test(a)) {
+    if (a !== base && /never completed another one/i.test(a)) {
       modeHook = j;
-      aHtml = a;
+      cHtml = a;
     }
   }
-  if (modeHook)
-    cHtml = build(null, {
-      1: 'funnels',
-      [viewHook]: 'dropoff',
-      [modeHook]: 'C',
-    });
+  // reading A is now what the view opens on, so the base render IS the A render
+  aHtml = base;
   check(
     'reading-A view names the column Silence, not Deadline',
     !!aHtml && />Silence<\/th>|>\s*Silence\s*</.test(aHtml),
@@ -1398,6 +1395,37 @@ check(
       `+${sessOpts - matOpts}`,
     );
   }
+})();
+
+// ------------------------------------------- the 14-day count is shown split, not as a bare total
+// Roughly half the workers the 14-day rule counts had answered every interview they were sent. That
+// is the deliberate choice, but a bare total describes those people as having dropped out when they
+// did not, so the split is shown beside it.
+(function () {
+  const CD = payload.cohortDropoff || [];
+  const o = CD.reduce((a, r) => a + (r.dAo || 0), 0);
+  const c = CD.reduce((a, r) => a + (r.dAc || 0), 0);
+  const dA = CD.reduce((a, r) => a + (r.dA || 0), 0);
+  check(
+    'payload carries the 14-day split',
+    o + c > 0 && o + c === dA,
+    `${o} unanswered + ${c} answered-everything = ${o + c} vs dA ${dA}`,
+  );
+  if (!dropHtml) return;
+  check(
+    'the split box renders on the default view',
+    /counted as dropped off are made of/i.test(dropHtml),
+  );
+  check(
+    'the split box shows both numbers',
+    dropHtml.includes(o.toLocaleString()) &&
+      dropHtml.includes(c.toLocaleString()),
+    `${o} / ${c}`,
+  );
+  check(
+    'the split box explains the second group did nothing wrong',
+    /did nothing wrong/i.test(dropHtml),
+  );
 })();
 
 // ---------------------------------------------------------------- no em/en dashes (house style)
