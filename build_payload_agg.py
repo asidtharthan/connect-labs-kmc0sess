@@ -1194,12 +1194,34 @@ for _c, _inf in sorted(bm.cohort_info.items()):
                         _tally["C_open"] += 1
                 else:
                     _tally["skipped"] += 1  # skipped one, came back
-        # A: the pre-21-Aug rule - not finished, and silent for more than 14 days as of the cohort's
-        # own last observed session (the old weekly grid froze there rather than running to today).
+        # A: not finished, and silent for more than 14 days at this cohort's SCORING DATE.
+        #
+        # That date used to be the cohort's own last observed SESSION, which is not a date at all - it
+        # is wherever the last straggler happened to log in. One worker finishing a long-overdue
+        # interview dragged the endpoint forward and pushed everyone else in the cohort over the line,
+        # while rescuing themselves. Two cohorts that behaved identically scored differently depending
+        # on whether anyone trickled in afterwards, so cohorts were not comparable with each other.
+        #
+        # It is now a fixed calendar date: the cohort's own close plus one 14-day silence window,
+        # capped at today so a cohort that has not yet reached that point is scored where it actually
+        # is. Every cohort is judged at the same point in its OWN life, which is what the engagement
+        # chart already does by measuring to the week on its axis. Measured on the live build: the
+        # programme total moves 804 -> 687, and it redistributes (PANEL down, TRS up) because cohorts
+        # that limped on were over-counted and cohorts that went quiet early were under-counted.
         _ds = _coh_dates.get(_c, {}).get(_f)
-        if _ds and _cohort_last_session.get(_c) and not _finished_all:
-            if (_cohort_last_session[_c] - max(_ds)).days > 14:
+        _a_asof = min(_end + timedelta(days=14), TODAY)
+        if _ds and _a_asof and not _finished_all:
+            if (_a_asof - max(_ds)).days > 14:
                 _tally["A"] += 1
+                # Split the silence count by whether anything was actually OUTSTANDING for them.
+                # Reading A does not ask, so 38% of the people it calls dropped had completed every
+                # interview they were sent and were simply never sent the rest. That is the deliberate
+                # choice (a worker we stopped sending to still counts as not retained), but describing
+                # them as having dropped out, with nothing beside it, is not what happened to them.
+                if any(_t[1] is None for _t in _dl):
+                    _tally["A_out"] += 1     # left something we sent unanswered
+                else:
+                    _tally["A_clean"] += 1   # answered everything we sent; the schedule stopped
         # Someone who completed their whole design AFTER the window shut is not a drop-out - they
         # finished, late. Measuring strictly at the window end swept 140 such workers into "dropped",
         # which is what made completed look too low and dropped too high against every other view.
@@ -1254,6 +1276,8 @@ for _c, _inf in sorted(bm.cohort_info.items()):
         "l": _tally["completed-late"],
         "d": _tally["dropped"],
         "dA": _tally["A"],
+        "dAo": _tally["A_out"],
+        "dAc": _tally["A_clean"],
         "dB": _tally["B"],
         "dC": _tally["C"],
         "sk": _tally["skipped"],

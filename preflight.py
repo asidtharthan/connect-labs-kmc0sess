@@ -68,6 +68,13 @@ NOT_IN_CI = [
     "screenshots/Latest files/GW Tables - 11th June 2026.xlsx",
 ]
 
+# CI (refresh-interviews.yml) sets this at JOB level, so every build AND every audit in the run reads
+# the Connect leg from connect_user_data_snapshot.csv. Preflight read it from the *_audit folders, which
+# hold 63 cohorts against the snapshot's 72: the regression guard reported 36 phantom drops on a change
+# that never touched Connect, and setting it for the build steps alone then desynced the audits from the
+# payload they check. Reproducing CI is the point of this script, so it is set once, here, for everything.
+os.environ.setdefault("INTERVIEWS_CONNECT_SNAPSHOT", "1")
+
 results = []
 
 
