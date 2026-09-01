@@ -119,7 +119,11 @@ rows_sorted = sorted(bm.rows, key=lambda r: (r["cohort_id"], r["connect_id"], in
 # render 8 KB OVER the 512 KB cap and the render gate refused to publish. This sample is illustrative -
 # the full data is in the tables and the CSV export - so it is the right thing to trade for headroom,
 # which is what the build's own warning has always said.
-GRANULAR_N = 30
+# Lowered 30 -> 10 on 2026-09-01: the OCS session census added ~4 KB of render code and the injected
+# render came to 511 KB against the 512 KB cap, leaving 1 KB where the gate wants 4. This sample is
+# illustrative - the Sessions view reads the LIVE OCS pipeline and the full data is in the CSV export -
+# so it is the right thing to trade, which is what the note above has always said.
+GRANULAR_N = 10
 granular = []
 for r in rows_sorted[:GRANULAR_N]:
     granular.append(
@@ -254,6 +258,7 @@ out = {
     # OCS review verdict on every COMPLETED interview, with not-yet-reviewed as its own bucket.
     # Small (four counts per subgroup and per topic), so it survives the render prune.
     "reviewStatus": payload.get("review_status", {}),
+    "sessionReview": payload.get("session_review", {}),
     "unmappedCohorts": payload.get("unmapped_cohorts", []),
     "retiredCohorts": payload.get("retired_cohorts", []),
 }

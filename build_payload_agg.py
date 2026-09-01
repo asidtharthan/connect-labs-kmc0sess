@@ -1356,10 +1356,80 @@ print(
     + "  ".join(f"{k}={_rev_overall[k]}" for k in _REVIEW_KEYS)
 )
 
+# ---------------------------------------------------------------- OCS session census (Leah, 25 Aug)
+# The block above answers "of the interviews we COMPLETED, what verdict did each get". It cannot show
+# incomplete sessions at all, because an interview that never finished has no completed row - which is
+# why the dashboard read 918 while OCS showed ~12,000 not-applicable.
+#
+# This one answers the question OCS's own screen answers: of every session an enrolled FLW ever had
+# with the bot, how did the evaluator judge it. Four mutually exclusive buckets over SESSIONS, so
+# incomplete work is visible and the numbers can be checked against OCS directly.
+#
+# The categories are the evaluator's own tags. Two things that are easy to get wrong:
+#   * `suspected_ai` is NOT a clean subset of `unacceptable`. Leah's rule is that 1-3 AI-looking
+#     answers are flagged but NOT penalised, and only 4+ fail the session. So 11 ACCEPTABLE sessions
+#     carry the AI flag. Counting the union as "unacceptable" would drag those into the wrong bucket.
+#     Unacceptable is the `unacceptable` tag alone; the AI figure is reported as a subset of it.
+#   * a session with no tag at all is not "acceptable by default" - the evaluator has not reached it.
+#     Only sessions at OCS status Waiting Final Review or Complete are evaluated.
+_sr_flw = set()
+for _c, _fs in bm.cohort_flws.items():
+    _sr_flw |= set(_fs)
+for _r in bm.rows:
+    _sr_flw.add(_r["connect_id"])
+
+_sr = {"acceptable": 0, "unacceptable": 0, "no-verdict": 0, "not-applicable": 0}
+_sr_ai_in_unacc = _sr_ai_total = _sr_ai_in_acc = 0
+_sr_all = _sr_enrolled = 0
+_sr_ocs = {"acceptable": 0, "unacceptable": 0, "no-verdict": 0, "not-applicable": 0}
+for _s in bm.sessions:
+    _sid = _s.get("id") or _s.get("sid")
+    _p = _s.get("participant") if isinstance(_s.get("participant"), dict) else {}
+    _pid = _p.get("identifier") if _p else _s.get("pid")
+    _ts = set(bm._ocs_tags.get(_sid) or ())
+    if "acceptable" in _ts:
+        _b = "acceptable"
+    elif "unacceptable" in _ts:
+        _b = "unacceptable"
+    elif "n/a" in _ts:
+        _b = "not-applicable"
+    else:
+        _b = "no-verdict"
+    _sr_all += 1
+    _sr_ocs[_b] += 1
+    if _pid not in _sr_flw:
+        continue                       # staff, test accounts and participants outside the programme
+    _sr_enrolled += 1
+    _sr[_b] += 1
+    if "suspected_ai" in _ts:
+        _sr_ai_total += 1
+        if _b == "unacceptable":
+            _sr_ai_in_unacc += 1
+        elif _b == "acceptable":
+            _sr_ai_in_acc += 1
+
+session_review = {
+    "order": ["acceptable", "unacceptable", "no-verdict", "not-applicable"],
+    "counts": _sr,
+    "sessions": _sr_enrolled,
+    "ai_in_unacceptable": _sr_ai_in_unacc,   # the subset shown when Unacceptable is expanded
+    "ai_total": _sr_ai_total,
+    "ai_in_acceptable": _sr_ai_in_acc,       # flagged but under the 4-answer penalty threshold
+    # what the same filters give on OCS's own screen, so the difference is a printed line, not a mystery
+    "ocs_counts": _sr_ocs,
+    "ocs_sessions": _sr_all,
+}
+print(
+    f"[rev] OCS session census over {_sr_enrolled} enrolled-FLW sessions "
+    f"(of {_sr_all} on OCS): " + "  ".join(f"{k}={_sr[k]}" for k in session_review["order"])
+    + f"  | AI-flagged {_sr_ai_total} ({_sr_ai_in_unacc} inside unacceptable, {_sr_ai_in_acc} inside acceptable)"
+)
+
 payload = {
     "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),  # stamped at build; render shows this
     "today": str(TODAY),
     "review_status": review_status,
+    "session_review": session_review,
     "counts": {
         "cohorts": len(bm.cohort_info),
         "flws": len({c["flw"] for c in cells}),
