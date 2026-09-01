@@ -62,6 +62,7 @@ function WorkflowUI(props) {
   var rvi = React.useState({ acceptable: true, unacceptable: true, suspected_ai: true, "not-reviewed": true });
   var revInc = rvi[0], setRevInc = rvi[1];
   var rvb = React.useState("sg"); var revBy = rvb[0], setRevBy = rvb[1];
+  var rvai = React.useState(false); var revAi = rvai[0], setRevAi = rvai[1];   // Suspected AI opens inside Unacceptable
   var fvw = React.useState("retention"); var funView = fvw[0], setFunView = fvw[1];   // funnels tab: retention lines | cohort engagement (3-panel) | drop-off by cohort
   var cdl = React.useState("design"); var cdLevel = cdl[0], setCdLevel = cdl[1];       // drop-off view: by design | every cohort
   var cds = React.useState("drop"); var cdSort = cds[0], setCdSort = cds[1];           // drop-off view: sort by drop-off % | cohort id
@@ -384,13 +385,13 @@ function WorkflowUI(props) {
         reads: ["table1", "table2", "table3", "cohortSG"],
         charts: [["Subgroup and cohort tables", "The same counts as Overview, split by subgroup, arm and individual cohort, with average FLW words per interview."]] },
       { id: "funnels", name: "Interview Completion Funnels", question: "Where do people fall out, and are they still engaged?",
-        reads: ["connectFunnel", "dropoff", "lineSeries", "deimpact", "cohortEngagement", "cohortEngagementLLO", "cohortDropoff", "reviewStatus"],
+        reads: ["connectFunnel", "dropoff", "lineSeries", "deimpact", "cohortEngagement", "cohortEngagementLLO", "cohortDropoff", "reviewStatus", "sessionReview"],
         charts: [
           ["Connect funnel", "Invited → accepted → Learn completed → claimed → initiated. Everything before an interview exists."],
           ["Interview drop-off table", "Per interview slot: eligible, triggered, started, completed, with three percentage bases (see Indicators)."],
           ["Retention lines", "Completion by interview number, with a Denominator toggle and a de-impact toggle."],
           ["Cohort Engagement (3 panels)", "Weekly recruitment, outcome (Finished / Dropped off / Schedule not completed / In progress) plus rhythm (Steady / Inconsistent), and status-now (New / Active / Slow / Quiet / Finished). The outcome lines follow whichever of the three readings of “dropped off” is selected; rhythm and status-now measure gaps between sessions, so no definition of drop-off changes them."],
-          ["Data review", "Every COMPLETED interview split by its OCS review verdict - Acceptable, Unacceptable, Suspected AI, or Not yet reviewed - with a checkbox per verdict and a Design/Topic split. Selecting Acceptable + Unacceptable reproduces the figure the OCS session screen shows; the difference from the full count is the review backlog."],
+          ["Data review", "Two bases, stated separately. First every SESSION an enrolled FLW had with the bot, sorted by the evaluator's own tag - Acceptable, Unacceptable (click for the Suspected AI subset), No verdict yet, Not applicable - which is how OCS counts and so includes sessions that never became an interview. Below it, the older view over COMPLETED interviews only, which can be split by design and topic."],
           ["Drop-off by cohort", "One row per cohort design or per individual cohort, each scored at ITS OWN end date rather than today or a date shared across the design. Five mutually exclusive states, defined on the page itself, plus a table showing what a fixed number of days would have meant in each design. Sortable by drop-off or by name at either level."]
         ] },
       { id: "fullretention", name: "Full Retention Table", question: "Give me every cohort × interview number in one grid.",
@@ -1862,8 +1863,106 @@ function WorkflowUI(props) {
       return { k: k, o: o, inc: inc, tot: tot, pct: tot ? Math.round((1000 * inc) / tot) / 10 : null };
     }).sort(function (a, b) { return b.inc - a.inc; });
 
+    // ---- OCS session census. The block below this one counts COMPLETED INTERVIEWS, which cannot
+    // show incomplete work at all - that is why this page read 918 against ~12,000 on OCS. This counts
+    // SESSIONS, the way OCS's own screen does, so incomplete sessions are visible and the figures can
+    // be checked against OCS directly.
+    var SR = DATA.sessionReview || null;
+    var SR_META = {
+      "acceptable": ["Acceptable", "#15803d",
+        "Passed the evaluator on all five dimensions: clarity, completeness, relevance, depth and authenticity."],
+      "unacceptable": ["Unacceptable", "#b45309",
+        "Failed on one or more of the five dimensions, or carried four or more AI-generated answers."],
+      "no-verdict": ["No verdict yet", "#6b7280",
+        "The evaluator has not tagged these. Only sessions at Waiting Final Review or Complete are evaluated, so anything still in progress is skipped."],
+      "not-applicable": ["Not applicable", "#7c3aed",
+        "The session never became an interview - opened, a message or two, then nothing. Includes what the bot side tags as run-on sessions."],
+    };
+    function srRow(k) {
+      var m = SR_META[k], n = SR.counts[k] || 0;
+      var pct = SR.sessions ? Math.round((1000 * n) / SR.sessions) / 10 : 0;
+      var isUn = k === "unacceptable";
+      return (
+        <React.Fragment key={k}>
+          <tr className={isUn ? "cursor-pointer hover:bg-gray-50" : ""}
+              onClick={isUn ? function () { setRevAi(!revAi); } : null}>
+            <td className="px-2 py-2 align-top" style={{ width: "20%" }}>
+              <span className="font-semibold" style={{ color: m[1] }}>{m[0]}</span>
+              {isUn ? <span className="ml-1.5 text-gray-400" style={{ fontSize: "10px" }}>{revAi ? "▾ hide" : "▸ AI"}</span> : null}
+            </td>
+            <td className="px-2 py-2 text-right font-semibold align-top" style={{ width: "10%" }}>{n.toLocaleString()}</td>
+            <td className="px-2 py-2 text-right text-gray-600 align-top" style={{ width: "8%" }}>{pct}%</td>
+            <td className="px-2 py-2 text-gray-600 align-top">{m[2]}</td>
+          </tr>
+          {isUn && revAi ? (
+            <tr className="bg-amber-50">
+              <td className="px-2 py-2 pl-6 align-top text-gray-700">&#8627; of which Suspected AI</td>
+              <td className="px-2 py-2 text-right font-semibold align-top" style={{ color: "#b45309" }}>
+                {(SR.ai_in_unacceptable || 0).toLocaleString()}
+              </td>
+              <td className="px-2 py-2"></td>
+              <td className="px-2 py-2 text-gray-600 align-top">
+                Failed <b>because of</b> AI use: four or more answers judged AI-generated fails the whole
+                session. The other {((SR.counts.unacceptable || 0) - (SR.ai_in_unacceptable || 0)).toLocaleString()}{" "}
+                failed on quality instead. One to three flagged answers is <b>not</b> penalised, which is why
+                a further {(SR.ai_in_acceptable || 0).toLocaleString()} sessions carry the AI flag and still
+                count as Acceptable.
+              </td>
+            </tr>
+          ) : null}
+        </React.Fragment>
+      );
+    }
+
     return (
       <React.Fragment>
+        {SR ? (
+          <div className="rounded border border-gray-200 bg-white px-1 py-1">
+            <div className="px-2 pt-2 pb-1">
+              <div className="text-sm font-semibold text-gray-800">Every session, as OCS counts them</div>
+              <div className="text-xs text-gray-600 mt-0.5">
+                All {SR.sessions.toLocaleString()} sessions that enrolled FLWs had with the bot, sorted by the
+                evaluator&apos;s own tag. Not interviews - sessions, so unfinished ones appear too.
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-xs">
+                <thead>
+                  <tr className="text-gray-500 border-b border-gray-200">
+                    <th className="px-2 py-1 text-left font-semibold">Category</th>
+                    <th className="px-2 py-1 text-right font-semibold">Sessions</th>
+                    <th className="px-2 py-1 text-right font-semibold">Share</th>
+                    <th className="px-2 py-1 text-left font-semibold">What it means</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {SR.order.map(srRow)}
+                  <tr className="bg-gray-50">
+                    <td className="px-2 py-2 font-semibold text-gray-800">Total</td>
+                    <td className="px-2 py-2 text-right font-semibold text-gray-800">{SR.sessions.toLocaleString()}</td>
+                    <td className="px-2 py-2"></td>
+                    <td className="px-2 py-2 text-gray-500">The four are mutually exclusive and cover every session.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div className="px-2 pb-2 pt-1 text-xs text-gray-500">
+              <b>Checking this against OCS:</b> filter Sessions by tag there and you will see{" "}
+              {(SR.ocs_counts.acceptable || 0).toLocaleString()} acceptable,{" "}
+              {(SR.ocs_counts.unacceptable || 0).toLocaleString()} unacceptable and{" "}
+              {(SR.ocs_counts["not-applicable"] || 0).toLocaleString()} not-applicable across{" "}
+              {SR.ocs_sessions.toLocaleString()} sessions. The difference is{" "}
+              {(SR.ocs_sessions - SR.sessions).toLocaleString()} sessions from Dimagi staff accounts and
+              test participants who are not enrolled in any cohort, which this page leaves out.
+            </div>
+          </div>
+        ) : null}
+
+        <div className="text-sm font-semibold text-gray-800 px-1 pt-3">Completed interviews only</div>
+        <div className="text-xs text-gray-600 px-1 pb-1">
+          A different base from the table above: one row per interview we actually completed
+          ({(sumOf(RS.overall, keys) || 0).toLocaleString()}), so it can be split by design and topic.
+        </div>
         <div className="flex flex-wrap items-center gap-2 px-1">
           <span className="text-xs font-semibold text-gray-700">Include:</span>
           {REV_META.map(function (m) {
