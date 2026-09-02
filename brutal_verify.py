@@ -104,15 +104,23 @@ def is_test(c):
 
 # Must mirror build_master_4src.py exactly so this independent gate reconciles after the cleanup.
 EXCLUDE_FLWS = {
+    # 2026-09-02: m6svr4qy3gemxuj2inoe and sqaktdfxupepdvt90t3f WERE on this list and have been
+    # REMOVED. The rationale above ("active since early April", riding 1ABT1C*/2WTC1) fits the other
+    # 12; it never fit those two. Both first appear 19/21 June, four days before the snapshots they
+    # were checked against, in 1PC1 ONLY, then 1NPS1. Between them they completed 23 panel interviews
+    # plus 2 NPS on the correct 4-day cadence over two months: 21 of 23 tagged `acceptable`, zero
+    # unacceptable, zero suspected-AI, 666 answers averaging 24.0 and 6.3 words. The transcripts carry
+    # MUAC screening, OTP referral, ORS and zinc, NAFDAC registration and named catchment detail.
+    # They are genuinely absent from the Connect roster (492 panel usernames, matching the live
+    # funnel's invited=492), so "never invited" is real - but it is an enrollment gap, not evidence
+    # of a test account. Reinstated on that evidence 2026-09-02. See PROJECT_LEARNINGS 5v.
     "10wcuh1u3s6595okhmfd",
     "5ej4jqjha0x1f3tbc08y",
     "7xhpeda8ipsouip6ynyk",
     "b6vt2wzi8slth6mlag1g",
     "m0i5azsqk7mzixp1bzib",
     "m33dn33c5vyf8es9kagq",
-    "m6svr4qy3gemxuj2inoe",
     "rfxkcx7nbom2whml8mbb",
-    "sqaktdfxupepdvt90t3f",
     "v3urwjuzqjxp3njyb5uz",
     "va7vh76am0m83h0rzu01",
     "wwnvw4diurrzuy32vba7",
@@ -358,6 +366,37 @@ for r in R:
 chk("is_started == (matched_session present)", bad_started == 0, f"{bad_started} bad")
 chk("every started row's session exists in OCS cache (raw)", bad_sid == 0, f"{bad_sid} missing")
 chk("is_completed == (OCS session status==interview_complete) (raw)", bad_completed == 0, f"{bad_completed} bad")
+
+# C4b: a slot must not be filled from a cohort that had its OWN unfilled slot for that topic.
+# Sessions are pooled by (pid, interview_n) with no cohort term, so before 2026-09-02 the earlier
+# cohort's trigger could claim a LATER cohort's completed session: 10 of 9,721 matched rows crossed,
+# moving 5 completions off PANEL onto ABT2-A. Cross-cohort matching is still ALLOWED where the
+# session's own cohort has no slot for that topic - losing a real interview is worse than filing it
+# under a neighbouring cohort - so this asserts the specific collision, not any mismatch at all.
+_sid_coh = {s["sid"]: (s.get("cohort_id") or "") for s in cache}
+_have_coh = sum(1 for v in _sid_coh.values() if v)
+_slots = {(r["connect_id"], r["cohort_id"], r["topic_code"]) for r in R}
+_filled = {(r["connect_id"], r["cohort_id"], r["topic_code"]) for r in R if r["matched_session_id"]}
+_crossed = []
+for r in R:
+    msid = r["matched_session_id"]
+    own = _sid_coh.get(msid, "") if msid else ""
+    if not own or own == r["cohort_id"]:
+        continue
+    k = (r["connect_id"], own, r["topic_code"])
+    if k in _slots and k not in _filled:  # that cohort wanted this topic and went without
+        _crossed.append((r["connect_id"], r["topic_code"], own, r["cohort_id"], r["is_completed"]))
+if _have_coh == 0:
+    print(
+        "  [warn] C4b skipped - no OCS cache row carries cohort_id (cache predates 2026-09-02; "
+        "pull_ocs_state.py force-reseeds to backfill it)"
+    )
+else:
+    chk(
+        "no slot stolen from a cohort that had its own unfilled slot for that topic",
+        not _crossed,
+        f"{len(_crossed)} crossed" + (f" e.g. {_crossed[:3]}" if _crossed else ""),
+    )
 
 # C5: connect funnel grounded to raw snapshot
 raw_fun = defaultdict(lambda: {k: set() for k in ["invited", "accepted", "learn_completed", "claimed"]})

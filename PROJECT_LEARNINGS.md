@@ -911,8 +911,119 @@ query surfaces Mellon.
 
 ⚠️ **Live counts moved again during this check: completed 9,464 (19:18 UTC 25 Aug) -> 9,382.**
 
+## 5v. SETTLED 2026-09-02: OCS 3,504 vs dashboard 3,464 panel interviews. All 40 explained.
+
+Asked "where is the difference coming from" after the dashboard showed PANEL completed 3,464 and a
+live, no-cache OCS pull showed 3,504. Both numbers are right. They count different populations.
+
+- **OCS 3,504** = chat sessions whose own `state.cohort_id` is `1PC1`/`1PE1` and which reached
+  `interview_complete`.
+- **Dashboard 3,464** = panel _schedule slots_ marked complete. Thirteen slots per worker, one slot
+  per (worker, cohort, topic).
+
+Reconciled worker by worker against `flwMatrixV2` in the live payload. Exact ledger:
+
+| Cause                                                                                         | Interviews |
+| --------------------------------------------------------------------------------------------- | ---------- |
+| 2 workers on the deliberate `EXCLUDE_FLWS` list (`build_master_4src.py`)                      | 23         |
+| Repeat completions of a topic the same worker had already completed (3 workers)               | 11         |
+| Completions of `Community & FLW Profile` (topic code `E`), which has no slot in the panel 13  | 2          |
+| Cross-cohort topic collisions where the dashboard kept the earlier FAILED attempt (4 workers) | 5          |
+| Reverse case: a panel slot the dashboard credits from an EXT-tagged session (see below)       | -1         |
+| **Total**                                                                                     | **40**     |
+
+**The 23 are deliberate, not a bug.** `m6svr4qy3gemxuj2inoe` and `sqaktdfxupepdvt90t3f` are 2 of the
+14 accounts the 2026-06-25 cleanup dropped for having interview activity but zero Connect enrollment
+in any snapshot. Worth a second look though: both are still active into late August, ran near-complete
+13-topic panel sequences (12 and 13 completions), every session tagged `acceptable`. The comment in
+the code calls them "test/manual accounts", which is not obviously what this behaviour looks like.
+
+**Do not read the ID format as the exclusion rule.** 6 of the 366 panel participants have non-hex
+`participant.identifier` values and 4 of the 6 ARE in the dashboard. The exclusion is the explicit
+list, nothing else. This is the second time an ID-shape inference was wrong (see 5p).
+
+**Why max-per-worker differs.** OCS tops out at 18 completions for one panel worker; the dashboard
+caps at 13, because there are 13 slots. A repeat cannot add, it overwrites.
+
+**The two FLW counts of 364 are a coincidence of definitions.** Dashboard PANEL `flws` = 364 is the
+_started_ column. Workers with at least one _completed_ panel interview, off the same matrix, is
+**361**. OCS reports 364 completed-at-least-one. It reconciles as 361 + 2 excluded + 1 collision = 364.
+So "364 FLWs completed at least one panel interview" is true of the OCS count but is NOT what the
+dashboard's 364 means. Say _started_ if quoting the dashboard.
+
+**Cohort filters and schedule slots are not the same lens.** 77 completions by panel participants on
+panel topics carry a non-panel `cohort_id` (`1ECE1` 32, `2ABT2EA3` 27, `2ABT2EA2` 12, `2ABT2EA1` 4,
+`1ECC1` 2). `0a7b5ff63dab029058c2` did Water & Diarrhea 2 on 23 Jul tagged `1ECC1`; the dashboard
+credits it to panel slot 11 and leaves the EXT slot as not-started, so it is counted once, correctly.
+Filtering OCS on `cohort_id` alone will always disagree with the dashboard for these workers.
+
+## 5w. THE VACUOUS A/B, 5th sighting: swapping master_4src.csv changes NOTHING
+
+To measure a `build_master_4src` change I built the master twice, copied each `master_4src.csv` into
+place, rebuilt the payload from each, and diffed. `impact_diff` reported "nothing fell. No waiver
+needed." It was comparing the fixed build to itself.
+
+`build_payload_agg.py` line 10 is `import build_master_4src as bm`, and lines 72 and 305 iterate
+`bm.rows`. **Importing the module RE-RUNS the master build in memory.** The payload never reads
+`master_4src.csv` from disk. That file is an artefact for humans and for `brutal_verify`, not an
+input to the payload.
+
+So an A/B of a builder change must swap the **CODE** and rebuild, never the CSV:
+
+```bash
+# neuter the behaviour in build_master_4src.py, then
+python build_payload_agg.py && python build_dashboard_data.py
+python impact_diff.py --snapshot off_code
+# restore the code, rebuild both, then
+python impact_diff.py --before off_code
+```
+
+Two further traps this run:
+
+- **Compare like with like or the waiver is garbage.** The first diff flagged 39 metrics. 36 were
+  `connectFunnel.*` reading zero because a local build uses the 63 `*_audit` folders, none of which
+  cover PANEL/2WT/ABT3/EXT, while the baseline had been built with live Connect. `connectFunnel`
+  cannot be touched by `pick_best`. Pasting that waiver string would have waived real regressions.
+  Only 3 metrics were genuinely mine, all the same -4: `table1.ABT2.icmp`, `table3pair.ABT2.icmp`,
+  `table3.Overall.icmp`.
+- **Row counts and interview counts are different units.** 3,490 PANEL completed master rows collapse
+  to 3,479 interviews, because `cells` dedupes to unique (flw, cohort, interview_n). A re-trigger
+  makes two rows and one interview. Quote the cell figure; that is what the dashboard shows.
+
+## 5x. The incremental OCS cache DRIFTS LOW on long cohorts, and only PANEL is exposed
+
+Reseeding `_ocs_state_cache.json` with no code change recovered **+5 PANEL completions**. Every other
+subgroup came out identical.
+
+`pull_ocs_state.py` re-scans a window keyed on **`created_at`** (default 30 days), because the OCS API
+has no `updated_at` filter. A session created in July whose status flips to complete in late August is
+outside that window forever, so the change is never collected. Four confirmed: created 14 Jul to
+27 Aug, updated 29 Aug to 1 Sep, complete in OCS, not complete in the cache.
+
+Only PANEL is bitten, because it runs 13 interviews over fourteen weeks. TRS/TRE/ABT1/ABT2/ABT3/2WT/EXT
+run 1 to 8 interviews and settle inside 30 days. **NOT FIXED as of 2026-09-02** - a reseed is currently
+the only thing that corrects it. Options: widen `OCS_LOOKBACK_DAYS` for long cohorts, or re-fetch any
+cached session whose `interview_status` is not terminal regardless of age.
+
 ## 6. Known defects not yet fixed
 
+- **The incremental OCS cache misses late status changes on long cohorts** (PROJECT_LEARNINGS 5x).
+  Costs PANEL about 5 completions between reseeds; no other subgroup is exposed. A reseed corrects it.
+- ~~Slot resolution keeps a failed attempt over a successful one.~~ **FIXED 2026-09-02, and the
+  first description of it was wrong.** The mechanism is not that a failed attempt is preferred.
+  `ocs_by_key` pools sessions by `(pid, interview_n)` with NO cohort term, so a worker enrolled in
+  two cohorts that both schedule the same interview number has ONE pool serving BOTH cohorts'
+  triggers. Slots fill in trigger order and `pick_best` preferred `interview_complete` with no bound
+  on how far forward it would reach, so the EARLIER cohort's trigger claimed the LATER cohort's
+  completed session and the later cohort was left with the incomplete one. Measured across the whole
+  dashboard: 10 of 9,721 matched rows crossed cohorts. 5 completions sat under ABT2-A that belonged
+  to PANEL, 4 PANEL slots held ABT2-A's incompletes, and 1 PANEL completion belonged to EXT. The
+  overall total was never wrong; only the per-subgroup split was. Fixed by making the session's own
+  `cohort_id` the first sort key in `pick_best`, guarded by check C4b in `brutal_verify`.
+  ⚠ `cohort_id` had to be ADDED to `_ocs_state_cache.json`, and the incremental window is keyed on
+  `created_at`, so old sessions would never have received it. `pull_ocs_state._needs_reseed` forces
+  one full scan when any cached row lacks the field. **A new field in an incrementally-built cache is
+  a schema change, not something that fills in over time.**
 - `TOPIC_QUESTIONS["99"] = 1` should be 9.
 - The `barrier` gem detector fires about half the time on a bare negation or a good outcome. The
   named-shortage list derived from it should not be quoted until tightened.

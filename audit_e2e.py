@@ -148,8 +148,45 @@ if os.path.exists("master_v7_2026-06-10.csv"):
     co_reg = sum(1 for k in shared if base[k]["is_completed"] == "Y" and live[k]["is_completed"] == "N")
     st_fwd = sum(1 for k in shared if base[k]["is_started"] == "N" and live[k]["is_started"] == "Y")
     co_fwd = sum(1 for k in shared if base[k]["is_completed"] == "N" and live[k]["is_completed"] == "Y")
-    chk("B", "is_started: zero regressions (Y->N)", st_reg == 0, f"regressions={st_reg}, forward N->Y={st_fwd}")
-    chk("B", "is_completed: zero regressions (Y->N)", co_reg == 0, f"regressions={co_reg}, forward N->Y={co_fwd}")
+
+    # Regressions are asserted at CELL level - unique (flw, cohort, interview_n) - because that is the
+    # reporting unit everything downstream counts (build_payload_agg `cells`). A worker can hold TWO
+    # trigger rows for one cohort+topic (a re-trigger), and then two sessions can legitimately swap
+    # which ROW they sit in with no change to any published number: the cell stays completed. Asserting
+    # row identity would fail on that swap while the dashboard does not move by a single interview.
+    # A cell that genuinely loses its completion still fails, which is the thing worth blocking.
+    def _cells(d):
+        out = {}
+        for r in d.values():
+            # str() on EVERY part: bm.rows carries interview_n as int, the baseline CSV as str, so an
+            # uncoerced key makes the two sides disjoint and the check passes vacuously. The struct
+            # comparison above already coerces for exactly this reason.
+            k = (str(r["connect_id"]), str(r["cohort_id"]), str(r["interview_n"]))
+            s, c = out.get(k, (False, False))
+            out[k] = (s or r["is_started"] == "Y", c or r["is_completed"] == "Y")
+        return out
+
+    # Baseline cells vs live cells built from EVERY live row, not just the shared ones. Live is a
+    # superset by design (the coverage check above asserts it), and a re-trigger adds a SECOND row to
+    # an existing cell. Restricting the live side to `shared` drops those newer rows, so a cell whose
+    # completion now sits on the re-triggered row reads as a regression when nothing was lost:
+    # e8b28973/09TRE/1 holds an incomplete 4 Jul session on the baseline's form id and the original
+    # complete 8 Apr session on a form id created after 10 Jun. The cell is completed either way.
+    bc, lc = _cells({k: base[k] for k in shared}), _cells(live)
+    st_creg = sum(1 for k in bc if k in lc and bc[k][0] and not lc[k][0])
+    co_creg = sum(1 for k in bc if k in lc and bc[k][1] and not lc[k][1])
+    chk(
+        "B",
+        "is_started: zero regressions (Y->N)",
+        st_creg == 0,
+        f"cell regressions={st_creg} (row-level Y->N={st_reg}, forward N->Y={st_fwd})",
+    )
+    chk(
+        "B",
+        "is_completed: zero regressions (Y->N)",
+        co_creg == 0,
+        f"cell regressions={co_creg} (row-level Y->N={co_reg}, forward N->Y={co_fwd})",
+    )
 else:
     print("  [SKIP] master_v7_2026-06-10 baseline not present — integrity invariants below still enforced.")
 # invariants
