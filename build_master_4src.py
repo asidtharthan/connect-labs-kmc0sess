@@ -244,15 +244,23 @@ def is_test_cohort(c):
 # FLWs. Explicit list (NOT a blanket "no-Connect -> drop" rule) so a snapshot-timing gap can't silently
 # drop a real FLW. See brutal-revalidation-2026-06-25 memory.
 EXCLUDE_FLWS = {
+    # 2026-09-02: m6svr4qy3gemxuj2inoe and sqaktdfxupepdvt90t3f WERE on this list and have been
+    # REMOVED. The rationale above ("active since early April", riding 1ABT1C*/2WTC1) fits the other
+    # 12; it never fit those two. Both first appear 19/21 June, four days before the snapshots they
+    # were checked against, in 1PC1 ONLY, then 1NPS1. Between them they completed 23 panel interviews
+    # plus 2 NPS on the correct 4-day cadence over two months: 21 of 23 tagged `acceptable`, zero
+    # unacceptable, zero suspected-AI, 666 answers averaging 24.0 and 6.3 words. The transcripts carry
+    # MUAC screening, OTP referral, ORS and zinc, NAFDAC registration and named catchment detail.
+    # They are genuinely absent from the Connect roster (492 panel usernames, matching the live
+    # funnel's invited=492), so "never invited" is real - but it is an enrollment gap, not evidence
+    # of a test account. Reinstated on that evidence 2026-09-02. See PROJECT_LEARNINGS 5v.
     "10wcuh1u3s6595okhmfd",
     "5ej4jqjha0x1f3tbc08y",
     "7xhpeda8ipsouip6ynyk",
     "b6vt2wzi8slth6mlag1g",
     "m0i5azsqk7mzixp1bzib",
     "m33dn33c5vyf8es9kagq",
-    "m6svr4qy3gemxuj2inoe",
     "rfxkcx7nbom2whml8mbb",
-    "sqaktdfxupepdvt90t3f",
     "v3urwjuzqjxp3njyb5uz",
     "va7vh76am0m83h0rzu01",
     "wwnvw4diurrzuy32vba7",
@@ -353,14 +361,41 @@ def clean_csv(path):
     return list(_csv.DictReader(StringIO(raw)))
 
 
-def pick_best(sessions, after_dt, claimed):
+def pick_best(sessions, after_dt, claimed, cohort_id=None, strict=False):
+    """Choose the OCS session that fills one trigger's slot.
+
+    Sessions are keyed by (pid, interview_n) ONLY, so a worker enrolled in two cohorts that both
+    schedule the same interview number has ONE pool serving BOTH cohorts' triggers. Slots are filled
+    in trigger order, so without a cohort tie-break the earlier cohort's trigger wins whichever
+    session is `interview_complete` - even one belonging to the later cohort. Measured 2026-09-02:
+    that crossed 10 of 9,721 matched rows, moving 5 completions off PANEL onto ABT2-A.
+
+    A session carries the cohort it actually ran under. Prefer a session whose own cohort matches
+    this trigger's cohort; only then fall back to completed-first, then earliest. `cohort_id` on the
+    session is absent in caches written before 2026-09-02, in which case `_ck` is None for every
+    candidate, the term is constant, and ordering is exactly what it was before.
+    """
     avail = [s for s in sessions if s["sid"] not in claimed]
     if not avail:
         return None
+
+    def _ck(s):
+        """0 = ran under this trigger's cohort, 1 = untagged or unknown, 2 = another cohort's."""
+        own = s.get("cohort_id")
+        if not own or not cohort_id:
+            return 1
+        return 0 if str(own) == str(cohort_id) else 2
+
+    if strict:
+        # First-refusal pass: only sessions that actually ran under THIS trigger's cohort.
+        avail = [s for s in avail if _ck(s) == 0]
+        if not avail:
+            return None
+
     after = [s for s in avail if s["first"] >= after_dt]
     if after:
-        return min(after, key=lambda s: (0 if s["status"] == "interview_complete" else 1, s["first"]))
-    return min(avail, key=lambda s: abs((s["first"] - after_dt).total_seconds()))
+        return min(after, key=lambda s: (_ck(s), 0 if s["status"] == "interview_complete" else 1, s["first"]))
+    return min(avail, key=lambda s: (_ck(s), abs((s["first"] - after_dt).total_seconds())))
 
 
 # ---------------- 1. Connect ----------------
@@ -609,7 +644,13 @@ for s in sessions:
     if not first:
         continue
     ocs_by_key[(pid, str(iv))].append(
-        {"sid": s["sid"], "first": first, "h": 1, "status": s.get("interview_status") or ""}
+        {
+            "sid": s["sid"],
+            "first": first,
+            "h": 1,
+            "status": s.get("interview_status") or "",
+            "cohort_id": s.get("cohort_id"),
+        }
     )
 for k in ocs_by_key:
     ocs_by_key[k].sort(key=lambda x: x["first"])
@@ -635,11 +676,26 @@ print(f"[4b] OCS words cache: {len(words)} sessions")
 PROVENANCE["ocs_words"] = len(words)
 
 # ---------------- match ----------------
+# Two passes, because the assignment is greedy and `_ck` alone only reorders ONE trigger's choice.
+# `ocs_by_key` is keyed on (pid, interview) where OCS's `interview` is the TOPIC CODE, not a
+# position, so every cohort that schedules a topic shares one pool for it. A trigger whose cohort
+# does not match would still take the only candidate and leave the matching cohort's slot empty -
+# that is how a 1ECC1 session ended up filling a 1PC1 panel slot. Pass 1 gives every trigger first
+# refusal on a session from its OWN cohort; pass 2 is the previous behaviour over what is left, so
+# an interview is never dropped just because its cohort tag is missing or unexpected.
 matched = {}
 for (flw, iv), trs in triggers_by_flw_iv.items():
     sess, claimed = ocs_by_key.get((flw, iv), []), set()
+    pending = []
     for tb in trs:
-        best = pick_best(sess, tb["received_on"], claimed)
+        best = pick_best(sess, tb["received_on"], claimed, tb.get("cohort_id"), strict=True)
+        if best:
+            matched[tb["form_id"]] = best
+            claimed.add(best["sid"])
+        else:
+            pending.append(tb)
+    for tb in pending:
+        best = pick_best(sess, tb["received_on"], claimed, tb.get("cohort_id"))
         matched[tb["form_id"]] = best
         if best:
             claimed.add(best["sid"])

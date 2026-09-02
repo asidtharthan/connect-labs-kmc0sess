@@ -91,6 +91,11 @@ def _row(s):
         "pid": p.get("identifier") if isinstance(p, dict) else None,
         "interview": (st or {}).get("interview"),
         "interview_status": (st or {}).get("interview_status"),
+        # The cohort the session itself ran under. Sessions are keyed by (pid, interview) only, so
+        # when one worker holds the SAME interview number in two cohorts their triggers compete for
+        # one session pool and the slot can be filled from the wrong cohort. build_master_4src's
+        # pick_best uses this to break that tie. See PROJECT_LEARNINGS 5v.
+        "cohort_id": (st or {}).get("cohort_id"),
         "created_at": s.get("created_at"),
         "updated_at": s.get("updated_at"),
     }
@@ -109,8 +114,32 @@ def _load_existing():
     return {}
 
 
+def _needs_reseed(existing):
+    """True when the cache predates a field the builder now needs.
+
+    The incremental window is keyed on created_at, so a field added to `_row` will NEVER reach
+    sessions created before the window - they are kept as-is from the cache forever. A new field is
+    therefore a schema change that requires one full scan, not a gradual fill. Without this the
+    `cohort_id` tie-break in build_master_4src's pick_best would silently do nothing for exactly the
+    old sessions it exists to fix. Declaring the reseed beats degrading quietly.
+    """
+    if not existing:
+        return False  # already a seed; nothing to compare against
+    missing = sum(1 for s in existing.values() if "cohort_id" not in s)
+    if missing:
+        print(
+            f"[ocs-state] cache schema is behind: {missing:,} of {len(existing):,} rows have no "
+            f"'cohort_id' -> forcing a FULL scan once to backfill it",
+            flush=True,
+        )
+        return True
+    return False
+
+
 def pull(full=False):
     existing = {} if full else _load_existing()
+    if not full and _needs_reseed(existing):
+        existing, full = {}, True
     seeding = full or not existing  # no prior cache -> must do a full scan to seed
     cutoff = None if seeding else datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)
     mode = "FULL scan" if seeding else f"INCREMENTAL (created within {LOOKBACK_DAYS}d)"
