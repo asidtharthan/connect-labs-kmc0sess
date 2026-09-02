@@ -386,11 +386,17 @@ for r in R:
     k = (r["connect_id"], own, r["topic_code"])
     if k in _slots and k not in _filled:  # that cohort wanted this topic and went without
         _crossed.append((r["connect_id"], r["topic_code"], own, r["cohort_id"], r["is_completed"]))
+# A missing field must not be a free pass. C4b skipping quietly is exactly how the cohort fix
+# shipped INERT on 2026-09-02: the field was added to pull_ocs_state.py, but the daily job writes
+# this cache from pull_ocs_tags.py (step 2t), so every row lacked cohort_id, the tie-break never
+# fired, and the gate said nothing. Under STRICT_FRESHNESS (CI) an absent field is a FAILURE.
+freshchk(
+    "OCS cache carries cohort_id (without it the cohort tie-break is inert)",
+    _have_coh > 0,
+    f"{_have_coh:,} of {len(_sid_coh):,} rows tagged",
+)
 if _have_coh == 0:
-    print(
-        "  [warn] C4b skipped - no OCS cache row carries cohort_id (cache predates 2026-09-02; "
-        "pull_ocs_state.py force-reseeds to backfill it)"
-    )
+    print("  [warn] C4b itself cannot run without cohort_id")
 else:
     chk(
         "no slot stolen from a cohort that had its own unfilled slot for that topic",
