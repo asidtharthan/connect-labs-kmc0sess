@@ -90,6 +90,13 @@ def _state_row(s):
         "pid": p.get("identifier") if isinstance(p, dict) else None,
         "interview": (st or {}).get("interview"),
         "interview_status": (st or {}).get("interview_status"),
+        # The cohort the session itself ran under. `interview` is the TOPIC CODE, not a position, so
+        # ocs_by_key pools sessions by (pid, topic) and every cohort scheduling that topic shares one
+        # pool. Without this, build_master_4src's pick_best cannot tell whose session is whose and the
+        # earlier cohort's trigger takes the later cohort's completion. THIS is the writer the daily
+        # job uses (step 2t); pull_ocs_state.py is manual-only and must carry the field too so a
+        # hand-run does not silently downgrade the cache. See PROJECT_LEARNINGS 5v.
+        "cohort_id": (st or {}).get("cohort_id"),
         "created_at": s.get("created_at"),
         "updated_at": s.get("updated_at"),
     }

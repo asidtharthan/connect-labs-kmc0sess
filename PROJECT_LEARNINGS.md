@@ -990,25 +990,40 @@ Two further traps this run:
   to 3,479 interviews, because `cells` dedupes to unique (flw, cohort, interview_n). A re-trigger
   makes two rows and one interview. Quote the cell figure; that is what the dashboard shows.
 
-## 5x. The incremental OCS cache DRIFTS LOW on long cohorts, and only PANEL is exposed
+## 5x. CORRECTED: the drift is in pull_ocs_state.py, which the daily job DOES NOT USE
 
-Reseeding `_ocs_state_cache.json` with no code change recovered **+5 PANEL completions**. Every other
-subgroup came out identical.
+First written as "the incremental OCS cache drifts low on long cohorts", measured as +5 PANEL
+completions recovered by a reseed. The measurement was real but the conclusion was wrong, and the
+error matters more than the finding.
 
-`pull_ocs_state.py` re-scans a window keyed on **`created_at`** (default 30 days), because the OCS API
-has no `updated_at` filter. A session created in July whose status flips to complete in late August is
-outside that window forever, so the change is never collected. Four confirmed: created 14 Jul to
-27 Aug, updated 29 Aug to 1 Sep, complete in OCS, not complete in the cache.
+`_ocs_state_cache.json` is written by **`pull_ocs_tags.py`** (step 2t of
+`refresh_interviews_dashboard.py`), NOT by `pull_ocs_state.py`. Step 2t does a **full scan every
+day**, deliberately, and the comment at `refresh_interviews_dashboard.py:384` says why: reviewing
+happens long after a session is created, so a created_at window "would freeze an April session's
+verdict forever". That window is already closed in CI.
 
-Only PANEL is bitten, because it runs 13 interviews over fourteen weeks. TRS/TRE/ABT1/ABT2/ABT3/2WT/EXT
-run 1 to 8 interviews and settle inside 30 days. **NOT FIXED as of 2026-09-02** - a reseed is currently
-the only thing that corrects it. Options: widen `OCS_LOOKBACK_DAYS` for long cohorts, or re-fetch any
-cached session whose `interview_status` is not terminal regardless of age.
+`pull_ocs_state.py` is kept for manual use only. Its 30-day `created_at` window is where the drift
+lives, and my +5 was measured against a local cache that script had written. **The live dashboard
+does not have this problem.**
+
+⚠ **This is how the cohort fix shipped INERT.** I added `cohort_id` to `pull_ocs_state.py` and built
+`_needs_reseed` to force a backfill, ran preflight green, merged, published as v205 - and ABT2-A was
+still 228 at 93.8%. The tie-break never fired, because the cache CI actually uses had no `cohort_id`
+in a single row. Both writers must carry the field.
+
+**Before patching a pipeline script, confirm the pipeline calls it.** Grep the orchestrator for the
+filename. Two scripts reading the same endpoint and writing the same cache is a trap, and a
+docstring saying a script "still works" can mean "and is no longer used".
+
+**And a gate that SKIPS on missing input is not a gate.** C4b printed `[warn] skipped - no OCS cache
+row carries cohort_id` and passed. That warning was the whole failure, stated plainly, and it did not
+block anything. It is now a `freshchk`, so it is a hard failure in CI.
 
 ## 6. Known defects not yet fixed
 
-- **The incremental OCS cache misses late status changes on long cohorts** (PROJECT_LEARNINGS 5x).
-  Costs PANEL about 5 completions between reseeds; no other subgroup is exposed. A reseed corrects it.
+- `pull_ocs_state.py` (manual use only) misses late status changes on long cohorts: its window is
+  keyed on created_at. The daily job is unaffected - it writes the cache from `pull_ocs_tags.py`,
+  which full-scans. Worth aligning the two so a hand-run cannot downgrade the cache. See 5x.
 - ~~Slot resolution keeps a failed attempt over a successful one.~~ **FIXED 2026-09-02, and the
   first description of it was wrong.** The mechanism is not that a failed attempt is preferred.
   `ocs_by_key` pools sessions by `(pid, interview_n)` with NO cohort term, so a worker enrolled in
