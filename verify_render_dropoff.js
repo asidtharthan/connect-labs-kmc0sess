@@ -1503,6 +1503,44 @@ check(
   );
 })();
 
+// --------------------------------- the completed-interview view agrees with the session census
+// Both blocks must apply the SAME rule: unacceptable is the verdict, suspected AI is a reason inside
+// it. The interview block used to check suspected_ai FIRST, which removed 169 flagged sessions from
+// the unacceptable total and is what produced 132 against the OCS screen's 145.
+(function () {
+  const rs = payload.reviewStatus;
+  if (!rs || !rs.overall) {
+    check('review status present', false);
+    return;
+  }
+  check(
+    'suspected_ai is NOT a verdict key any more',
+    !('suspected_ai' in rs.overall),
+    Object.keys(rs.overall).join(', '),
+  );
+  check(
+    'the AI count is reported as a subset instead',
+    typeof rs.ai_in_unacceptable === 'number' &&
+      typeof rs.ai_in_acceptable === 'number',
+    `${rs.ai_in_unacceptable} in unacceptable, ${rs.ai_in_acceptable} in acceptable`,
+  );
+  check(
+    'AI-flagged never exceeds the bucket it sits in',
+    rs.ai_in_unacceptable <= rs.overall.unacceptable &&
+      rs.ai_in_acceptable <= rs.overall.acceptable,
+  );
+  // the two blocks disagreed for months; they must now move together
+  const SR = payload.sessionReview;
+  if (SR) {
+    check(
+      'both blocks put the same AI count inside acceptable',
+      rs.ai_in_acceptable === SR.ai_in_acceptable,
+      `interviews ${rs.ai_in_acceptable} vs sessions ${SR.ai_in_acceptable}`,
+    );
+  }
+  if (dropHtml) return;
+})();
+
 // ---------------------------------------------------------------- no em/en dashes (house style)
 // Checked on the SOURCE: that is the file people edit and the one the rule is about.
 const dashes = (injected.match(/[–—]/g) || []).length;

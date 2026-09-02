@@ -1316,13 +1316,13 @@ print(
 #
 # Counted over COMPLETED interviews only. A review verdict on an interview nobody finished would not
 # mean anything, and mixing the two bases is how the two systems stopped agreeing in the first place.
-_REVIEW_KEYS = ("acceptable", "unacceptable", "suspected_ai", "not-reviewed")
+_REVIEW_KEYS = ("acceptable", "unacceptable", "not-reviewed")
 # Verdict priority when ONE interview has more than one session. A duplicate bot trigger produces two
 # master rows for the same (FLW, cohort, interview), each with its own OCS session and therefore
 # possibly its own verdict - live examples include one row not-reviewed beside its twin acceptable, and
 # one acceptable beside its twin suspected_ai. Strongest signal wins, and anything a person actually
 # looked at outranks something nobody has. Same order _review_status uses inside a single session.
-_REVIEW_RANK = {"suspected_ai": 0, "unacceptable": 1, "acceptable": 2, "not-reviewed": 3}
+_REVIEW_RANK = {"unacceptable": 0, "acceptable": 1, "not-reviewed": 2}
 _rev_cell = {}
 for _r in bm.rows:
     if _r.get("is_completed") != "Y":
@@ -1332,28 +1332,43 @@ for _r in bm.rows:
         _st = "not-reviewed"
     # Keyed on the INTERVIEW, not the row, so this ties to the Overview's completed count exactly.
     _key = (_r["connect_id"], _r["cohort_id"], _r["interview_n"])
+    _ai = _r.get("review_ai") == "Y"
     _prev = _rev_cell.get(_key)
     if _prev is None or _REVIEW_RANK[_st] < _REVIEW_RANK[_prev[0]]:
-        _rev_cell[_key] = (_st, _r["subgroup"], _r["topic_code"])
+        # the AI flag is OR-ed across the duplicate rows: if either session was flagged, the interview was
+        _rev_cell[_key] = (_st, _r["subgroup"], _r["topic_code"], _ai or (_prev[3] if _prev else False))
+    elif _ai and _prev:
+        _rev_cell[_key] = (_prev[0], _prev[1], _prev[2], True)
 
 _rev_overall = defaultdict(int)
 _rev_sg = defaultdict(lambda: defaultdict(int))
 _rev_topic = defaultdict(lambda: defaultdict(int))
-for _st, _sg, _tc in _rev_cell.values():
+_rev_ai_in_unacc = _rev_ai_in_acc = 0
+for _st, _sg, _tc, _ai in _rev_cell.values():
     _rev_overall[_st] += 1
     _rev_sg[_sg][_st] += 1
     _rev_topic[_tc][_st] += 1
+    if _ai:
+        if _st == "unacceptable":
+            _rev_ai_in_unacc += 1
+        elif _st == "acceptable":
+            _rev_ai_in_acc += 1
 review_status = {
     "keys": list(_REVIEW_KEYS),
     "overall": {k: _rev_overall[k] for k in _REVIEW_KEYS},
     "by_sg": {sg: {k: v[k] for k in _REVIEW_KEYS} for sg, v in sorted(_rev_sg.items())},
     "by_topic": {tc: {k: v[k] for k in _REVIEW_KEYS} for tc, v in sorted(_rev_topic.items())},
+    # Suspected AI is a REASON inside unacceptable, not a fourth verdict. Reported as a subset so the
+    # three keys above still cover every completed interview exactly once.
+    "ai_in_unacceptable": _rev_ai_in_unacc,
+    "ai_in_acceptable": _rev_ai_in_acc,
 }
 _rev_tot = sum(_rev_overall[k] for k in _REVIEW_KEYS)
 print(
     f"[rev] OCS review status over {_rev_tot} completed interviews "
     f"(unique FLW x cohort x interview, deduped from {sum(1 for r in bm.rows if r.get('is_completed') == 'Y')} rows): "
     + "  ".join(f"{k}={_rev_overall[k]}" for k in _REVIEW_KEYS)
+    + f"  | AI-flagged {_rev_ai_in_unacc} inside unacceptable, {_rev_ai_in_acc} inside acceptable"
 )
 
 # ---------------------------------------------------------------- OCS session census (Leah, 25 Aug)
