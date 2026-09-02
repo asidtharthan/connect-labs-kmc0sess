@@ -57,9 +57,11 @@ function WorkflowUI(props) {
   var lineRef = React.useRef(null), lineInst = React.useRef(null);
   var barRef = React.useRef(null), barInst = React.useRef(null);
   // Data review: which OCS verdicts are included, and whether the split is by design or by topic.
-  // All four start ON, including not-yet-reviewed - the whole reason this view exists is that the OCS
+  // All three start ON, including not-yet-reviewed - the whole reason this view exists is that the OCS
   // screen filters that bucket away silently, which made 8,6xx look like it disagreed with 9,4xx.
-  var rvi = React.useState({ acceptable: true, unacceptable: true, suspected_ai: true, "not-reviewed": true });
+  // Suspected AI is NOT a fourth checkbox: it is a reason a session is unacceptable, reported as a
+  // subset underneath. As its own filter it removed those sessions from the unacceptable count.
+  var rvi = React.useState({ acceptable: true, unacceptable: true, "not-reviewed": true });
   var revInc = rvi[0], setRevInc = rvi[1];
   var rvb = React.useState("sg"); var revBy = rvb[0], setRevBy = rvb[1];
   var rvai = React.useState(false); var revAi = rvai[0], setRevAi = rvai[1];   // Suspected AI opens inside Unacceptable
@@ -1843,8 +1845,7 @@ function WorkflowUI(props) {
   // anything, and mixing bases is how Labs and OCS stopped agreeing in the first place.
   var REV_META = [
     ["acceptable", "Acceptable", "#2E7D32", "A reviewer marked the session acceptable."],
-    ["unacceptable", "Unacceptable", "#C62828", "A reviewer marked the session unacceptable."],
-    ["suspected_ai", "Suspected AI", "#F9A825", "Flagged as the FLW pasting an AI-generated answer rather than the bot failing. Checked first, so a session tagged both ways counts here."],
+    ["unacceptable", "Unacceptable", "#C62828", "Failed the evaluator on one or more of the five dimensions, or carried four or more AI-generated answers. Suspected AI is a reason inside this bucket, not a separate verdict."],
     ["not-reviewed", "Not yet reviewed", "#78909C", "Completed, but nobody has given it a verdict yet. Shown by default on purpose: filtering it away silently is what made the OCS session count look smaller than the dashboard's."]
   ];
 
@@ -1985,6 +1986,18 @@ function WorkflowUI(props) {
           {subBtn(revBy, "sg", setRevBy, "Design")}
           {subBtn(revBy, "topic", setRevBy, "Topic")}
         </div>
+
+        {(RS.ai_in_unacceptable || RS.ai_in_acceptable) ? (
+          <div className="mx-1 mt-1 text-xs text-gray-600">
+            <b>{(RS.ai_in_unacceptable || 0).toLocaleString()}</b> of the{" "}
+            {(RS.overall.unacceptable || 0).toLocaleString()} unacceptable were flagged for{" "}
+            <b>suspected AI use</b>; the other{" "}
+            {((RS.overall.unacceptable || 0) - (RS.ai_in_unacceptable || 0)).toLocaleString()} failed on
+            quality. A further <b>{(RS.ai_in_acceptable || 0).toLocaleString()}</b> flagged sessions remain
+            acceptable, because one to three flagged answers is not penalised - only four or more fails a
+            session.
+          </div>
+        ) : null}
 
         <div className="text-xs bg-indigo-50 border border-indigo-100 rounded px-3 py-2 text-gray-700 mt-2">
           <b>{grand.toLocaleString()}</b> of <b>{all.toLocaleString()}</b> completed interviews match the

@@ -32,11 +32,22 @@ TAGS_CACHE = ROOT / "_ocs_tags_cache.json"  # {sid: [tags]} from pull_ocs_tags.p
 # because a session can carry both, and "we think the FLW pasted an AI answer" is the more important
 # fact about it. Everything else OCS puts in `tags` (Run-on Session, n/a, Test) is bookkeeping, not a
 # verdict, and must never be mixed in - that is what makes "how many were acceptable" unanswerable.
-_REVIEW_ORDER = ("suspected_ai", "unacceptable", "acceptable")
+# UNACCEPTABLE outranks the AI flag, not the other way round. Leah (25 Aug): suspected AI is a REASON a
+# session is unacceptable, not a verdict of its own, and 1-3 AI-looking answers are flagged WITHOUT
+# penalty - only 4+ fail the session. With suspected_ai first, 169 of the 182 flagged sessions were
+# returned as "suspected_ai" and vanished from the unacceptable count, which is what made this page
+# read 132 against the OCS screen's 145. The flag now rides alongside the verdict instead of replacing
+# it, so a session can be acceptable AND carry it - 11 live examples do.
+_REVIEW_ORDER = ("unacceptable", "acceptable")
+
+
+def _review_ai(sid, tags_by_sid):
+    """Did the evaluator flag suspected AI use on this session? Independent of the verdict."""
+    return bool(sid) and "suspected_ai" in set(tags_by_sid.get(sid) or ())
 
 
 def _review_status(sid, tags_by_sid):
-    """One of suspected_ai / unacceptable / acceptable / not-reviewed, for a matched session.
+    """One of unacceptable / acceptable / not-reviewed, for a matched session.
 
     ABSENCE of a verdict is itself the answer, and a meaningful one: on 2026-08-25, 931 of the 9,624
     sessions OCS marks interview_complete (10%) carried no verdict at all. Filtering those away
@@ -680,6 +691,7 @@ for (flw, iv), trs in triggers_by_flw_iv.items():
                 "trigger_received_on": tb["received_on"].isoformat(),
                 "matched_session_id": m["sid"] if m else "",
                 "review_status": _review_status(m["sid"] if m else "", _ocs_tags),
+                "review_ai": "Y" if _review_ai(m["sid"] if m else "", _ocs_tags) else "",
                 "session_status": m["status"] if m else "",
                 "session_human_words": sw.get("human_words", 0) if m else 0,
                 "session_human_msgs": sw.get("human_msgs", 0) if m else 0,
