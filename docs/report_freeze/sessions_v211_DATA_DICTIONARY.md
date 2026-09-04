@@ -7,7 +7,12 @@ The base table every dashboard number is aggregated from. Pinned at **v211**.
 **One row per (FLW, cohort, interview slot)** from the CommCare interview schedule.
 
 A slot that was offered but never opened is still a row, with `is_started = N`. Those rows are
-what make drop-off computable, so they are kept rather than filtered out. Filter on
+what make drop-off computable, so they are kept rather than filtered out. **(connect_id, cohort_id, interview_n) is NOT a unique key.** 32 slots were re-triggered, so 64
+rows share a key. Counting rows rather than distinct slots runs about 0.2% high: completed ROWS
+number 9,452, deduped it is 9,431, and 9,431 is the published figure. The 21-row difference is
+exactly the 21 re-triggered pairs where both rows completed.
+
+Filter on
 `matched_session_id != ""` if you want only real sessions.
 
 | | |

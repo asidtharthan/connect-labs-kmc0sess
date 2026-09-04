@@ -2,49 +2,62 @@ FROZEN DATA SET FOR THE GIVEWELL REPORT
 ==============================================================================
 
 payload version     v207   (built 2026-09-03 09:15 UTC)
-session base        v211   (cut the same day; ties out to the payload, see the dictionary)
+session base        v211   (cut the same day; ties out to the payload)
 render template     644b38920ed1c0565165ae6d7b5ee53edade7c0b
+repo commit         d9e3fb5230be23cac6f286409671909b89781890
 
-Two labels on purpose. v207 is the report's citation basis and nothing in it has moved. The
-session base was cut later the same day when we added row-level detail. Every completed count
-is identical between them; started differs by 2 from build timing.
+Two version labels on purpose. v207 is the report's citation basis and nothing in it has moved.
+The session base was cut later the same day when we added row-level detail. Every completed
+count is identical between them; started differs by 2 from build timing.
 
 WHERE TO START
 ------------------------------------------------------------------------------
-sessions_v211_DATA_DICTIONARY.md   read first: columns, grain, tie-out, and exactly what can
-                                   and cannot be reproduced from this folder.
-sessions_v211.xlsx / .csv          the base table, one row per interview slot.
+RESTORE.md                         disaster recovery: what is recoverable, what is not, and
+                                   the restore order. Read this before you need it.
+sessions_v211_DATA_DICTIONARY.md   columns, grain, tie-out, reproducibility limits.
+sessions_v211.xlsx / .csv          the base table, one row per interview SLOT.
 Report_Figures_v207.xlsx           the 31 report figures with definitions and sources.
+
+⚠ A row in the session base is one interview SLOT, not one session, and
+(connect_id, cohort_id, interview_n) is NOT a unique key: 32 slots were re-triggered, so 64
+rows share a key. Counting rows rather than distinct slots runs ~0.2% high. Completed rows
+number 9,452; deduped it is 9,431, which is the published figure.
 
 REGENERATE
 ------------------------------------------------------------------------------
 python build_report_freeze.py docs/report_freeze/payload_<new>.json <new>
-python build_session_base.py <new>          (also writes the roster and the schedule)
-python tools_freeze_rekey_ids.py            (only for the v207-era files)
+python build_session_base.py <new>          also writes the roster and the schedule
+python build_freeze_manifest.py            ALWAYS run this last
+python verify_freeze.py                    18 checks; exit 0 means usable
+python build_dr_bundle.py                  the irreplaceable sources, for off-machine backup
 
 FILES, WITH CHECKSUMS
 ------------------------------------------------------------------------------
 2wt_lags_v207.csv                          32288 bytes  306a6cff6e166fec79346d8e1ec234905bc3f22c84a24ad6e4b98da2d9ad5a63
-connect_roster_v211.csv                   461396 bytes  3eba912fde660a3c0e8d6eb138ff90a456feaf0ddd46679bb69ccdb3a20a3397
+connect_roster_v211.csv                   457432 bytes  287c5f0f2cd783a0ca27789f0388fbcaddb409734dcfe5ae9c93d08180ffcae3
 panel_gaps_v207.csv                        14972 bytes  38249c0f6d1e50ae00d74d175131b790e2c3ecd764963a2a365ffdc66ceb5491
 payload_v207.json                         239670 bytes  70801f9abeb0645d2eb1ad3de840ea6f78e870e9cfe376f5941564559de0a068
 Report_Figures_v207.xlsx                   11761 bytes  86bfd80f7842fdec2ae456e10fc8194673b14e253d53e896eeba5c091ae42664
-schedule_v211.csv                           3369 bytes  e5611d8d3490c095e5045a7765ae4e06bd2ec747b49dd3e5b9c7ef98c7273700
-sessions_v211.csv                        2757042 bytes  23aa61fce766a23157813cc77b468dcab09fab844383025c79a3a728500aa36b
+RESTORE.md                                  5089 bytes  2354ea4ab18d2c4491aed13fbaaf5ce17a7d714bb6c7860e49978a7e7265a4db
+schedule_v211.csv                           3146 bytes  f5b40fa866c9ea2e18a732a53f5208dbc4bac75c56aadcac555d02c47130ec0a
+sessions_v211.csv                        2746506 bytes  037f4b5d525763a6b16d1b6e46842ec616d47f24d2b51123188fdf039cb2b264
 sessions_v211.xlsx                       1650288 bytes  5bf0aeba2e429f365d066e736f2b71415dade4d114544f595bbd291e59cb8f08
-sessions_v211_DATA_DICTIONARY.md            6275 bytes  0a180d88e8a11dcea90f2da5581e81de928facfbabde313a1358e3bf1bee6539
+sessions_v211_DATA_DICTIONARY.md            6629 bytes  263dfc719fb1e365c7af10ce388d428d9849dbbfb961c970766d4662247b79df
 
 IDENTIFIERS
 ------------------------------------------------------------------------------
 Every file above is re-keyed: FLW_xxxxxxxx, SESS_xxxxxxxx, TRIG_xxxxxxxx. Verified across all
-9 files: zero Connect ids, zero session or form UUIDs, no names, phones, LGAs, settlements.
+10 files: zero Connect ids, zero session or form UUIDs, no names, phones, LGAs, settlements.
 Codes are stable across files, so they join to each other.
 
-Reversing it needs the salt AND the code map. Neither is in this folder or in git, and they
-are the only things that undo it. Round-trip verified on all 10,535 session rows.
+Reversing it needs BOTH .report_freeze_salt and .id_map_*.csv. Neither is in this folder as
+shared, neither is in git, and together they are the only thing that undoes the re-keying.
+Round-trip verified on all 10,535 session rows. See RESTORE.md - losing them is the one
+genuinely unrecoverable failure here.
 
 NOT INCLUDED, DELIBERATELY
 ------------------------------------------------------------------------------
-the chat transcripts    ~180 MB and they hold FLW answers. Only message TIMESTAMPS were used,
+the chat transcripts    ~186 MB and they hold FLW answers. Only message TIMESTAMPS were used,
                         and those are already here as session_ended_at.
-the render template     in the repo, not here. Needed only to reproduce the interface.
+the HQ form dumps       ~105 MB, append-only, and the pull script is resumable.
+the render template     in git at the commit above. Needed only to reproduce the interface.
