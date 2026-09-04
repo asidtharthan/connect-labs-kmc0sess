@@ -1864,105 +1864,30 @@ function WorkflowUI(props) {
       return { k: k, o: o, inc: inc, tot: tot, pct: tot ? Math.round((1000 * inc) / tot) / 10 : null };
     }).sort(function (a, b) { return b.inc - a.inc; });
 
-    // ---- OCS session census. The block below this one counts COMPLETED INTERVIEWS, which cannot
-    // show incomplete work at all - that is why this page read 918 against ~12,000 on OCS. This counts
-    // SESSIONS, the way OCS's own screen does, so incomplete sessions are visible and the figures can
-    // be checked against OCS directly.
+    // Two acceptable counts on one screen could not be reconciled by eye, so the session table is
+    // gone (Mansi, 4 Sep - one number and one explanation). What survives is the single figure that
+    // CANNOT exist in an interview count: sessions that never became an interview at all. Leah asked
+    // for that on 25 Aug so leadership can see the volume of unfinished work, and an interview that
+    // never happened has no interview row to sit in.
     var SR = DATA.sessionReview || null;
-    var SR_META = {
-      "acceptable": ["Acceptable", "#15803d",
-        "Passed the evaluator on all five dimensions: clarity, completeness, relevance, depth and authenticity."],
-      "unacceptable": ["Unacceptable", "#b45309",
-        "Failed on one or more of the five dimensions, or carried four or more AI-generated answers."],
-      "no-verdict": ["No verdict yet", "#6b7280",
-        "The evaluator has not tagged these. Only sessions at Waiting Final Review or Complete are evaluated, so anything still in progress is skipped."],
-      "not-applicable": ["Not applicable", "#7c3aed",
-        "The session never became an interview - opened, a message or two, then nothing. Includes what the bot side tags as run-on sessions."],
-    };
-    function srRow(k) {
-      var m = SR_META[k], n = SR.counts[k] || 0;
-      var pct = SR.sessions ? Math.round((1000 * n) / SR.sessions) / 10 : 0;
-      var isUn = k === "unacceptable";
-      return (
-        <React.Fragment key={k}>
-          <tr className={isUn ? "cursor-pointer hover:bg-gray-50" : ""}
-              onClick={isUn ? function () { setRevAi(!revAi); } : null}>
-            <td className="px-2 py-2 align-top" style={{ width: "20%" }}>
-              <span className="font-semibold" style={{ color: m[1] }}>{m[0]}</span>
-              {isUn ? <span className="ml-1.5 text-gray-400" style={{ fontSize: "10px" }}>{revAi ? "▾ hide" : "▸ AI"}</span> : null}
-            </td>
-            <td className="px-2 py-2 text-right font-semibold align-top" style={{ width: "10%" }}>{n.toLocaleString()}</td>
-            <td className="px-2 py-2 text-right text-gray-600 align-top" style={{ width: "8%" }}>{pct}%</td>
-            <td className="px-2 py-2 text-gray-600 align-top">{m[2]}</td>
-          </tr>
-          {isUn && revAi ? (
-            <tr className="bg-amber-50">
-              <td className="px-2 py-2 pl-6 align-top text-gray-700">&#8627; of which Suspected AI</td>
-              <td className="px-2 py-2 text-right font-semibold align-top" style={{ color: "#b45309" }}>
-                {(SR.ai_in_unacceptable || 0).toLocaleString()}
-              </td>
-              <td className="px-2 py-2"></td>
-              <td className="px-2 py-2 text-gray-600 align-top">
-                Failed <b>because of</b> AI use: four or more answers judged AI-generated fails the whole
-                session. The other {((SR.counts.unacceptable || 0) - (SR.ai_in_unacceptable || 0)).toLocaleString()}{" "}
-                failed on quality instead. One to three flagged answers is <b>not</b> penalised, which is why
-                a further {(SR.ai_in_acceptable || 0).toLocaleString()} sessions carry the AI flag and still
-                count as Acceptable.
-              </td>
-            </tr>
-          ) : null}
-        </React.Fragment>
-      );
-    }
 
     return (
       <React.Fragment>
-        {SR ? (
-          <div className="rounded border border-gray-200 bg-white px-1 py-1">
-            <div className="px-2 pt-2 pb-1">
-              <div className="text-sm font-semibold text-gray-800">Every session, as OCS counts them</div>
-              <div className="text-xs text-gray-600 mt-0.5">
-                All {SR.sessions.toLocaleString()} sessions that enrolled FLWs had with the bot, sorted by the
-                evaluator&apos;s own tag. Not interviews - sessions, so unfinished ones appear too.
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-xs">
-                <thead>
-                  <tr className="text-gray-500 border-b border-gray-200">
-                    <th className="px-2 py-1 text-left font-semibold">Category</th>
-                    <th className="px-2 py-1 text-right font-semibold">Sessions</th>
-                    <th className="px-2 py-1 text-right font-semibold">Share</th>
-                    <th className="px-2 py-1 text-left font-semibold">What it means</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {SR.order.map(srRow)}
-                  <tr className="bg-gray-50">
-                    <td className="px-2 py-2 font-semibold text-gray-800">Total</td>
-                    <td className="px-2 py-2 text-right font-semibold text-gray-800">{SR.sessions.toLocaleString()}</td>
-                    <td className="px-2 py-2"></td>
-                    <td className="px-2 py-2 text-gray-500">The four are mutually exclusive and cover every session.</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div className="px-2 pb-2 pt-1 text-xs text-gray-500">
-              <b>Checking this against OCS:</b> filter Sessions by tag there and you will see{" "}
-              {(SR.ocs_counts.acceptable || 0).toLocaleString()} acceptable,{" "}
-              {(SR.ocs_counts.unacceptable || 0).toLocaleString()} unacceptable and{" "}
-              {(SR.ocs_counts["not-applicable"] || 0).toLocaleString()} not-applicable across{" "}
-              {SR.ocs_sessions.toLocaleString()} sessions. The difference is{" "}
-              {(SR.ocs_sessions - SR.sessions).toLocaleString()} sessions from Dimagi staff accounts and
-              test participants who are not enrolled in any cohort, which this page leaves out.
-            </div>
+        {SR && SR.counts && SR.counts["not-applicable"] ? (
+          <div className="rounded border border-purple-200 bg-purple-50 px-3 py-2 text-xs text-gray-700">
+            <b>{SR.counts["not-applicable"].toLocaleString()} sessions never became an interview.</b>{" "}
+            Someone opened the chat, sent a message or two, and stopped - what the bot side tags as a
+            run-on session. They are counted here because they are more than half of all sessions
+            ({Math.round((100 * SR.counts["not-applicable"]) / SR.sessions)}% of {SR.sessions.toLocaleString()}),
+            and they cannot appear in the table below, which counts interviews that were completed.
           </div>
         ) : null}
 
-        <div className="text-sm font-semibold text-gray-800 px-1 pt-3">Completed interviews only</div>
+        <div className="text-sm font-semibold text-gray-800 px-1 pt-3">Review verdicts</div>
         <div className="text-xs text-gray-600 px-1 pb-1">
-          A different base from the table above: one row per interview we actually completed
-          ({(sumOf(RS.overall, keys) || 0).toLocaleString()}), so it can be split by design and topic.
+          One row per interview we completed ({(sumOf(RS.overall, keys) || 0).toLocaleString()}), so it can be
+          split by design and topic. OCS counts SESSIONS rather than interviews, so its figures run higher:
+          one interview can span several sessions, and it counts sessions whose interview was never finished.
         </div>
         <div className="flex flex-wrap items-center gap-2 px-1">
           <span className="text-xs font-semibold text-gray-700">Include:</span>
@@ -2001,9 +1926,9 @@ function WorkflowUI(props) {
 
         <div className="text-xs bg-indigo-50 border border-indigo-100 rounded px-3 py-2 text-gray-700 mt-2">
           <b>{grand.toLocaleString()}</b> of <b>{all.toLocaleString()}</b> completed interviews match the
-          selected verdicts ({all ? Math.round((1000 * grand) / all) / 10 : 0}%). This is the same field
-          OCS filters on, so selecting Acceptable + Unacceptable reproduces the OCS session figure, and
-          the difference from the full count is the <b>review backlog</b>, not missing data.
+          selected verdicts ({all ? Math.round((1000 * grand) / all) / 10 : 0}%). It is the same verdict
+          field OCS filters on, so the difference from the full count is the <b>review backlog</b>,
+          not missing data. It will not equal the OCS figure exactly, because OCS counts sessions.
         </div>
 
         <div style={{ overflowX: "auto" }} className="mt-2">

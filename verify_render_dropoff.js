@@ -1428,42 +1428,17 @@ check(
   );
 })();
 
-// ------------------------------------------------------- the OCS session census (Leah, 25 Aug)
-// Four buckets over SESSIONS, matching how OCS counts, so incomplete work is visible. The old view
-// counted completed interviews only, which is why it read 918 against ~12,000 on OCS.
+// ------------------------------------- the one session-level figure that survives (Mansi, 4 Sep)
+// The session table is gone: two acceptable counts on one screen could not be reconciled by eye. What
+// stays is the single figure that CANNOT exist in an interview count - sessions that never became an
+// interview - which Leah asked for on 25 Aug so the volume of unfinished work stays visible.
 (function () {
   const SR = payload.sessionReview;
-  check('payload carries the session census', !!SR && !!SR.counts);
+  check('payload still carries the session census', !!(SR && SR.counts));
   if (!SR || !SR.counts) return;
-  const total = Object.values(SR.counts).reduce((a, b) => a + b, 0);
-  check(
-    'the four categories cover every session exactly',
-    total === SR.sessions,
-    `${total} vs ${SR.sessions}`,
-  );
-  check(
-    'Not applicable is LAST in the display order',
-    SR.order[SR.order.length - 1] === 'not-applicable',
-    SR.order.join(' > '),
-  );
-  check(
-    'Suspected AI is reported as a subset, not a fifth bucket',
-    SR.ai_in_unacceptable <= SR.counts.unacceptable &&
-      !('suspected_ai' in SR.counts),
-    `${SR.ai_in_unacceptable} of ${SR.counts.unacceptable} unacceptable`,
-  );
-  // Leah's rule: 1-3 AI answers are flagged but NOT penalised, so some ACCEPTABLE sessions carry the
-  // flag. Folding the union into "unacceptable" would move those into the wrong bucket.
-  check(
-    'AI-flagged-but-acceptable sessions are kept out of unacceptable',
-    SR.ai_total ===
-      SR.ai_in_unacceptable +
-        SR.ai_in_acceptable +
-        (SR.ai_total - SR.ai_in_unacceptable - SR.ai_in_acceptable),
-    `${SR.ai_total} flagged, ${SR.ai_in_acceptable} of them acceptable`,
-  );
+  const na = SR.counts['not-applicable'];
+  check('not-applicable is present and non-zero', na > 0, String(na));
 
-  // find the review view and confirm it renders
   let revHtml = null;
   for (let i = 2; i <= 60 && !revHtml; i++) {
     let h;
@@ -1472,34 +1447,27 @@ check(
     } catch (e) {
       continue;
     }
-    if (/Every session, as OCS counts them/.test(h)) revHtml = h;
+    if (/never became an interview/.test(h)) revHtml = h;
   }
-  check('the session census renders', !!revHtml);
+  check('the not-applicable line renders', !!revHtml);
   if (!revHtml) return;
+  check('it shows the count', revHtml.includes(na.toLocaleString()));
+  check('it explains run-on sessions', /run-on session/i.test(revHtml));
+  // the whole point of the change: ONE acceptable number on the page
+  const accSess = (SR.counts.acceptable || 0).toLocaleString();
+  const accIv = (payload.reviewStatus.overall.acceptable || 0).toLocaleString();
   check(
-    'every category shows its count',
-    ['acceptable', 'unacceptable', 'no-verdict', 'not-applicable'].every((k) =>
-      revHtml.includes(SR.counts[k].toLocaleString()),
-    ),
+    'the session-level acceptable count is NOT shown any more',
+    accSess === accIv || !revHtml.includes(accSess),
+    `session ${accSess} vs interview ${accIv}`,
   );
   check(
-    'every category carries a plain-language definition',
-    /five dimensions/i.test(revHtml) &&
-      /run-on sessions/i.test(revHtml) &&
-      /Waiting Final Review/i.test(revHtml),
+    'the session verdict table is gone',
+    !/Every session, as OCS counts them/.test(revHtml),
   );
   check(
-    'Not applicable is rendered after No verdict yet',
-    revHtml.indexOf('Not applicable') > revHtml.indexOf('No verdict yet'),
-  );
-  check(
-    'the Suspected AI subset is collapsed by default',
-    !/of which Suspected AI/.test(revHtml),
-  );
-  check(
-    'the OCS reconciliation line is shown',
-    /Checking this against OCS/i.test(revHtml) &&
-      revHtml.includes(SR.ocs_sessions.toLocaleString()),
+    'the surviving table says why OCS runs higher',
+    /OCS counts SESSIONS rather than interviews/i.test(revHtml),
   );
 })();
 
