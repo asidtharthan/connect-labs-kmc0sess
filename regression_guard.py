@@ -101,7 +101,12 @@ ARM_PAIRS = {"ABT1": ("ABT1-A", "ABT1-B"), "ABT2": ("ABT2-A", "ABT2-B"), "ABT3":
 COUNT_KEYS = ("cohorts", "flws", "master_rows", "started", "completed", "claimed_pairs")
 T1_FIELDS = ("flws", "ist", "icmp")
 CF_FIELDS = ("invited", "accepted", "learn_completed", "claimed")
-SOURCE_KEYS = ("ocs_sessions", "trigger_rows", "connect_snapshot_rows", "trigger_files")
+SOURCE_KEYS = ("ocs_sessions", "trigger_rows", "connect_snapshot_rows", "trigger_files", "ocs_newest_age_days")
+# Not every source figure is a cumulative counter, and Tier 1 assumes they all are. An AGE falls when
+# fresh data arrives, which is the HEALTHY direction, so holding it to monotonicity would fail the
+# publish at the exact moment a stuck pull recovered. It stays in the metrics so Tier 3 and the run
+# history can both read it; it is only excluded from the monotonic comparison.
+NON_CUMULATIVE_SOURCES = frozenset({"ocs_newest_age_days"})
 
 # Tier 2 tolerance: a per-arm figure may fall by up to max(ARM_ABS, ARM_PCT * prior) without failing.
 ARM_DROP_ABS = 3
@@ -128,11 +133,48 @@ FLOORS = {
 FLOOR_FRACTION_OF_HISTORY = 0.55
 
 STALL_RUNS = 3  # counts.started identical across this many consecutive runs => frozen source
+# How stale OCS's newest session must be before a frozen count reads as a quiet programme rather than
+# a stuck pull. Two days: the pull runs daily, so a genuinely stuck one still has yesterday's session
+# sitting in the cache, while a wound-down programme leaves nothing new for days. Measured on the
+# 2026-09-04 block, OCS's newest session was 2 days old and falling - 16 sessions on 28 Aug, 2 on 2 Sep.
+# It MUST exceed STALL_RUNS. Flatness takes STALL_RUNS days to establish, and while sources are
+# frozen the newest session ages exactly one day per run, so a threshold at or below STALL_RUNS can
+# never be met while the stall is still detectable - the fail branch becomes unreachable and the
+# check silently does nothing. Proven vacuous at 2; +2 leaves a real stuck pull two runs to shout.
+STALL_QUIET_DAYS = STALL_RUNS + 2
+
+# The last day the programme collected interviews, declared rather than inferred.
+#
+# A finished programme and a stuck pull are byte-identical in the data: both show a frozen interview
+# count beside a frozen source, and both leave the newest session ageing a day at a time. No amount
+# of arithmetic separates them, so one of them has to be declared. Past this date a frozen count is
+# the expected steady state and Tier 3 stops asking.
+#
+# Tier 1 stays live throughout - a FALL in any counter still fails, which is the signal that
+# actually matters once collection has stopped.
+#
+# The bot was deactivated after 2026-09-02 (last session 04:34, against 16 on 28 Aug). If the
+# programme RESUMES, set this back to None or the stall check stays switched off for the new run.
+PROGRAMME_ENDED = "2026-09-02"
 
 
 # --------------------------------------------------------------------------------------- helpers
 def _strict() -> bool:
     return bool(os.environ.get("INTERVIEWS_STRICT_FRESHNESS"))
+
+
+def _programme_ended() -> tuple[bool, str]:
+    """(has the declared programme end passed, the date it was declared for).
+
+    INTERVIEWS_PROGRAMME_ENDED overrides the constant; set it empty to switch the exemption off.
+    """
+    raw = os.environ.get("INTERVIEWS_PROGRAMME_ENDED", PROGRAMME_ENDED)
+    if not raw:
+        return False, ""
+    try:
+        return date.today() > date.fromisoformat(raw), raw
+    except ValueError:
+        return False, ""
 
 
 def _allowlist() -> list[str]:
@@ -175,12 +217,31 @@ def source_counts(extra_sources: dict | None = None) -> dict:
 
     if OCS_STATE_CACHE.exists():
         cache = _load_json(OCS_STATE_CACHE)
+        rows: list = []
         if isinstance(cache, list):
-            out["ocs_sessions"] = len(cache)
+            rows = cache
         elif isinstance(cache, dict):
             # tolerate a future dict-shaped cache ({sid: state} or {"sessions": [...]})
             sess = cache.get("sessions")
-            out["ocs_sessions"] = len(sess) if isinstance(sess, list) else len(cache)
+            rows = sess if isinstance(sess, list) else list(cache.values())
+        out["ocs_sessions"] = len(rows)
+        # AGE of the newest session, not just how many there are. The stall check needs to tell a
+        # stuck pull from a quiet programme, and it cannot do that on the count alone: when interviews
+        # genuinely stop, the count freezes too and an idle programme looks identical to a broken one.
+        # A frozen count beside a session from this morning is a stuck pull; a frozen count beside a
+        # session from a week ago is simply nobody interviewing.
+        newest = ""
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            t = (r.get("updated_at") or r.get("created_at") or "")[:10]
+            if t > newest:
+                newest = t
+        if newest:
+            try:
+                out["ocs_newest_age_days"] = (date.today() - date.fromisoformat(newest)).days
+            except ValueError:
+                pass
 
     if HQ_PULL_DIR.is_dir():
         trig_files = sorted(HQ_PULL_DIR.glob("*trigger_bot.jsonl"))
@@ -394,6 +455,8 @@ def check(
 
         # Tier 1 — hard monotonic, tolerance 0.
         for metric, old in sorted(pm.items()):
+            if metric.startswith("sources.") and metric.split(".", 1)[1] in NON_CUMULATIVE_SOURCES:
+                continue  # an age is not a counter; see NON_CUMULATIVE_SOURCES
             new = cm.get(metric)
             if new is None:
                 fail(
@@ -442,22 +505,53 @@ def check(
         prior = [h.get("counts", {}).get("started") for h in recent]
         flat = started_now is not None and len(prior) >= STALL_RUNS - 1 and all(p == started_now for p in prior)
         if flat:
+            # Four states reach here, and only ONE of them is a fault. They must be told apart by
+            # something other than the counters, because a finished programme and a broken pull look
+            # identical on those. Getting it wrong deadlocks the daily job: this gate runs before the
+            # push and history is only written after a successful one, so a wrong FAIL can never
+            # clear itself on its own.
+            #
+            #   sources still growing  -> a programme winding down. Real, must publish.
+            #   past PROGRAMME_ENDED   -> collection has stopped by declaration. Expected steady state.
+            #   newest session is old  -> nobody is interviewing. Quiet, not broken.
+            #   newest session is FRESH-> OCS has data we are not turning into interviews. A stuck pull.
+            age_now = cm.get("sources.ocs_newest_age_days")
             src_now = cm.get("sources.ocs_sessions")
             src_prior = [_metrics(h).get("sources.ocs_sessions") for h in recent]
             sources_frozen = src_now is not None and all(s == src_now for s in src_prior)
             dates = ", ".join(str(h.get("date")) for h in recent)
-            if sources_frozen:
+            ended, ended_on = _programme_ended()
+            quiet = age_now is not None and age_now >= STALL_QUIET_DAYS
+            flat_for = f"counts.started flat at {started_now} for {STALL_RUNS} days ({dates} and today)"
+
+            if not sources_frozen:
+                if verbose:
+                    print(
+                        f"  [warn] {flat_for}, but sources are still moving "
+                        f"(ocs_sessions {src_prior} -> {src_now}) - reads as a quiet programme, "
+                        f"not a frozen pull. Not failing."
+                    )
+            elif ended:
+                if verbose:
+                    print(
+                        f"  [warn] {flat_for} and ocs_sessions frozen at {src_now}, but the programme is "
+                        f"declared finished as of {ended_on} - a frozen count is the expected steady "
+                        f"state, not a stuck pull. Not failing. Tier 1 still fails on any FALL."
+                    )
+            elif quiet:
+                if verbose:
+                    print(
+                        f"  [warn] {flat_for} and ocs_sessions frozen at {src_now}, but OCS's newest "
+                        f"session is {age_now} days old - the programme has gone quiet, not the pull. "
+                        f"Not failing."
+                    )
+            else:
                 fail(
                     "counts.started",
                     f"TIER 3 STALL: counts.started == {started_now} AND sources.ocs_sessions == {src_now} "
-                    f"across {STALL_RUNS} distinct days ({dates} and today) — the interview count and its "
-                    f"source are both frozen, so a pull is stuck rather than the programme being quiet",
-                )
-            elif verbose:
-                print(
-                    f"  [warn] counts.started flat at {started_now} for {STALL_RUNS} days ({dates} and today), "
-                    f"but sources are still moving (ocs_sessions {src_prior} -> {src_now}) — reads as a quiet "
-                    f"programme, not a frozen pull. Not failing."
+                    f"across {STALL_RUNS} distinct days ({dates} and today) while OCS's newest session is "
+                    f"only {'unknown' if age_now is None else age_now} day(s) old, so OCS has data we are "
+                    f"not turning into interviews - a pull is stuck rather than the programme being quiet",
                 )
         elif verbose and started_now is not None:
             print(f"  [PASS] stall: counts.started {prior} -> {started_now}")
