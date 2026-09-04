@@ -4,7 +4,7 @@ FROZEN DATA SET FOR THE GIVEWELL REPORT
 payload version     v207   (built 2026-09-03 09:15 UTC)
 session base        v211   (cut the same day; ties out to the payload)
 render template     644b38920ed1c0565165ae6d7b5ee53edade7c0b
-repo commit         d9e3fb5230be23cac6f286409671909b89781890
+repo commit         0cf851b537f3e139032906bd30c73c4476efb215
 
 Two version labels on purpose. v207 is the report's citation basis and nothing in it has moved.
 The session base was cut later the same day when we added row-level detail. Every completed
@@ -42,7 +42,7 @@ RESTORE.md                                  5089 bytes  2354ea4ab18d2c4491aed13f
 schedule_v211.csv                           3146 bytes  f5b40fa866c9ea2e18a732a53f5208dbc4bac75c56aadcac555d02c47130ec0a
 sessions_v211.csv                        2746506 bytes  037f4b5d525763a6b16d1b6e46842ec616d47f24d2b51123188fdf039cb2b264
 sessions_v211.xlsx                       1650288 bytes  5bf0aeba2e429f365d066e736f2b71415dade4d114544f595bbd291e59cb8f08
-sessions_v211_DATA_DICTIONARY.md            6629 bytes  263dfc719fb1e365c7af10ce388d428d9849dbbfb961c970766d4662247b79df
+sessions_v211_DATA_DICTIONARY.md            6508 bytes  013039cc70535d8ca70e0fdaddf8ff92d0640c9782a109a0d07527c547af51e9
 
 IDENTIFIERS
 ------------------------------------------------------------------------------

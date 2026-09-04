@@ -410,6 +410,12 @@ def main():
         must_contain="ALL PASS",
     )
 
+    # The frozen report set is a deliverable now, and it is checksum-pinned. Anything that rewrites
+    # a file in it - a formatter, a re-run of one generator - invalidates MANIFEST.txt silently.
+    # That already happened once: prettier reformatted the data dictionary AFTER the manifest was
+    # written, so the manifest described a file that no longer existed byte for byte.
+    step("3e. frozen report set intact", [PY, "verify_freeze.py"], must_contain="0 failed")
+
     # ---- 4. CI SIMULATION ---------------------------------------------------------------------
     # The runner does not have these files. Sections that need them skip, which changes the check
     # count - and a floor tuned to the local count blocks every CI run. Hide them and re-run.
@@ -418,14 +424,29 @@ def main():
         stash = os.path.join(ROOT, "_preflight_stash")
         os.makedirs(stash, exist_ok=True)
         moved = []
-        for rel in NOT_IN_CI:
-            src = os.path.join(ROOT, rel)
-            if os.path.exists(src):
+        # The move loop lives INSIDE the try so a failure part-way through still restores. It used
+        # to sit outside, and on 2026-09-04 a transient Windows lock on the GW workbook (an indexer
+        # or AV holding it) raised WinError 32 mid-loop, skipped the finally, and left
+        # master_v7_2026-06-10.csv stranded in _preflight_stash - a repo broken by the tool that
+        # exists to stop the repo breaking.
+        try:
+            for rel in NOT_IN_CI:
+                src = os.path.join(ROOT, rel)
+                if not os.path.exists(src):
+                    continue
                 dst = os.path.join(stash, os.path.basename(rel))
-                shutil.move(src, dst)
+                try:
+                    shutil.move(src, dst)
+                except OSError as e:
+                    # A locked file is an environment problem, not a code one. Say so and carry on
+                    # with the files that DID hide, rather than aborting the whole run.
+                    print(f"  [warn] could not hide {rel}: {e.__class__.__name__} - {e}")
+                    print("         another process is holding it (Excel, an indexer, AV).")
+                    print("         steps 4a/4b will run with it present, so their check COUNT may")
+                    print("         differ from CI. Close it and re-run for a true CI simulation.")
+                    continue
                 moved.append((src, dst))
                 print(f"  hidden: {rel}")
-        try:
             step("4a. audit_e2e AS CI SEES IT", [PY, "audit_e2e.py"], forbid="CHECKS RAN")
             step("4b. dashboard_data audit AS CI SEES IT", [PY, "build_dashboard_data_audit.py"], forbid="CHECKS RAN")
         finally:

@@ -17,6 +17,7 @@ Exit code 0 means the set is usable. Non-zero means do not rely on it.
 import csv
 import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -220,6 +221,92 @@ else:
                 if c.startswith("FLW_") and c in m
             )
             chk("the salt reproduces the codes in the map (spot check)", ok, "200 sampled")
+
+# ------------------------------------------------------------------ F. is the freeze STALE?
+sec("F. HAS A CITED FIGURE MOVED SINCE THE FREEZE?")
+# A freeze older than the current build is normal - pinning one is the whole point. What is NOT
+# normal is a figure the report CITES having changed while the frozen set still claims the old
+# value. That is how a stale number reaches a reviewer.
+#
+# Compared against the LOCAL build, not live. Local and live differ for reasons unrelated to
+# staleness - a different HQ pull vintage, the Connect snapshot versus the *_audit folders - and
+# chasing those produced three false diagnoses in one day. The developer controls the local build,
+# so it is the honest comparison and needs no network.
+#
+# WARNS by default and FAILS under INTERVIEWS_STRICT_FRESHNESS, the same switch brutal_verify.py
+# uses. Hard-failing by default would block every unrelated push on any day the data moved, and a
+# gate that fires on unrelated work gets waived habitually, which is worse than no gate.
+STRICT = bool(os.environ.get("INTERVIEWS_STRICT_FRESHNESS"))
+local = ROOT / "dashboard_data.json"
+
+CITED = ("flws", "ist", "icmp", "pct")
+
+
+def figures(d):
+    """Exactly what Report_Figures pins. Anything not cited is allowed to drift."""
+    out = {}
+    for r in d.get("table1", []):
+        for f in CITED:
+            out["table1.{}.{}".format(r["key"], f)] = r.get(f)
+    for r in d.get("table3", []):
+        out["table3.%s.pct" % r["key"]] = r.get("pct")
+    for k in ("cohorts", "flws", "started", "completed"):
+        out["counts.%s" % k] = d.get("counts", {}).get(k)
+    return out
+
+
+if not (payloads and local.exists()):
+    print("  [warn] no local build to compare against - run build_dashboard_data.py first")
+else:
+    FZ = json.loads(payloads[-1].read_text(encoding="utf-8"))
+    LV = json.loads(local.read_text(encoding="utf-8"))
+    fz, lv = figures(FZ), figures(LV)
+    moved = {k: (fz[k], lv[k]) for k in fz if k in lv and fz[k] != lv[k]}
+    detail = "%d figures checked, frozen %s vs local %s" % (len(fz), FZ.get("built_at"), LV.get("built_at"))
+    if not moved:
+        chk("no cited figure has moved since the freeze", True, detail)
+    elif STRICT:
+        chk("no cited figure has moved since the freeze", False, "%d moved" % len(moved))
+    else:
+        print("  [warn] %d cited figure(s) have moved since the freeze  (%s)" % (len(moved), detail))
+    if moved:
+        for k, (a, b) in sorted(moved.items()):
+            print("           %-28s %s -> %s" % (k, a, b))
+        print("         THE FROZEN SET IS STALE. Regenerate it before quoting a number:")
+        print("           python build_report_freeze.py docs/report_freeze/payload_<v>.json <v>")
+        print("           python build_session_base.py <v>")
+        print("           python build_freeze_manifest.py")
+        print("         then diff the Figures sheets to see exactly what changed and why.")
+        if not STRICT:
+            print("         (set INTERVIEWS_STRICT_FRESHNESS=1 to make this a hard failure)")
+
+# ------------------------------------------------------------------ G. off-machine backup
+sec("G. IS THERE A CURRENT OFF-MACHINE BACKUP?")
+# .report_freeze_salt and .id_map_*.csv have no upstream. Losing them makes every already-shared
+# file permanently un-linkable to a real worker. This cannot be enforced from here - the bundle
+# lives outside the repo on purpose - so it warns, but it warns on every run until one exists.
+BDIR = ROOT.parent / "connect-labs-dr-backup"
+bundles = sorted(BDIR.glob("*/DR_MANIFEST.txt")) if BDIR.is_dir() else []
+if not bundles:
+    print("  [warn] NO DR bundle found.")
+    print("         .report_freeze_salt and .id_map_*.csv exist in exactly ONE place. Lose them")
+    print("         and every file already shared becomes permanently un-linkable to a worker.")
+    print("         Run: python build_dr_bundle.py   then copy it to access-controlled storage.")
+else:
+    newest = bundles[-1].parent
+    print("  newest bundle: %s" % newest.name)
+    if payloads:
+        pf = json.loads(payloads[-1].read_text(encoding="utf-8"))
+        print("  frozen payload built %s" % pf.get("built_at"))
+    if local.exists():
+        lb = json.loads(local.read_text(encoding="utf-8")).get("built_at")
+        older = newest.name < str(lb)[:10]
+        print("  local build          {}{}".format(lb, "   <- NEWER than the bundle" if older else ""))
+        if older:
+            print("  [warn] the local build is newer than the newest bundle. Take a fresh one:")
+            print("         python build_dr_bundle.py")
+    print("  [note] a bundle is only a backup once it is OFF this machine. It holds REAL")
+    print("         identifiers, so copy it to access-controlled storage and never commit it.")
 
 # ------------------------------------------------------------------ verdict
 print("\n" + "=" * 78)
