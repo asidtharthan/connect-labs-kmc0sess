@@ -386,6 +386,9 @@ def main():
 
     # ---- 1. unit fixtures ---------------------------------------------------------------------
     step("1. reading-rule fixtures", [PY, "test_topic_status_lib.py"], must_contain="fixtures pass")
+    # The stall check deadlocks the daily job if it gets this wrong: history is only written after a
+    # successful push, so a false "stuck pull" verdict can never clear itself. Both directions pinned.
+    step("1b. stall check verdicts", [PY, "test_regression_stall.py"], must_contain="all verdicts correct")
 
     # ---- 2. rebuild, IN ORDER -----------------------------------------------------------------
     if not FAST:

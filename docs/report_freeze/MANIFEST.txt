@@ -1,0 +1,64 @@
+FROZEN CITATION SET FOR THE GIVEWELL REPORT
+==============================================================================
+
+render version      v207
+payload built_at    2026-09-03 09:15 UTC
+data as of          2026-09-03
+render template     6509b4e93a2b0c2de0424ea1d337f68be502863d  (docs/interviews_render_template.js)
+
+The dashboard as seen at v207 = payload_v207.json + the render template at that commit.
+The payload alone holds every NUMBER but no interface; the template alone renders nothing.
+
+PINNED FILES
+------------------------------------------------------------------------------
+.id_map_v207.csv                       48791 bytes  d26925999307b658f9c61bce6bc8e9c045239150289166eeb134597d3ef7170a
+2wt_lags_v207.csv                      32777 bytes  de32d42579782cdc2a5747872bdb99e3707ad7004f8b814966041d026b21641f
+panel_gaps_v207.csv                    15343 bytes  1aa0ad0061b60a8aebe869dbe55a21b1056772223f361b46304077fe3d236719
+payload_v207.json                     239670 bytes  70801f9abeb0645d2eb1ad3de840ea6f78e870e9cfe376f5941564559de0a068
+Report_Figures_v207.xlsx               11761 bytes  86bfd80f7842fdec2ae456e10fc8194673b14e253d53e896eeba5c091ae42664
+
+THE FIVE FIGURES NOT IN THE PAYLOAD, AND WHERE THEY NOW COME FROM
+------------------------------------------------------------------------------
+panel retention        328 of 367 = 89.4%
+                       -> panel_gaps_v207.csv, one row per FLW
+panel runtime          13 interviews, offsets 0..48 days = 6.9 weeks per worker
+                       -> _interview_schedule.json (CCHQ lookup, not pinned; stable design data)
+panel calendar span    2026-06-12 to 2026-09-02 = 11.6 weeks
+                       -> derivable from panel_gaps_v207.csv first/last columns
+2WT within 2 days      467 of 484 completers within 2 days; 467/515 started = 90.7%
+                       -> 2wt_lags_v207.csv, one row per completer
+2WT within 6 hours     derivable from the lag_days column of the same file
+
+NOT PINNED, DELIBERATELY
+------------------------------------------------------------------------------
+ocs_transcript_dump/   ~180 MB and it contains FLW answers. Only message TIMESTAMPS were used,
+                       and those are already baked into 2wt_lags_v207.csv.
+_ocs_state_cache.json  4 MB, rebuilt daily. Its contribution is in panel_gaps_v207.csv.
+master_4src.csv        2 MB, rebuilt daily. Its contribution is in 2wt_lags_v207.csv.
+
+PRIVACY: WORKER IDS ARE RE-KEYED
+------------------------------------------------------------------------------
+Every worker identifier in these files is FLW_xxxxxx, a salted SHA-256 of the Connect id truncated
+to 6 hex. No Connect id, session UUID, name, phone, LGA or settlement appears anywhere. Verified: 0
+20-hex ids and 0 session UUIDs across all five files. This repo is a PUBLIC fork and the refresh
+workflow states no participant data goes in git, which is why the re-keying exists.
+
+Every figure remains fully recomputable, because the codes are only labels:
+  panel_gaps -> retention 328 of 367 = 89.4%
+  2wt_lags   -> 467 of 484 completers within 2 days, 467/515 started = 90.7%
+  payload    -> PANEL 3,491 | ABT2 1,201 | ABT2-A 92.1% | Overall 9,431
+
+To re-link internally you need BOTH of these, and both are gitignored:
+  .report_freeze_salt                     the 256-bit salt
+  docs/report_freeze/.id_map_v207.csv     code -> connect_id, 1,478 rows
+Losing the salt makes the mapping unreproducible. That is the intended property, so keep a copy
+somewhere durable if internal re-linking matters later.
+
+The session_id column was DROPPED from 2wt_lags rather than hashed: it identifies a conversation
+and contributes nothing to auditing a lag.
+
+TO REFRESH
+------------------------------------------------------------------------------
+python build_report_freeze.py docs/report_freeze/payload_<new>.json <new>
+then diff the Figures sheets against this version. Exporting without diffing just accumulates
+files nobody compares.

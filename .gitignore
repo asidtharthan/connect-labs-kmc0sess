@@ -425,3 +425,10 @@ pull_msgs.log
 pull_all.log
 transcript_gems.csv
 insights_payload.json
+
+# Frozen report citation set. The data files ARE tracked, but only because every worker identifier
+# in them is a salted hash (FLW_xxxxxx), not a Connect id - this repo is a PUBLIC fork and the
+# refresh workflow states no participant data goes in git. What must never be committed is the salt
+# and the code->id map, because together they undo the re-keying.
+.report_freeze_salt
+docs/report_freeze/.id_map_*.csv
