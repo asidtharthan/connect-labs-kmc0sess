@@ -144,6 +144,55 @@ jobs:
           EXTRA=""
           if [ "${{ inputs.full_resync }}" = "true" ]; then EXTRA="--full-resync"; echo "FULL OCS re-scan requested"; fi
           python refresh_interviews_dashboard.py --pull-connect --pull-hq --pull-ocs --pull-words --push $EXTRA
+      # dashboard_data.json is the build the freeze gets compared against. It carries only
+      # aggregates plus a re-keyed FLW matrix, no names or contact details, so it is safe to hand
+      # to a second job. The Connect snapshot below is NOT, which is why it is deleted instead.
+      - name: Keep the built payload for the drift check
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-data
+          path: dashboard_data.json
+          retention-days: 7
+          if-no-files-found: warn
       - name: Clean up snapshot (don't persist participant data on the runner)
         if: always()
         run: rm -f connect_user_data_snapshot.csv
+
+  # ---------------------------------------------------------------------------------------------
+  # Has the frozen report set fallen behind the dashboard?
+  #
+  # docs/report_freeze/ is what the GiveWell report cites. The dashboard republishes every night,
+  # so a figure can move under a number that is already written down. Nothing noticed that: the
+  # check lived in preflight.py, which only runs when a developer chooses to run it.
+  #
+  # A SEPARATE job on purpose. A stale freeze is not a reason to stop the dashboard updating, so
+  # the refresh job stays green and only this one goes red. And it is a hard failure, not a log
+  # line: gates 6a and 6b were once advisory with no sys.exit and a failing check shipped
+  # unnoticed. An advisory warning here would repeat that.
+  #
+  # It compares the frozen payload against the build the refresh job just made, and fails naming
+  # every cited figure that moved. Fixing it means regenerating the freeze, which is a human step
+  # by design - the re-keying salt exists only on a developer machine and must never reach CI.
+  freeze-drift:
+    needs: refresh
+    if: always() && needs.refresh.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r requirements-refresh.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: dashboard-data
+      - name: Has a cited report figure moved since the freeze?
+        env:
+          INTERVIEWS_STRICT_FRESHNESS: 1
+        run: |
+          echo "The dashboard published successfully. This job asks a different question:"
+          echo "does docs/report_freeze/ still agree with it?"
+          echo
+          python verify_freeze.py
