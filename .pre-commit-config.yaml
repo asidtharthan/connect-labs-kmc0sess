@@ -22,7 +22,10 @@ repos:
     hooks:
       - id: prettier
         args: ['--tab-width', '2', '--single-quote']
-        exclude: 'commcare_connect/templates/'
+        # docs/report_freeze/ holds PINNED artefacts whose bytes are recorded as SHA256 in
+        # MANIFEST.txt. Reformatting them invalidates every checksum, which is how a manifest
+        # generated before the hook ran ended up disagreeing with the file it described.
+        exclude: 'commcare_connect/templates/|^docs/report_freeze/'
 
   - repo: https://github.com/adamchainz/django-upgrade
     rev: '1.13.0'
