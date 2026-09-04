@@ -432,3 +432,8 @@ insights_payload.json
 # and the code->id map, because together they undo the re-keying.
 .report_freeze_salt
 docs/report_freeze/.id_map_*.csv
+
+# DR bundles hold REAL participant ids and live outside the repo by design. This is a belt-and-
+# braces guard in case one is ever created inside it.
+connect-labs-dr-backup/
+*_dr_bundle/
