@@ -994,6 +994,16 @@ function WorkflowUI(props) {
               onClick={function () { dlText(JSON.stringify({ generated: F.today, built_at: F.built, scale: F, docs: DOCS }, null, 1), "interviews-dashboard-documentation.json", "application/json"); }}>
               ↓ Structured JSON
             </button>
+            {/* Pin a version. Every number on this dashboard is derivable from this one object,
+                so downloading it freezes a citation basis that later republishes cannot move.
+                Note it does NOT cover five report figures (panel retention, runtime, calendar
+                span, the two 2WT timings) - those need raw OCS gaps, the CCHQ schedule lookup or
+                transcript timestamps. build_report_freeze.py produces the complete set. */}
+            <button className="px-2.5 py-1 text-xs rounded-md border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-medium"
+              title="The entire payload behind every number here. Download it to pin a version the report can cite, so a later republish cannot move a quoted figure."
+              onClick={function () { dlText(JSON.stringify(DATA, null, 1), "interviews-payload-" + F.today + ".json", "application/json"); }}>
+              ↓ Full payload (JSON)
+            </button>
             <button className="px-2.5 py-1 text-xs rounded-md border border-gray-300 hover:bg-gray-100"
               onClick={function () {
                 var t = docsMarkdown("all");
