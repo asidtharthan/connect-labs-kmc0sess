@@ -88,6 +88,32 @@ for r in rows:
     r["session_ended_at"] = _end or _s.get("updated_at") or ""
     r["session_end_source"] = "last_message" if _end else ("updated_at" if _s.get("updated_at") else "")
 
+# ---- duplicate-slot flags. Andrea filtered completed rows and got 9,452 against the published
+# 9,431. Both are right: 32 slots were re-triggered, so 64 rows share a (flw, cohort, interview_n)
+# key and a completed slot can appear twice. Rather than explain that in prose every time, the file
+# now carries two flags so a spreadsheet user can get to the published number with one filter.
+#   dupe_slot     = Y on BOTH rows of a re-triggered slot, so the duplicates can be seen
+#   canonical_row = Y on exactly ONE row per slot, the one the dashboard counts. Filtering
+#                   canonical_row = Y reproduces the published figures exactly.
+_slots = {}
+for _r in rows:
+    _slots.setdefault((_r["connect_id"], _r["cohort_id"], _r["interview_n"]), []).append(_r)
+for _k, _rs in _slots.items():
+    _dupe = "Y" if len(_rs) > 1 else "N"
+    # the dashboard treats a slot as completed if ANY of its rows completed, so the canonical row is
+    # the completed one where there is one, then the started one, then simply the first.
+    _best = (
+        next((x for x in _rs if x["is_completed"] == "Y"), None)
+        or next((x for x in _rs if x["is_started"] == "Y"), None)
+        or _rs[0]
+    )
+    for _r in _rs:
+        _r["dupe_slot"] = _dupe
+        _r["canonical_row"] = "Y" if _r is _best else "N"
+for _c in ("dupe_slot", "canonical_row"):
+    if _c not in cols:
+        cols.append(_c)
+
 for r in rows:
     r["connect_id"] = code("FLW", r["connect_id"])
     r["matched_session_id"] = code("SESS", r["matched_session_id"])
@@ -174,6 +200,12 @@ DEFS = [
     ("c_accepted", "Connect funnel: the FLW accepted the invitation."),
     ("c_learn_completed", "Connect funnel: the FLW finished the learn module."),
     ("c_claimed", "Connect funnel: the FLW claimed the opportunity."),
+    ("dupe_slot", "Y on BOTH rows of a re-triggered slot. 32 slots have two rows, so 64 rows carry Y."),
+    (
+        "canonical_row",
+        "Y on exactly ONE row per slot, the row the dashboard counts. Filter canonical_row = Y to"
+        " reproduce the published figures: 9,431 completed, not the 9,452 raw rows.",
+    ),
     ("is_initiated", "Y if the FLW clicked through the welcome for this cohort. NOT the same as started."),
 ]
 

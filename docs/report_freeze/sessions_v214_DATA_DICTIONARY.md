@@ -1,23 +1,18 @@
-# sessions_v211.csv - data dictionary
+# sessions_v214.csv - data dictionary
 
-The base table every dashboard number is aggregated from. Pinned at **v211**.
+The base table every dashboard number is aggregated from. Pinned at **v214**.
 
 ## Grain
 
 **One row per (FLW, cohort, interview slot)** from the CommCare interview schedule.
 
 A slot that was offered but never opened is still a row, with `is_started = N`. Those rows are
-what make drop-off computable, so they are kept rather than filtered out. **(connect_id, cohort_id, interview_n) is NOT a unique key.** 32 slots were re-triggered, so 64
-rows share a key. Counting rows rather than distinct slots runs about 0.2% high: completed ROWS
-number 9,452, deduped it is 9,431, and 9,431 is the published figure. The 21-row difference is
-exactly the 21 re-triggered pairs where both rows completed.
-
-Filter on
+what make drop-off computable, so they are kept rather than filtered out. Filter on
 `matched_session_id != ""` if you want only real sessions.
 
 | | |
 | --- | --- |
-| rows | 10,535 |
+| rows | 10,546 |
 | rows with a session | 9,958 |
 | rows started | 9,958 |
 | rows completed | 9,452 |
@@ -69,6 +64,8 @@ Codes are stable across every file in this freeze, so they join to each other.
 | `c_accepted` | Connect funnel: the FLW accepted the invitation. |
 | `c_learn_completed` | Connect funnel: the FLW finished the learn module. |
 | `c_claimed` | Connect funnel: the FLW claimed the opportunity. |
+| `dupe_slot` | Y on BOTH rows of a re-triggered slot. 32 slots have two rows, so 64 rows carry Y. |
+| `canonical_row` | Y on exactly ONE row per slot, the row the dashboard counts. Filter canonical_row = Y to reproduce the published figures: 9,431 completed, not the 9,452 raw rows. |
 | `is_initiated` | Y if the FLW clicked through the welcome for this cohort. NOT the same as started. |
 
 ## Worked examples
@@ -81,11 +78,11 @@ rate      = completed / started
 
 # 2WT response time
 lag = session end - trigger_received_on   (session end needs the transcript archive,
-                                           already computed in 2wt_lags_v211.csv)
+                                           already computed in 2wt_lags_v214.csv)
 
 # panel retention
 per FLW, the gaps between consecutive session dates; retained if no gap exceeds 14 days
-(already computed in panel_gaps_v211.csv)
+(already computed in panel_gaps_v214.csv)
 ```
 
 ## Two traps
@@ -104,7 +101,7 @@ reconciliation rather than asking you to trust it. Figures are started / complet
 
 | subgroup | this file | dashboard | difference |
 | --- | --- | --- | --- |
-| built_at | 2026-09-04 18:11 UTC |  |  |
+| built_at | 2026-09-07 12:40 UTC |  |  |
 | TRS | 2349 / 2262 | 2349 / 2262 | +0 / +0 |
 | TRE | 299 / 292 | 299 / 292 | +0 / +0 |
 | ABT1 | 1201 / 1058 | 1201 / 1058 | +0 / +0 |

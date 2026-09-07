@@ -513,6 +513,46 @@ for i, (s, b) in enumerate(NOTES, start=1):
     cell(ws3, i, 1, s, bold=b)
 ws3.column_dimensions["A"].width = 104
 
+# ---- the two derived tables behind the amber figures. Written here because this is where the
+# figures are computed; keeping them in a separate script meant a re-pin at a new version silently
+# dropped them and the retention and 2WT numbers stopped being auditable.
+_pg = ROOT / ("docs/report_freeze/panel_gaps_%s.csv" % VER)
+with _pg.open("w", newline="", encoding="utf-8") as _f:
+    _w = csv.writer(_f)
+    _w.writerow(["# retention = share of FLWs whose max_gap_days is 14 or less."])
+    _w.writerow(["# Gaps are BETWEEN consecutive interviews only; silence after the last one is"])
+    _w.writerow(["# not counted, which is why this reads 89% while the engagement view reads 49%."])
+    _w.writerow(["flw_id", "n_sessions", "first_session", "last_session", "max_gap_days", "retained_14d"])
+    for _p, _ds in sorted(by.items()):
+        _g = [(_ds[i + 1] - _ds[i]).days for i in range(len(_ds) - 1)]
+        _mx = max(_g) if _g else 0
+        _w.writerow([_p, len(_ds), _ds[0].date(), _ds[-1].date(), _mx, "Y" if _mx <= 14 else "N"])
+print("wrote %s  (%d FLWs, retention %d of %d)" % (_pg.name, len(by), RET_K, RET_N))
+
+_wl = ROOT / ("docs/report_freeze/2wt_lags_%s.csv" % VER)
+_n = 0
+with _wl.open("w", newline="", encoding="utf-8") as _f:
+    _w = csv.writer(_f)
+    _w.writerow(["# lag_days = last message in the session minus trigger_received_on (when offered)."])
+    _w.writerow(["# session_id is omitted: it identifies a conversation and adds nothing to a lag audit."])
+    _w.writerow(["flw_id", "trigger_received_on", "end_time", "end_source", "lag_days", "within_2d"])
+    for _r in csv.DictReader((ROOT / "master_4src.csv").open(encoding="utf-8")):
+        if _r["subgroup"] != "2WT" or _r["is_completed"] != "Y":
+            continue
+        _a = dt(_r["trigger_received_on"])
+        _sid = _r["matched_session_id"]
+        _b, _src = last_msg.get(_sid), "last_message"
+        if _b is None:
+            _b, _src = sid_upd.get(_sid), "updated_at"
+        if not (_a and _b):
+            continue
+        _lag = (_b - _a).total_seconds() / 86400
+        _n += 1
+        _w.writerow(
+            [_r["connect_id"], _a.isoformat(), _b.isoformat(), _src, round(_lag, 4), "Y" if _lag <= 2 else "N"]
+        )
+print("wrote %s  (%d completers, %d within 2 days)" % (_wl.name, _n, W2))
+
 wb.save(OUT)
 print("wrote %s" % OUT)
 print("  Figures: %d rows (%d recomputed from raw)" % (len(FIGURES), sum(1 for f in FIGURES if f[6] == RAW)))

@@ -272,11 +272,25 @@ else:
     if moved:
         for k, (a, b) in sorted(moved.items()):
             print("           %-28s %s -> %s" % (k, a, b))
-        print("         THE FROZEN SET IS STALE. Regenerate it before quoting a number:")
-        print("           python build_report_freeze.py docs/report_freeze/payload_<v>.json <v>")
-        print("           python build_session_base.py <v>")
-        print("           python build_freeze_manifest.py")
-        print("         then diff the Figures sheets to see exactly what changed and why.")
+        # Which side is behind matters, and getting it backwards is worse than saying nothing. A
+        # freeze pinned from a fresh live pull can easily be NEWER than the developer's local build,
+        # and telling someone to regenerate the freeze then would send them the wrong way.
+        behind_local = str(FZ.get("built_at") or "") > str(LV.get("built_at") or "")
+        if behind_local:
+            print(
+                "         The FROZEN set is NEWER than your local build (%s vs %s)."
+                % (FZ.get("built_at"), LV.get("built_at"))
+            )
+            print("         So this is your LOCAL build lagging, not a stale freeze. Rebuild locally")
+            print("         before reading anything into the differences above:")
+            print("           python build_payload_agg.py && python build_dashboard_data.py")
+        else:
+            print("         THE FROZEN SET IS STALE. Regenerate it before quoting a number:")
+            print("           python build_report_freeze.py docs/report_freeze/payload_<v>.json <v>")
+            print("           python build_session_base.py <v>")
+            print("           python tools_freeze_rekey_ids.py <v>")
+            print("           python build_freeze_manifest.py")
+            print("         then diff the Figures sheets to see exactly what changed and why.")
         if not STRICT:
             print("         (set INTERVIEWS_STRICT_FRESHNESS=1 to make this a hard failure)")
 

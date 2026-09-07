@@ -1,6 +1,6 @@
 # retention = share of FLWs whose max_gap_days is 14 or less.
-"# Gaps are BETWEEN consecutive interviews only; silence after the last one is not counted,"
-"# which is why this reads 89% while the engagement view, which counts that tail, reads 49%."
+# Gaps are BETWEEN consecutive interviews only; silence after the last one is
+"# not counted, which is why this reads 89% while the engagement view reads 49%."
 flw_id,n_sessions,first_session,last_session,max_gap_days,retained_14d
 FLW_ff3752,13,2026-06-12,2026-07-28,4,Y
 FLW_ba07de,11,2026-06-19,2026-08-15,10,Y
