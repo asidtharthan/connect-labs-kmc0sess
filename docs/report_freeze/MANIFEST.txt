@@ -1,12 +1,12 @@
 FROZEN DATA SET FOR THE GIVEWELL REPORT
 ==============================================================================
 
-payload version     v207   (built 2026-09-03 09:15 UTC)
-session base        v211   (cut the same day; ties out to the payload)
+payload version     v214   (built 2026-09-07 12:40 UTC)
+session base        v214   (cut the same day; ties out to the payload)
 render template     644b38920ed1c0565165ae6d7b5ee53edade7c0b
-repo commit         0cf851b537f3e139032906bd30c73c4476efb215
+repo commit         ad38f6bbfa838a94ae7ecbc620aaac5958276333
 
-Two version labels on purpose. v207 is the report's citation basis and nothing in it has moved.
+Two version labels on purpose. v214 is the report's citation basis and nothing in it has moved.
 The session base was cut later the same day when we added row-level detail. Every completed
 count is identical between them; started differs by 2 from build timing.
 
@@ -14,9 +14,9 @@ WHERE TO START
 ------------------------------------------------------------------------------
 RESTORE.md                         disaster recovery: what is recoverable, what is not, and
                                    the restore order. Read this before you need it.
-sessions_v211_DATA_DICTIONARY.md   columns, grain, tie-out, reproducibility limits.
-sessions_v211.xlsx / .csv          the base table, one row per interview SLOT.
-Report_Figures_v207.xlsx           the 31 report figures with definitions and sources.
+sessions_v214_DATA_DICTIONARY.md   columns, grain, tie-out, reproducibility limits.
+sessions_v214.xlsx / .csv          the base table, one row per interview SLOT.
+Report_Figures_v214.xlsx           the 31 report figures with definitions and sources.
 
 ⚠ A row in the session base is one interview SLOT, not one session, and
 (connect_id, cohort_id, interview_n) is NOT a unique key: 32 slots were re-triggered, so 64
@@ -33,21 +33,22 @@ python build_dr_bundle.py                  the irreplaceable sources, for off-ma
 
 FILES, WITH CHECKSUMS
 ------------------------------------------------------------------------------
-2wt_lags_v207.csv                          32288 bytes  306a6cff6e166fec79346d8e1ec234905bc3f22c84a24ad6e4b98da2d9ad5a63
-connect_roster_v211.csv                   457432 bytes  287c5f0f2cd783a0ca27789f0388fbcaddb409734dcfe5ae9c93d08180ffcae3
-panel_gaps_v207.csv                        14972 bytes  38249c0f6d1e50ae00d74d175131b790e2c3ecd764963a2a365ffdc66ceb5491
-payload_v207.json                         239670 bytes  70801f9abeb0645d2eb1ad3de840ea6f78e870e9cfe376f5941564559de0a068
-Report_Figures_v207.xlsx                   11761 bytes  86bfd80f7842fdec2ae456e10fc8194673b14e253d53e896eeba5c091ae42664
+2wt_lags_v214.csv                          16774 bytes  83a95129a251f3016f69a0b228bef8ac444edc8518ed5746fefac8a0a640df9b
+connect_roster_v214.csv                   461396 bytes  3eba912fde660a3c0e8d6eb138ff90a456feaf0ddd46679bb69ccdb3a20a3397
+Labs_Dashboard_v214.xlsx                   73035 bytes  d051da8e005e659500ec0e9fb01875a33e8b08bff9a1ec109e1fc151d4685eb0
+panel_gaps_v214.csv                        15316 bytes  76a93780099164823fa46609343e27b867e9500039a02bc05c82053690c35c95
+payload_v214.json                         239671 bytes  22954ec2e8e250c571ac24950eb5e5a0f02c78ba99331e5edbd0592cab693955
+Report_Figures_v214.xlsx                   11760 bytes  447b5eada335745e4020ecfd16c4293cc5f169952272491dc3fd0a0696491301
 RESTORE.md                                  5089 bytes  2354ea4ab18d2c4491aed13fbaaf5ce17a7d714bb6c7860e49978a7e7265a4db
-schedule_v211.csv                           3146 bytes  f5b40fa866c9ea2e18a732a53f5208dbc4bac75c56aadcac555d02c47130ec0a
-sessions_v211.csv                        2746506 bytes  037f4b5d525763a6b16d1b6e46842ec616d47f24d2b51123188fdf039cb2b264
-sessions_v211.xlsx                       1650288 bytes  5bf0aeba2e429f365d066e736f2b71415dade4d114544f595bbd291e59cb8f08
-sessions_v211_DATA_DICTIONARY.md            6508 bytes  013039cc70535d8ca70e0fdaddf8ff92d0640c9782a109a0d07527c547af51e9
+schedule_v214.csv                           3369 bytes  e5611d8d3490c095e5045a7765ae4e06bd2ec747b49dd3e5b9c7ef98c7273700
+sessions_v214.csv                        2800993 bytes  7c636cde0167c2c1d33cd5c0f20293239712b6ea6c2a658436ff4ec6bccd4833
+sessions_v214.xlsx                       1726471 bytes  cb65b46f62fccd655f2f9d6e4eea6aae21925632b48bc3f76acc1970213fd8b4
+sessions_v214_DATA_DICTIONARY.md            6563 bytes  173c84a15c3c7a2e0ed42c02c03145fe3eff1e2fdc82db772b73c06f71074690
 
 IDENTIFIERS
 ------------------------------------------------------------------------------
 Every file above is re-keyed: FLW_xxxxxxxx, SESS_xxxxxxxx, TRIG_xxxxxxxx. Verified across all
-10 files: zero Connect ids, zero session or form UUIDs, no names, phones, LGAs, settlements.
+11 files: zero Connect ids, zero session or form UUIDs, no names, phones, LGAs, settlements.
 Codes are stable across files, so they join to each other.
 
 Reversing it needs BOTH .report_freeze_salt and .id_map_*.csv. Neither is in this folder as

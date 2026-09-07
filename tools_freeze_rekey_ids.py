@@ -17,11 +17,12 @@ import csv
 import hashlib
 import json
 import secrets
+import sys
 from pathlib import Path
 
 ROOT = Path(r"C:\Users\Aathithya S\Desktop\connect-labs-AaS")
 FREEZE = ROOT / "docs/report_freeze"
-VER = "v207"
+VER = sys.argv[1] if len(sys.argv) > 1 else "v207"
 SALT_F = ROOT / ".report_freeze_salt"
 
 if SALT_F.exists():
@@ -125,12 +126,15 @@ merged = {}
 if m.exists():
     for row in csv.DictReader(m.open(encoding="utf-8")):
         if row.get("code"):
-            merged[row["code"]] = row["connect_id"]
+            # build_session_base.py writes this map with a "real" column; this tool
+            # used to write "connect_id". Two generators, one file, two schemas -
+            # which crashed a re-pin. Accept either; write "real" from here on.
+            merged[row["code"]] = row.get("real") or row.get("connect_id") or ""
 for real, c in _seen.items():
     merged[c] = real
 with m.open("w", newline="", encoding="utf-8") as f:
     w = csv.writer(f)
-    w.writerow(["code", "connect_id"])
+    w.writerow(["code", "real"])
     for c in sorted(merged):
         w.writerow([c, merged[c]])
 print(
