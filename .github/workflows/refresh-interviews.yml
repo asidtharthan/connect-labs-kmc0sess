@@ -17,9 +17,20 @@ name: Refresh Interviews Dashboard
 #   CONNECT_SNAP_1/2/3          - the Connect snapshot, gzip+base64, split in 3 (set by the script)
 
 on:
-  schedule:
-    - cron: '37 4 * * *' # 04:37 UTC daily — off-peak, odd minute (avoids top-of-hour scheduler congestion that delayed the '0 6' run by ~4h)
-  workflow_dispatch: # also runnable on-demand from the Actions tab
+  # NIGHTLY REFRESH DISABLED 2026-09-07. The interview programme is finished: the bot was
+  # deactivated after 2026-09-02, OCS has taken no new session since, and the published figures have
+  # not moved for four days (completed 9,431, started 9,933, FLWs 1,451, and the three review
+  # verdicts, all identical between the 3 Sep and 7 Sep builds).
+  #
+  # A nightly rebuild of identical numbers is not free: every run is another chance to trip a gate
+  # written for a live programme, which is what failed on 5 and 6 Sep. The dashboard is now frozen at
+  # what is published, and stays runnable on demand below if anything ever needs republishing.
+  #
+  # To resume, uncomment the schedule AND set regression_guard.PROGRAMME_ENDED back to None, or the
+  # stall and freshness checks stay exempt and would miss a genuinely stuck pull.
+  # schedule:
+  #   - cron: '37 4 * * *' # 04:37 UTC daily — off-peak, odd minute
+  workflow_dispatch: # runnable on-demand from the Actions tab
     inputs:
       full_resync:
         description: 'Full OCS re-scan (state+words) to self-heal — slower + many more OCS requests; leave off for normal incremental runs'
