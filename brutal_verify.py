@@ -46,12 +46,36 @@ def chk(name, ok, detail=""):
         print(f"  [FAIL] {name}  {detail}")
 
 
-def freshchk(name, ok, detail=""):
-    """Freshness check: hard failure only under INTERVIEWS_STRICT_FRESHNESS (CI); else a warning."""
+# Collection stopping is not the same as the pipeline breaking. The bot was deactivated after
+# 2026-09-02, so "newest OCS session within 2 days" can never pass again, and the nightly failed on it
+# twice (5 and 6 Sep) with the pull working perfectly - 22,367 sessions, unchanged, nothing new to
+# fetch. regression_guard already owns that declaration for the stall check, so this reuses it rather
+# than keeping a second date in a second place.
+#
+# Deliberately narrow. It exempts only the asserts about how fresh the SOURCE DATA is. The asserts
+# about this BUILD - data.today == today, built_at == today - stay hard, because a stale build is a
+# broken pipeline whether or not the programme is running.
+try:
+    from regression_guard import _programme_ended as _prog_ended
+
+    _ENDED, _ENDED_ON = _prog_ended()
+except Exception:  # noqa: BLE001 - guard import must never take brutal_verify down
+    _ENDED, _ENDED_ON = False, ""
+
+
+def freshchk(name, ok, detail="", source_data=False):
+    """Freshness check: hard failure only under INTERVIEWS_STRICT_FRESHNESS (CI); else a warning.
+
+    source_data=True marks an assert about how recent the INCOMING DATA is, which a declared
+    programme end exempts. Everything else stays enforced.
+    """
     global P, F
     if ok:
         P += 1
         print(f"  [PASS] {name}  {detail}")
+    elif source_data and _ENDED:
+        P += 1
+        print(f"  [PASS] {name}  collection ended {_ENDED_ON}, so no newer data is expected  {detail}")
     elif STRICT_FRESH:
         F += 1
         FAILS.append(name)
@@ -197,7 +221,12 @@ print(f"  today={TODAY}  built_at={DD.get('built_at')}  data.today={DD.get('toda
 print(f"  latest trigger_bot form: {maxtrig}   latest OCS session: {maxocs}   connect snapshot mtime: {snap_mtime}")
 freshchk("data.today == today", DD.get("today") == str(TODAY), f"{DD.get('today')} == {TODAY}")
 freshchk("built_at date == today", (DD.get("built_at") or "").startswith(str(TODAY)), DD.get("built_at"))
-freshchk("latest trigger form within 2 days of today", maxtrig and (TODAY - maxtrig).days <= 2, f"latest={maxtrig}")
+freshchk(
+    "latest trigger form within 2 days of today",
+    maxtrig and (TODAY - maxtrig).days <= 2,
+    f"latest={maxtrig}",
+    source_data=True,
+)
 # PER DOMAIN, not just the global max. A single max() across all 12 CommCare domains passes when 11 are
 # current and one is weeks behind - which silently DEFLATES drop-off, because an interview the pull
 # never saw is one nobody can be recorded as skipping. Found 2026-08-24: a local tree 8 weeks stale on
@@ -222,7 +251,12 @@ for _p in sorted((ROOT / "hq_pull_full").glob("*__trigger_bot.jsonl")):
         if _r and (_newest is None or _r.date() > _newest):
             _newest = _r.date()
     _lag = (TODAY - _newest).days if _newest else None
-    if _age > 2:
+    # mtime alone is the wrong test. pull_hq_full_payloads only REWRITES a file when it appends new
+    # records, so a domain with nothing new keeps an old mtime even though the pull ran and found
+    # nothing - which is the normal state once a cohort finishes. Flag a domain only when its file is
+    # stale AND its newest form is recent enough that the pull should have picked something up. A file
+    # untouched for weeks whose newest form is also weeks old is a finished cohort, not a skipped pull.
+    if _age > 2 and (_lag is None or _lag <= _age - 2):
         _stale_files.append(f"{_p.name.split('__')[0]} file {_age}d old, newest form " f"{_newest} ({_lag}d)")
 freshchk(
     "EVERY HQ domain pull is within 2 days (not just the global max)",
@@ -233,7 +267,12 @@ freshchk(
         else f"{len(list((ROOT / 'hq_pull_full').glob('*__trigger_bot.jsonl')))} domains current"
     ),
 )
-freshchk("latest OCS session within 2 days of today", maxocs and (TODAY - maxocs).days <= 2, f"latest={maxocs}")
+freshchk(
+    "latest OCS session within 2 days of today",
+    maxocs and (TODAY - maxocs).days <= 2,
+    f"latest={maxocs}",
+    source_data=True,
+)
 # CONTENT-based, not mtime. The workflow rewrites this file from the secrets at the start
 # of every run, so its timestamp is always today whatever the live pull did - the check it
 # replaced passed straight through the 24-June fallback firing on 2026-08-25.
