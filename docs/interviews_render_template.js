@@ -290,9 +290,12 @@ function WorkflowUI(props) {
 
   // The tab list lives here, not inline in the JSX, so the Documentation tab can compare what it
   // documents against what actually exists (see docsCoverage) instead of silently going stale.
+  // Evaluations is its OWN tab, not a view under Interview Completion Funnels. Everything in that tab
+  // answers "did people do the interviews"; this answers "were the interviews any good" (Andrea,
+  // 16 Sep). It sat there because that is where the review data happened to land, not because it fits.
   var TABS = [["overview", "Overview"], ["table", "Table View"], ["funnels", "Interview Completion Funnels"],
               ["fullretention", "Full Retention Table"], ["breakdowns", "Breakdowns"],
-              ["flw", "FLW Retention"], ["docs", "Documentation"]];
+              ["flw", "FLW Retention"], ["evaluations", "Evaluations"], ["docs", "Documentation"]];
 
   // ============================================================ DOCUMENTATION TAB
   // ONE structured constant, TWO outputs: the interactive UI below and the Markdown/JSON export.
@@ -387,13 +390,12 @@ function WorkflowUI(props) {
         reads: ["table1", "table2", "table3", "cohortSG"],
         charts: [["Subgroup and cohort tables", "The same counts as Overview, split by subgroup, arm and individual cohort, with average FLW words per interview."]] },
       { id: "funnels", name: "Interview Completion Funnels", question: "Where do people fall out, and are they still engaged?",
-        reads: ["connectFunnel", "dropoff", "lineSeries", "deimpact", "cohortEngagement", "cohortEngagementLLO", "cohortDropoff", "reviewStatus", "sessionReview"],
+        reads: ["connectFunnel", "dropoff", "lineSeries", "deimpact", "cohortEngagement", "cohortEngagementLLO", "cohortDropoff"],
         charts: [
           ["Connect funnel", "Invited → accepted → Learn completed → claimed → initiated. Everything before an interview exists."],
           ["Interview drop-off table", "Per interview slot: eligible, triggered, started, completed, with three percentage bases (see Indicators)."],
           ["Retention lines", "Completion by interview number, with a Denominator toggle and a de-impact toggle."],
           ["Cohort Engagement (3 panels)", "Weekly recruitment, outcome (Finished / Dropped off / Schedule not completed / In progress) plus rhythm (Steady / Inconsistent), and status-now (New / Active / Slow / Quiet / Finished). The outcome lines follow whichever of the three readings of “dropped off” is selected; rhythm and status-now measure gaps between sessions, so no definition of drop-off changes them."],
-          ["Data review", "Two bases, stated separately. First every SESSION an enrolled FLW had with the bot, sorted by the evaluator's own tag - Acceptable, Unacceptable (click for the Suspected AI subset), No verdict yet, Not applicable - which is how OCS counts and so includes sessions that never became an interview. Below it, the older view over COMPLETED interviews only, which can be split by design and topic."],
           ["Drop-off by cohort", "One row per cohort design or per individual cohort, each scored at ITS OWN end date rather than today or a date shared across the design. Five mutually exclusive states, defined on the page itself, plus a table showing what a fixed number of days would have meant in each design. Sortable by drop-off or by name at either level."]
         ] },
       { id: "fullretention", name: "Full Retention Table", question: "Give me every cohort × interview number in one grid.",
@@ -412,6 +414,12 @@ function WorkflowUI(props) {
           ["Nine drill-down panels", "State, partner, cadre, tier, persona, cohort count, finished, peer density, pace - all click-to-filter and cross-filtering."],
           ["Survival ladder", "Share reaching each interview number, each row against its OWN eligible pool."],
           ["Geography", "LGA-level spread, which is wider than the between-state spread."]
+        ] },
+      { id: "evaluations", name: "Evaluations", question: "Were the interviews any good?",
+        reads: ["reviewStatus", "sessionReview"],
+        charts: [
+          ["Sessions that never became an interview", "One line above the table. It cannot sit IN the table, which counts completed interviews - a session that never became one has no interview row."],
+          ["Review verdicts", "One row per design or topic: Acceptable and Unacceptable as a share of those REVIEWED, with the Suspected AI subset beside Unacceptable, and Not yet reviewed as a plain count. Its own tab rather than a view under the funnels, because those answer whether people did the interviews and this answers whether they were any good."]
         ] },
       { id: "docs", name: "Documentation", question: "How does all of this work, and how do I add a cohort?",
         reads: ["everything (read-only)"],
@@ -1859,6 +1867,42 @@ function WorkflowUI(props) {
     ["not-reviewed", "Not yet reviewed", "#78909C", "Completed, but nobody has given it a verdict yet. Shown by default on purpose: filtering it away silently is what made the OCS session count look smaller than the dashboard's."]
   ];
 
+  // Quality beside the other per-subgroup and per-topic figures, not only in its own tab (Andrea,
+  // 16 Sep). Same base as the Evaluations tab - acceptable over REVIEWED, excluding not-yet-reviewed -
+  // so the two tabs cannot disagree. Returns null when nothing has a verdict yet.
+  function acceptPct(key, by) {
+    var src = ((DATA.reviewStatus || {})[by === "topic" ? "by_topic" : "by_sg"]) || {};
+    var o = src[key];
+    if (!o && key === "Overall") o = (DATA.reviewStatus || {}).overall;
+    if (!o) {
+      // table1 groups an A/B test into ONE row (ABT1) while the verdicts are held per ARM
+      // (ABT1-A, ABT1-B). Roll the arms up rather than showing a blank for the tests.
+      var acc = 0, un = 0, nr = 0, hit = false;
+      Object.keys(src).forEach(function (k) {
+        if (k.indexOf(key + "-") !== 0) return;
+        hit = true;
+        acc += src[k].acceptable || 0; un += src[k].unacceptable || 0; nr += src[k]["not-reviewed"] || 0;
+      });
+      if (!hit) return null;
+      o = { acceptable: acc, unacceptable: un, "not-reviewed": nr };
+    }
+    var rev = (o.acceptable || 0) + (o.unacceptable || 0);
+    if (!rev) return null;
+    return { pct: Math.round((1000 * (o.acceptable || 0)) / rev) / 10, acc: o.acceptable || 0,
+             rev: rev, nr: o["not-reviewed"] || 0 };
+  }
+  function acceptCell(key, by) {
+    var a = acceptPct(key, by);
+    return (
+      <td className={td + " text-right " + (a ? "text-green-800 font-medium" : "text-gray-400")}
+          title={a ? a.acc.toLocaleString() + " acceptable of " + a.rev.toLocaleString() + " reviewed"
+                     + (a.nr ? " (" + a.nr.toLocaleString() + " not yet reviewed)" : "")
+                   : "no verdicts yet"}>
+        {a ? a.pct + "%" : "-"}
+      </td>
+    );
+  }
+
   function renderReview() {
     var RS = DATA.reviewStatus || {};
     if (!RS.overall) {
@@ -1871,7 +1915,13 @@ function WorkflowUI(props) {
     var grand = sumOf(RS.overall, on), all = sumOf(RS.overall, keys);
     var rows = Object.keys(src).map(function (k) {
       var o = src[k], inc = sumOf(o, on), tot = sumOf(o, keys);
-      return { k: k, o: o, inc: inc, tot: tot, pct: tot ? Math.round((1000 * inc) / tot) / 10 : null };
+      // "Reviewed" is acceptable + unacceptable. It is the honest denominator for a quality rate: the
+      // not-yet-reviewed ones have no verdict, so including them would make the rate a share of
+      // whatever happened to be looked at rather than of the work judged.
+      var rev = (o.acceptable || 0) + (o.unacceptable || 0);
+      var aiSrc = revBy === "sg" ? (RS.ai_by_sg || {}) : (RS.ai_by_topic || {});
+      return { k: k, o: o, inc: inc, tot: tot, rev: rev, ai: aiSrc[k] || 0,
+               pct: tot ? Math.round((1000 * inc) / tot) / 10 : null };
     }).sort(function (a, b) { return b.inc - a.inc; });
 
     // Two acceptable counts on one screen could not be reconciled by eye, so the session table is
@@ -1947,11 +1997,22 @@ function WorkflowUI(props) {
               <tr>
                 <th className="px-2 py-1 text-left border-b">{revBy === "sg" ? "Design" : "Topic"}</th>
                 {REV_META.map(function (m) {
-                  return <th key={m[0]} className="px-2 py-1 text-right border-b" style={{ color: m[2], opacity: revInc[m[0]] ? 1 : 0.35 }}>{m[1]}</th>;
+                  return (
+                    <React.Fragment key={m[0]}>
+                      <th className="px-2 py-1 text-right border-b" style={{ color: m[2], opacity: revInc[m[0]] ? 1 : 0.35 }}>{m[1]}</th>
+                      {/* Suspected AI sits immediately after Unacceptable because it is a SUBSET of it,
+                          not a fourth verdict. Without it per row, a design could be entirely AI-driven
+                          or entirely quality-driven and this table would look identical. */}
+                      {m[0] === "unacceptable" ? (
+                        <th className="px-2 py-1 text-right border-b" style={{ color: "#F9A825", opacity: revInc[m[0]] ? 1 : 0.35 }}
+                            title="Of the unacceptable, how many were flagged for suspected AI use. A subset of the column to its left, not an addition to it.">
+                          &#8627; Suspected AI
+                        </th>
+                      ) : null}
+                    </React.Fragment>
+                  );
                 })}
-                <th className="px-2 py-1 text-right border-b">Selected</th>
-                <th className="px-2 py-1 text-right border-b">All completed</th>
-                <th className="px-2 py-1 text-right border-b">% selected</th>
+                <th className="px-2 py-1 text-right border-b">Reviewed</th>
               </tr>
             </thead>
             <tbody>
@@ -1960,11 +2021,26 @@ function WorkflowUI(props) {
                   <tr key={r.k} className="border-b">
                     <td className="px-2 py-1 font-medium">{revBy === "topic" ? ((DATA.topicNames || {})[r.k] || r.k) : r.k}</td>
                     {REV_META.map(function (m) {
-                      return <td key={m[0]} className="px-2 py-1 text-right" style={{ opacity: revInc[m[0]] ? 1 : 0.35 }}>{(r.o[m[0]] || 0).toLocaleString()}</td>;
+                      var v = r.o[m[0]] || 0;
+                      // Acceptable and unacceptable are shown as a RATE over the reviewed base, because
+                      // that is the question people are asking. Not-yet-reviewed keeps a bare count - a
+                      // percentage of the reviewed base is meaningless for the ones not in it.
+                      var pc = (m[0] !== "not-reviewed" && r.rev) ? Math.round((1000 * v) / r.rev) / 10 : null;
+                      return (
+                        <React.Fragment key={m[0]}>
+                          <td className="px-2 py-1 text-right" style={{ opacity: revInc[m[0]] ? 1 : 0.35 }}>
+                            {pc == null ? v.toLocaleString()
+                                        : <span><b>{pc}%</b> <span className="text-gray-500">({v.toLocaleString()})</span></span>}
+                          </td>
+                          {m[0] === "unacceptable" ? (
+                            <td className="px-2 py-1 text-right" style={{ opacity: revInc[m[0]] ? 1 : 0.35, color: "#8a6d1f" }}>
+                              {(r.ai || 0).toLocaleString()}
+                            </td>
+                          ) : null}
+                        </React.Fragment>
+                      );
                     })}
-                    <td className="px-2 py-1 text-right font-semibold">{r.inc.toLocaleString()}</td>
-                    <td className="px-2 py-1 text-right">{r.tot.toLocaleString()}</td>
-                    <td className="px-2 py-1 text-right">{r.pct == null ? "-" : r.pct + "%"}</td>
+                    <td className="px-2 py-1 text-right font-semibold">{r.rev.toLocaleString()}</td>
                   </tr>
                 );
               })}
@@ -3367,11 +3443,9 @@ function WorkflowUI(props) {
               {subBtn(funView, "retention", setFunView, "Retention lines")}
               {subBtn(funView, "engagement", setFunView, "Cohort engagement")}
               {subBtn(funView, "dropoff", setFunView, "Drop-off by cohort")}
-              {subBtn(funView, "review", setFunView, "Data review")}
             </div>
             {funView === "engagement" && renderEngagement()}
             {funView === "dropoff" && renderCohortDropoff()}
-            {funView === "review" && renderReview()}
             {funView === "retention" && (
             <React.Fragment>
             <div className="flex flex-wrap items-center gap-2 px-1">
@@ -3641,6 +3715,10 @@ function WorkflowUI(props) {
           </div>
         )}
 
+        {activeTab === "evaluations" && (
+          <div className="p-3 space-y-3">{renderReview()}</div>
+        )}
+
         {activeTab === "breakdowns" && (
           <div className="p-3 space-y-3">
             <div className="flex items-center gap-2">
@@ -3663,6 +3741,7 @@ function WorkflowUI(props) {
                     <th className={th + " text-left"}>Subgroup</th><th className={th + " text-right"}>FLWs Started</th>
                     <th className={th + " text-right"}>Interviews Started</th><th className={th + " text-right"}>Interviews Completed</th>
                     <th className={th + " text-right"}>% Completed</th><th className={th + " text-right"}>Avg words / FLW msg</th>
+                    <th className={th + " text-right"} title="Of the completed interviews with a verdict, the share marked acceptable. Same base as the Evaluations tab.">% Acceptable</th>
                   </tr></thead>
                   <tbody className="bg-white divide-y divide-gray-100">
                     {DATA.table1.map(function (r) {
@@ -3674,6 +3753,7 @@ function WorkflowUI(props) {
                           <td className={td + " text-right text-green-700 font-medium"}>{r.icmp}</td>
                           <td className={td + " text-right text-gray-500"}>{pctTxt(r.pct)}</td>
                           <td className={td + " text-right text-gray-500"}>{r.avg_words == null ? "-" : r.avg_words}</td>
+                          {acceptCell(r.key, "sg")}
                         </tr>
                       );
                     })}
@@ -3692,6 +3772,7 @@ function WorkflowUI(props) {
                     <th className={th + " text-right"}>FLWs Started</th><th className={th + " text-right"}>Interviews Started</th>
                     <th className={th + " text-right"}>Interviews Completed</th><th className={th + " text-right"}>% Completed</th>
                     <th className={th + " text-right"}>Avg words / FLW msg</th>
+                    <th className={th + " text-right"} title="Of the completed interviews with a verdict, the share marked acceptable. Same base as the Evaluations tab.">% Acceptable</th>
                   </tr></thead>
                   <tbody className="bg-white divide-y divide-gray-100">
                     {DATA.table2.map(function (r) {
@@ -3705,6 +3786,7 @@ function WorkflowUI(props) {
                           <td className={td + " text-right text-green-700 font-medium"}>{none ? "-" : r.icmp}</td>
                           <td className={td + " text-right text-gray-500"}>{pctTxt(r.pct)}</td>
                           <td className={td + " text-right text-gray-500"}>{r.avg_words == null ? "-" : r.avg_words}</td>
+                          {acceptCell(r.code, "topic")}
                         </tr>
                       );
                     })}
@@ -3721,6 +3803,7 @@ function WorkflowUI(props) {
                     <th className={th + " text-left"}>Arm</th><th className={th + " text-right"}>FLWs Started</th>
                     <th className={th + " text-right"}>Interviews Started</th><th className={th + " text-right"}>Interviews Completed</th>
                     <th className={th + " text-right"}>% Completed</th><th className={th + " text-right"}>Avg words / FLW msg</th>
+                    <th className={th + " text-right"} title="Of the completed interviews with a verdict, the share marked acceptable. Same base as the Evaluations tab.">% Acceptable</th>
                   </tr></thead>
                   <tbody className="bg-white divide-y divide-gray-100">
                     {DATA.table3.map(function (r) {
@@ -3732,6 +3815,7 @@ function WorkflowUI(props) {
                           <td className={td + " text-right text-green-700 font-medium"}>{r.icmp}</td>
                           <td className={td + " text-right text-gray-500"}>{pctTxt(r.pct)}</td>
                           <td className={td + " text-right text-gray-500"}>{r.avg_words == null ? "-" : r.avg_words}</td>
+                          {acceptCell(r.key, "sg")}
                         </tr>
                       );
                     })}
