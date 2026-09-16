@@ -812,17 +812,18 @@ check(
   // useState indices shift whenever a hook is added above, so find the view hook rather than assume
   // it - hardcoding 2 is what made this check pass on the button label while the view never rendered.
   let html = null;
-  for (let i = 2; i <= 60 && !html; i++) {
+  // Evaluations is a top-level tab since 16 Sep, so it is reached by the TAB hook.
+  for (let i = 1; i <= 3 && !html; i++) {
     let candidate;
     try {
-      candidate = build(null, { 1: 'funnels', [i]: 'review' });
+      candidate = build(null, { [i]: 'evaluations' });
     } catch (e) {
       continue;
     }
     if (candidate.includes('completed interviews match the')) html = candidate;
   }
   check(
-    'Data review view renders',
+    'Evaluations tab renders',
     !!html,
     html ? '' : 'view never rendered at any hook index',
   );
@@ -1440,10 +1441,10 @@ check(
   check('not-applicable is present and non-zero', na > 0, String(na));
 
   let revHtml = null;
-  for (let i = 2; i <= 60 && !revHtml; i++) {
+  for (let i = 1; i <= 3 && !revHtml; i++) {
     let h;
     try {
-      h = build(null, { 1: 'funnels', [i]: 'review' });
+      h = build(null, { [i]: 'evaluations' });
     } catch (e) {
       continue;
     }
@@ -1507,6 +1508,118 @@ check(
     );
   }
   if (dropHtml) return;
+})();
+
+// ----------------------------------------- the Evaluations tab, as asked for on 16 Sep (Andrea)
+(function () {
+  const rs = payload.reviewStatus;
+  if (!rs || !rs.overall) return;
+  check(
+    'payload carries the AI split per design and per topic',
+    !!(rs.ai_by_sg && rs.ai_by_topic),
+    rs.ai_by_sg ? Object.keys(rs.ai_by_sg).length + ' designs' : 'absent',
+  );
+  if (rs.ai_by_sg) {
+    const tot = Object.values(rs.ai_by_sg).reduce((a, b) => a + b, 0);
+    check(
+      'the per-design AI counts add back to the overall total',
+      tot === rs.ai_in_unacceptable,
+      `${tot} vs ${rs.ai_in_unacceptable}`,
+    );
+    // a subset can never exceed the bucket it sits inside
+    const over = Object.keys(rs.ai_by_sg).filter(
+      (k) => rs.ai_by_sg[k] > (rs.by_sg[k] || {}).unacceptable,
+    );
+    check(
+      'no design has more AI-flagged than unacceptable',
+      over.length === 0,
+      over.join(', '),
+    );
+  }
+
+  let ev = null;
+  for (let i = 1; i <= 3 && !ev; i++) {
+    let h;
+    try {
+      h = build(null, { [i]: 'evaluations' });
+    } catch (e) {
+      continue;
+    }
+    if (/Review verdicts/.test(h)) ev = h;
+  }
+  check('Evaluations renders as its own tab', !!ev);
+  if (!ev) return;
+  check(
+    'it is NOT still a view under the funnels',
+    !/Data review/.test(build(null, { 1: 'funnels' })),
+  );
+  check('the table shows a Suspected AI column', /Suspected AI/.test(ev));
+  check(
+    'the dead selection columns are gone',
+    !/% selected/.test(ev) && !/All completed<\/th>/.test(ev),
+  );
+  check(
+    'there is a Reviewed column instead',
+    /<th[^>]*>Reviewed<\/th>/.test(ev),
+  );
+  // rates must be over REVIEWED, not over all completed
+  const sg = Object.keys(payload.reviewStatus.by_sg)[0];
+  const o = payload.reviewStatus.by_sg[sg];
+  const revBase = (o.acceptable || 0) + (o.unacceptable || 0);
+  const pc = Math.round((1000 * o.acceptable) / revBase) / 10;
+  check(
+    'acceptable is shown as a % of those reviewed, with the count beside it',
+    ev.includes(pc + '%') && ev.includes((o.acceptable || 0).toLocaleString()),
+    `${sg}: ${pc}% of ${revBase} reviewed`,
+  );
+  const wouldBe = Math.round((1000 * (o['not-reviewed'] || 0)) / revBase) / 10;
+  check(
+    'not-yet-reviewed stays a bare count, no rate',
+    ev.includes((o['not-reviewed'] || 0).toLocaleString()) &&
+      !ev.includes(wouldBe + '%'),
+    `${sg}: shows ${o['not-reviewed']}, would have been ${wouldBe}% if rated`,
+  );
+})();
+
+// ------------------------------------ % Acceptable in Breakdowns must AGREE with the Evaluations tab
+// Two tabs showing the same metric on different bases is the defect this check exists to prevent.
+(function () {
+  const rs = payload.reviewStatus;
+  if (!rs || !rs.by_sg) return;
+  let bd = null;
+  for (let i = 1; i <= 3 && !bd; i++) {
+    let h;
+    try {
+      h = build(null, { [i]: 'breakdowns' });
+    } catch (e) {
+      continue;
+    }
+    if (/% Acceptable/.test(h)) bd = h;
+  }
+  check('Breakdowns shows a % Acceptable column', !!bd);
+  if (!bd) return;
+  const bad = [];
+  const groups = {};
+  Object.keys(rs.by_sg).forEach((sg) => {
+    const g = /^(ABT\d)-/.test(sg) ? sg.replace(/-(A|B)$/, '') : sg;
+    groups[g] = groups[g] || { acceptable: 0, unacceptable: 0 };
+    groups[g].acceptable += rs.by_sg[sg].acceptable || 0;
+    groups[g].unacceptable += rs.by_sg[sg].unacceptable || 0;
+  });
+  Object.keys(groups).forEach((g) => {
+    const o = groups[g];
+    const rev = o.acceptable + o.unacceptable;
+    if (!rev) return;
+    const pc = Math.round((1000 * o.acceptable) / rev) / 10;
+    if (!bd.includes(pc + '%')) bad.push(g + ' expected ' + pc + '%');
+  });
+  check(
+    'every design % matches acceptable / reviewed, the same base the Evaluations tab uses',
+    bad.length === 0,
+    bad.length
+      ? bad.slice(0, 3).join('; ')
+      : Object.keys(rs.by_sg).length + ' designs agree',
+  );
 })();
 
 // ---------------------------------------------------------------- no em/en dashes (house style)

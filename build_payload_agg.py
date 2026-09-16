@@ -1344,6 +1344,11 @@ _rev_overall = defaultdict(int)
 _rev_sg = defaultdict(lambda: defaultdict(int))
 _rev_topic = defaultdict(lambda: defaultdict(int))
 _rev_ai_in_unacc = _rev_ai_in_acc = 0
+# Per design and per topic as well as overall. The table shows one row per design, and "161 of the 282
+# were AI" in a sentence underneath cannot be split down to those rows - so a design could be entirely
+# AI-driven or entirely quality-driven and the table would look identical either way.
+_rev_ai_sg = defaultdict(int)
+_rev_ai_topic = defaultdict(int)
 for _st, _sg, _tc, _ai in _rev_cell.values():
     _rev_overall[_st] += 1
     _rev_sg[_sg][_st] += 1
@@ -1351,6 +1356,8 @@ for _st, _sg, _tc, _ai in _rev_cell.values():
     if _ai:
         if _st == "unacceptable":
             _rev_ai_in_unacc += 1
+            _rev_ai_sg[_sg] += 1
+            _rev_ai_topic[_tc] += 1
         elif _st == "acceptable":
             _rev_ai_in_acc += 1
 review_status = {
@@ -1362,6 +1369,9 @@ review_status = {
     # three keys above still cover every completed interview exactly once.
     "ai_in_unacceptable": _rev_ai_in_unacc,
     "ai_in_acceptable": _rev_ai_in_acc,
+    # the same subset, split the way the table is split
+    "ai_by_sg": {k: _rev_ai_sg.get(k, 0) for k in sorted(_rev_sg)},
+    "ai_by_topic": {k: _rev_ai_topic.get(k, 0) for k in sorted(_rev_topic)},
 }
 _rev_tot = sum(_rev_overall[k] for k in _REVIEW_KEYS)
 print(
