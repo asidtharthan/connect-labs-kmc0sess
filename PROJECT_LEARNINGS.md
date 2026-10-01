@@ -1,7 +1,7 @@
 # Connect Interviews: project learnings
 
 **Read this before starting any work on this project.** It is the running record of rules, traps and
-settled facts. Update it whenever something is learned, corrected or decided. Last updated 2026-08-24.
+settled facts. Update it whenever something is learned, corrected or decided. Last updated 2026-10-01.
 
 ---
 
@@ -9,14 +9,39 @@ settled facts. Update it whenever something is learned, corrected or decided. La
 
 **Read this section every time. It is short on purpose.**
 
-| #   | Ask                                         | Command                                                            | If it fails                                                    |
-| --- | ------------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------- |
-| 1   | Did I write down a risk and not measure it? | re-read my own notes for "this could break" / "I should check"     | go measure it NOW, before the next step                        |
-| 2   | Does this change REMOVE or RESHAPE data?    | `python impact_diff.py` (needs a `--snapshot before` taken first)  | paste the printed list into `allow_regression`; never guess it |
-| 3   | Will CI pass?                               | `python preflight.py`                                              | fix locally; do not push to find out                           |
-| 4   | Am I quoting a number to a human?           | it must come from `_pull_full_live.py`, never a local build        | the local build is ~40% short                                  |
-| 5   | Did I add a gate?                           | mutate the payload and prove the gate fails                        | a gate that cannot fail is decoration                          |
-| 6   | Is the cohort mapping edited in EVERY copy? | `build_payload_agg.py`, `audit_e2e.py`, `brutal_verify.py`, render | `brutal_verify` keeps its own copy and will fail alone         |
+| #   | Ask                                            | Command                                                            | If it fails                                                    |
+| --- | ---------------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------- |
+| 1   | Did I write down a risk and not measure it?    | re-read my own notes for "this could break" / "I should check"     | go measure it NOW, before the next step                        |
+| 2   | Does this change REMOVE or RESHAPE data?       | `python impact_diff.py` (needs a `--snapshot before` taken first)  | paste the printed list into `allow_regression`; never guess it |
+| 3   | Will CI pass?                                  | `python preflight.py`                                              | fix locally; do not push to find out                           |
+| 4   | Am I quoting a number to a human?              | it must come from `_pull_full_live.py`, never a local build        | the local build is ~40% short                                  |
+| 5   | Did I add a gate?                              | mutate the payload and prove the gate fails                        | a gate that cannot fail is decoration                          |
+| 6   | Is the cohort mapping edited in EVERY copy?    | `build_payload_agg.py`, `audit_e2e.py`, `brutal_verify.py`, render | `brutal_verify` keeps its own copy and will fail alone         |
+| 7   | Did the SCREEN change anywhere I did not mean? | snapshot before AND after, then diff (see below)                   | an unexpected screen change is a regression until explained    |
+
+### Snapshot every change, end to end (standing rule from 2026-10-01)
+
+The programme is finished and the published numbers are frozen, so **every** dashboard change, however
+small, is checked against the live dashboard before it ships. Take the BEFORE snapshot first, before
+editing anything, or the comparison measures the change against itself.
+
+```bash
+python pull_live_render.py                                  # 1. saves live_v<N>.js + live_data_v<N>.json,
+                                                            #    and proves HEAD + that data == live
+node render_snapshot.js .render_snapshots/live_v<N>.js .render_snapshots/before.json     # 2. BEFORE
+# ...make the change...
+node render_snapshot.js --template docs/interviews_render_template.js \
+     .render_snapshots/live_data_v<N>.json .render_snapshots/after.json                   # 3. AFTER, same data
+node render_snapshot.js --diff .render_snapshots/before.json .render_snapshots/after.json \
+     --allow '^evaluations'                                 # 4. name ONLY the tab you meant to change
+```
+
+`render_snapshot.js` renders every tab under every view option the template offers (about 540 screen
+states) and diffs all visible text. PASS needs three things: the embedded DATA is byte-identical, no
+screen outside `--allow` changed, and both runs covered the same states. Then check the screen you DID
+change cell by cell (every number the same, only the intended difference), and after publishing run the
+snapshot again on the render pulled back off Labs. A data change will fail the DATA check by design; use
+`impact_diff.py` for the numbers and read every changed screen the diff lists.
 
 **The rule behind the checklist:** a predicted failure that is not measured is worse than an
 unpredicted one. If naming the risk was possible, enumerating its instances was possible too.

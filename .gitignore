@@ -437,3 +437,6 @@ docs/report_freeze/.id_map_*.csv
 # braces guard in case one is ever created inside it.
 connect-labs-dr-backup/
 *_dr_bundle/
+
+# render_snapshot.js before/after snapshots (contain live payload)
+.render_snapshots/

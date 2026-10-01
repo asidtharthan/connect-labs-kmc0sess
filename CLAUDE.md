@@ -174,9 +174,16 @@ A local MCP server (`tools/commcare_mcp/`) gives Claude access to CommCare appli
 
 ## Interviews dashboard: run preflight before you push
 
-**Start at [PROJECT_LEARNINGS.md](PROJECT_LEARNINGS.md) section 0** - a six-line pre-push checklist,
+**Start at [PROJECT_LEARNINGS.md](PROJECT_LEARNINGS.md) section 0** - a seven-line pre-push checklist,
 kept short so there is no excuse for skipping it. The rest of that file is the running record of
 every rule, trap and settled fact on this project.
+
+**Every dashboard change gets a before/after snapshot against LIVE, no exceptions.** The published
+numbers are frozen, so a change must move nothing it did not mean to. Before editing:
+`python pull_live_render.py` then `node render_snapshot.js .render_snapshots/live_v<N>.js
+.render_snapshots/before.json`; after: snapshot the new template on the same live data and run
+`node render_snapshot.js --diff ... --allow '<the tab you changed>'`. It must report DATA identical and
+zero unexpected screen changes across ~540 states. Full procedure in PROJECT_LEARNINGS.md section 0.
 
 `python preflight.py` reproduces the CI publish job locally and is the difference between anticipating
 a failure and discovering it. On 2026-08-25 the job failed seven times in one day; every failure was
