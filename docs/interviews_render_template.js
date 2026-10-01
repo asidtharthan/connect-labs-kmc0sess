@@ -93,6 +93,9 @@ function WorkflowUI(props) {
   // Series hidden via the chart legend, by dataset index. The table reads this too, so a filtered
   // chart and its table always agree.
   var ehd = React.useState({}); var engHidden = ehd[0], setEngHidden = ehd[1];
+  // Evaluations verdict table sort. Declared LAST so no earlier hook changes index. Defaults to the row
+  // name, so ticking a verdict box can never reorder the rows (it used to sort by the ticked total).
+  var rvs = React.useState({ key: "name", dir: "asc" }); var revSort = rvs[0], setRevSort = rvs[1];
   var eng3Ref = React.useRef(null), eng3Inst = React.useRef(null);
 
   // Design + topic names come from the build (DATA.subgroupDesign / topicNames), derived from the
@@ -1921,8 +1924,34 @@ function WorkflowUI(props) {
       var rev = (o.acceptable || 0) + (o.unacceptable || 0);
       var aiSrc = revBy === "sg" ? (RS.ai_by_sg || {}) : (RS.ai_by_topic || {});
       return { k: k, o: o, inc: inc, tot: tot, rev: rev, ai: aiSrc[k] || 0,
+               name: revBy === "topic" ? ((DATA.topicNames || {})[k] || k) : k,
                pct: tot ? Math.round((1000 * inc) / tot) / 10 : null };
-    }).sort(function (a, b) { return b.inc - a.inc; });
+    });
+    // Sorted by what the column SHOWS: the rate for the three verdict-rate columns, the count for the
+    // other two. Ties, and the default, go by name with numeric order so "Malaria 2" precedes "Malaria 10".
+    var byName = function (a, b) { return a.name.localeCompare(b.name, undefined, { numeric: true }); };
+    var sortVal = function (r, key) {
+      if (key === "rev") return r.rev;
+      if (key === "not-reviewed") return r.o[key] || 0;
+      return r.rev ? (key === "ai" ? r.ai : r.o[key] || 0) / r.rev : -1;
+    };
+    rows.sort(function (a, b) {
+      var c = revSort.key === "name" ? byName(a, b) : sortVal(a, revSort.key) - sortVal(b, revSort.key);
+      return (revSort.dir === "asc" ? c : -c) || byName(a, b);
+    });
+    // Click a header to sort by it, click again to reverse. Numbers open highest first, names A to Z.
+    var sortTh = function (key, label, style, title) {
+      var on = revSort.key === key;
+      return (
+        <th className={"px-2 py-1 border-b cursor-pointer select-none " + (key === "name" ? "text-left" : "text-right")}
+            style={style} title={(title ? title + " " : "") + "Click to sort."}
+            onClick={function () {
+              setRevSort({ key: key, dir: on ? (revSort.dir === "asc" ? "desc" : "asc") : (key === "name" ? "asc" : "desc") });
+            }}>
+          {label}{on ? (revSort.dir === "asc" ? " ▲" : " ▼") : ""}
+        </th>
+      );
+    };
 
     // Two acceptable counts on one screen could not be reconciled by eye, so the session table is
     // gone (Mansi, 4 Sep - one number and one explanation). What survives is the single figure that
@@ -1995,31 +2024,30 @@ function WorkflowUI(props) {
           <table className="min-w-full text-xs border-collapse">
             <thead className="bg-gray-50 text-gray-600">
               <tr>
-                <th className="px-2 py-1 text-left border-b">{revBy === "sg" ? "Design" : "Topic"}</th>
+                {sortTh("name", revBy === "sg" ? "Design" : "Topic")}
                 {REV_META.map(function (m) {
                   return (
                     <React.Fragment key={m[0]}>
-                      <th className="px-2 py-1 text-right border-b" style={{ color: m[2], opacity: revInc[m[0]] ? 1 : 0.35 }}>{m[1]}</th>
+                      {sortTh(m[0], m[1], { color: m[2], opacity: revInc[m[0]] ? 1 : 0.35 })}
                       {/* Suspected AI sits immediately after Unacceptable because it is a SUBSET of it,
                           not a fourth verdict. Without it per row, a design could be entirely AI-driven
-                          or entirely quality-driven and this table would look identical. */}
-                      {m[0] === "unacceptable" ? (
-                        <th className="px-2 py-1 text-right border-b" style={{ color: "#F9A825", opacity: revInc[m[0]] ? 1 : 0.35 }}
-                            title="Of the unacceptable, how many were flagged for suspected AI use. A subset of the column to its left, not an addition to it.">
-                          &#8627; Suspected AI
-                        </th>
-                      ) : null}
+                          or entirely quality-driven and this table would look identical. The name says
+                          so (Ali, 29 Sep), and its rate uses the same reviewed base as its neighbours. */}
+                      {m[0] === "unacceptable"
+                        ? sortTh("ai", "Unacceptable: Suspected AI", { color: "#F9A825", opacity: revInc[m[0]] ? 1 : 0.35 },
+                                 "Unacceptable AND flagged for suspected AI use, as a share of those reviewed. Part of the Unacceptable column, not added to it.")
+                        : null}
                     </React.Fragment>
                   );
                 })}
-                <th className="px-2 py-1 text-right border-b">Reviewed</th>
+                {sortTh("rev", "Reviewed")}
               </tr>
             </thead>
             <tbody>
               {rows.map(function (r) {
                 return (
                   <tr key={r.k} className="border-b">
-                    <td className="px-2 py-1 font-medium">{revBy === "topic" ? ((DATA.topicNames || {})[r.k] || r.k) : r.k}</td>
+                    <td className="px-2 py-1 font-medium">{r.name}</td>
                     {REV_META.map(function (m) {
                       var v = r.o[m[0]] || 0;
                       // Acceptable and unacceptable are shown as a RATE over the reviewed base, because
@@ -2034,7 +2062,8 @@ function WorkflowUI(props) {
                           </td>
                           {m[0] === "unacceptable" ? (
                             <td className="px-2 py-1 text-right" style={{ opacity: revInc[m[0]] ? 1 : 0.35, color: "#8a6d1f" }}>
-                              {(r.ai || 0).toLocaleString()}
+                              {r.rev ? <span><b>{Math.round((1000 * r.ai) / r.rev) / 10}%</b> <span className="text-gray-500">({r.ai.toLocaleString()})</span></span>
+                                     : r.ai.toLocaleString()}
                             </td>
                           ) : null}
                         </React.Fragment>
