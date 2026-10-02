@@ -64,7 +64,6 @@ function WorkflowUI(props) {
   var rvi = React.useState({ acceptable: true, unacceptable: true, "not-reviewed": true });
   var revInc = rvi[0], setRevInc = rvi[1];
   var rvb = React.useState("sg"); var revBy = rvb[0], setRevBy = rvb[1];
-  var rvai = React.useState(false); var revAi = rvai[0], setRevAi = rvai[1];   // Suspected AI opens inside Unacceptable
   var fvw = React.useState("retention"); var funView = fvw[0], setFunView = fvw[1];   // funnels tab: retention lines | cohort engagement (3-panel) | drop-off by cohort
   var cdl = React.useState("design"); var cdLevel = cdl[0], setCdLevel = cdl[1];       // drop-off view: by design | every cohort
   var cds = React.useState("drop"); var cdSort = cds[0], setCdSort = cds[1];           // drop-off view: sort by drop-off % | cohort id
@@ -96,30 +95,18 @@ function WorkflowUI(props) {
   // Evaluations verdict table sort. Declared LAST so no earlier hook changes index. Defaults to the row
   // name, so ticking a verdict box can never reorder the rows (it used to sort by the ticked total).
   var rvs = React.useState({ key: "name", dir: "asc" }); var revSort = rvs[0], setRevSort = rvs[1];
+  // Granular filter: OCS review verdict (Acceptable | Unacceptable | Not yet reviewed | Suspected AI). Last
+  // hook, for the same reason as rvs above.
+  var gvf = React.useState([]); var fVd = gvf[0], setFVd = gvf[1];
   var eng3Ref = React.useRef(null), eng3Inst = React.useRef(null);
 
   // Design + topic names come from the build (DATA.subgroupDesign / topicNames), derived from the
-  // CommCare HQ interview_schedule lookup - single source of truth. Fallbacks for older data only.
+  // CommCare HQ interview_schedule lookup - single source of truth. The hardcoded fallbacks for payloads
+  // older than both keys were removed 2026-10-01 to make room under the 512 KB cap: every build since
+  // July emits both, and the design fallback had gone stale anyway (its ABT3 topics were wrong).
   var SUBGROUP_DESIGN = {};
-  if (DATA.subgroupDesign) {
-    Object.keys(DATA.subgroupDesign).forEach(function (sg) { SUBGROUP_DESIGN[sg] = DATA.subgroupDesign[sg].topics; });
-  } else {
-    SUBGROUP_DESIGN = {
-      "TRS": ["A", "B"], "TRE": ["A", "B", "C", "D", "E"],
-      "ABT1-A": ["1", "2", "3", "4"], "ABT1-B": ["1", "2", "3", "4"],
-      "ABT2-A": ["1", "2"], "ABT2-B": ["1", "2", "5", "6", "7", "8", "9", "3"],
-      "PANEL": ["7", "1", "2", "12", "3", "4", "5", "6", "C", "10", "11", "8", "13"],
-      "ABT3-A": ["8", "9", "10", "11"], "ABT3-B": ["8", "9", "10", "11"],
-      "EXT": ["11", "C", "99"]
-    };
-  }
-  var TOPIC_NAMES = DATA.topicNames || { A: "Community Demographics", B: "Malaria", C: "Nutrition Prevalance and Programs",
-    D: "Water & Diarrhea", E: "Community & FLW Profile", "1": "Seasonal Malaria Chemoprevention",
-    "2": "Seasonal Malaria Chemoprevention 2", "3": "Bed Net Usage", "4": "Health Worker Experience",
-    "5": "Family Planning", "6": "Vitamin A Supplementation", "7": "Vaccines",
-    "8": "Antibiotics and ACT Use", "9": "Medicine Quality & Counterfeiting",
-    "10": "Malaria 2", "11": "Water & Diarrhea 2", "12": "Community & FLW Profile 2", "13": "Medicine Quality & Counterfeiting 2", "14": "Malaria 5",
-    "8S": "Antibiotics and ACT Use 2", "8L": "Antibiotics and ACT Use 3", "10S": "Malaria 3", "10L": "Malaria 4", "11S": "Water & Diarrhea 3", "11L": "Water & Diarrhea 4", "13L": "Medicine Quality & Counterfeiting 3" };
+  Object.keys(DATA.subgroupDesign || {}).forEach(function (sg) { SUBGROUP_DESIGN[sg] = DATA.subgroupDesign[sg].topics; });
+  var TOPIC_NAMES = DATA.topicNames || {};
   var SG_ORDER = ["TRS", "TRE", "ABT1-A", "ABT1-B", "ABT2-A", "ABT2-B", "PANEL", "ABT3-A", "ABT3-B", "2WT", "EXT"];
   // Subgroups whose Connect funnel (Invited/Accepted/Claimed) hasn't been pulled yet (cohorts present
   // in the interview data but missing from the Connect snapshot). Their Invited=0 means "not pulled",
@@ -2859,6 +2846,50 @@ function WorkflowUI(props) {
     });
     return rows;
   }
+  // One row per COMPLETED interview with its verdict - the same rows as the report's 9,431, not one per
+  // session. Each completed matrix cell is paired with its live OCS session: exact cohort first, then the
+  // older sessions that carry no cohort, in cohort order. Checked against the frozen per-interview file on
+  // 2026-10-01: 9,431 of 9,431 land on the same session. Honours every filter except Status.
+  function exportVerdicts() {
+    var cand = {}, used = {}, cells = [], out = [["connect_id", "cohort_id", "subgroup", "interview_n", "topic_code", "topic_name", "session_id", "session_date", "verdict", "suspected_ai", "verdict_source"]];
+    ocsLive.slice().sort(function (a, b) { return a.created_at < b.created_at ? -1 : +(a.created_at > b.created_at); }).forEach(function (r) {
+      var k = r.connect_id + "|" + r.interview;
+      if (r.interview_status === "interview_complete") (cand[k] = cand[k] || []).push(r);
+    });
+    FM.forEach(function (r) { (SUBGROUP_DESIGN[r.g] || []).forEach(function (t, i) { if (r.s[i] === 5) cells.push([r, t, i + 1]); }); });
+    [1, 0].forEach(function (x) {
+      cells.forEach(function (c) {
+        var h = c[3] ? 0 : (cand[c[0].f + "|" + c[1]] || []).filter(function (o) { return !used[o.id] && (x ? o.cohort_id === c[0].c : !o.cohort_id); })[0];
+        if (h) { c[3] = h; used[h.id] = 1; }
+      });
+    });
+    // An interview sent twice can have a second completed session. It belongs to the same interview when
+    // exactly one cell can own it, and the verdict is then the strongest of the two (AI flag OR-ed) - the
+    // rule the build uses for the Evaluations tab, so this export and that tab agree (8,226 / 282 / 923
+    // on the 7 Sep tags rather than 8,224 / 282 / 925).
+    var byK = {};
+    cells.forEach(function (c) { var k = c[0].f + "|" + c[1]; (byK[k] = byK[k] || []).push(c); });
+    Object.keys(cand).forEach(function (k) {
+      cand[k].forEach(function (o) {
+        var cs = used[o.id] ? [] : (byK[k] || []).filter(function (c) { return c[3] && (!o.cohort_id || o.cohort_id === c[0].c); });
+        if (cs.length === 1) (cs[0][4] = cs[0][4] || []).push(o);
+      });
+    });
+    cells.forEach(function (c) {
+      var r = c[0], o = c[3], v = (c[4] || []).reduce(function (a, t) {
+        var w = verdictOf(t.tags);
+        // strongest wins: "Unacceptable" (the only label > "U") beats all; otherwise "Acceptable" < "Not yet
+        // reviewed" alphabetically, so the smaller label is the stronger one
+        return [w[0] > "U" || w[0] < a[0] && a[0] < "U" ? w[0] : a[0], a[1] || w[1]];
+      }, verdictOf(o && o.tags));
+      if (!(gq && (r.f + " " + r.c).toLowerCase().indexOf(gq) < 0) && (!fSg.length || fSg.indexOf(r.g) >= 0) && (!fCo.length || fCo.indexOf(r.c) >= 0) &&
+          (!fTr.length || fTr.indexOf(r.u ? "untrained" : "trained") >= 0) && (!fTopic.length || fTopic.indexOf(c[1]) >= 0) &&
+          (!fVd.length || fVd.indexOf(v[0]) >= 0 || (v[1] && fVd.indexOf("Suspected AI") >= 0)))
+        out.push([r.f, r.c, r.g, c[2], c[1], TOPIC_NAMES[c[1]]].concat(o ? [o.id, (o.created_at || "").slice(0, 10), v[0], v[1] ? "Yes" : "No", v[0][0] !== "N" ? "OCS evaluator tags" : ""] : ["", "", "", "", ""]));
+    });
+    dlCsv(out, "interview_review_verdicts_" + new Date().toISOString().slice(0, 10) + ".csv");
+  }
+
   function matCsvRows(list) {
     var rows = [["connect_id", "cohort", "subgroup"].concat(MTOPICS)];
     list.forEach(function (r) {
@@ -2882,6 +2913,15 @@ function WorkflowUI(props) {
   // ---- Granular: ALL live OCS sessions (from the pipeline prop, not embedded) + client-side search/paging ----
   function liveRows(alias) { var p = props.pipelines; return (p && p[alias] && p[alias].rows) || []; }
   var ocsLive = liveRows("sessions");
+  // OCS review tags -> one verdict plus the AI flag. Unacceptable outranks acceptable, exactly as
+  // build_master_4src._review_status does, so this agrees with the Evaluations tab. The tags are the LLM
+  // evaluator's; human annotation was recorded separately and is not in them. Tags may arrive as a list,
+  // a JSON list or comma-separated text depending on how the pipeline serialises them.
+  function verdictOf(t) {
+    var s = (Array.isArray(t) ? t : t ? (t[0] === "[" ? JSON.parse(t) : t.split(",")) : [])
+      .map(function (x) { return String(x).trim().toLowerCase(); });
+    return [s.indexOf("unacceptable") >= 0 ? "Unacceptable" : s.indexOf("acceptable") >= 0 ? "Acceptable" : "Not yet reviewed", s.indexOf("suspected_ai") >= 0];
+  }
   // (FLW × Topic links, item D) map "connect_id|interview" -> OCS session id, from the live pipeline.
   // Lets each matrix cell link to its session with zero embed-size cost; empty if pipeline not loaded.
   var sessByKey = {};
@@ -2897,7 +2937,7 @@ function WorkflowUI(props) {
         return {
           connect_id: r.connect_id || r.username || "", interview: (iv == null || iv === "") ? "" : String(iv),
           started: !!(iv != null && iv !== ""), completed: stt === "interview_complete",
-          created_at: (r.created_at || "").slice(0, 10), session_id: r.id || r.matched_session_id || "",
+          created_at: (r.created_at || "").slice(0, 10), session_id: r.session_id || r.id || r.matched_session_id || "",
           cohort_id: r.cohort_id || "",   // exact cohort the bot recorded in the OCS session state
         };
       })
@@ -2970,9 +3010,6 @@ function WorkflowUI(props) {
     fi.cohorts[r.c] = 1; fi.cg[r.c] = r.g; if (r.u) fi.u = 1;   // cg: cohort -> subgroup (topic disambiguation)
     cohortSG[r.c] = r.g;
   });
-  // The FLW's cohort id(s). A live OCS session carries no cohort and an FLW can be claimed in several
-  // cohorts, so this lists all (comma-joined); "" if the FLW isn't claimed.
-  function cohortsFor(cid) { var fi = flwInfo[cid]; return fi ? Object.keys(fi.cohorts).sort().join(", ") : ""; }
   // Exact cohort for ONE session. Best source is the OCS session's own state (r.cohort_id - the cohort the
   // bot recorded on that session); every session from ~early May onward has it. Sessions before that predate
   // the field, so the exact cohort is simply not in the source data - for those we ONLY infer a cohort when
@@ -3025,8 +3062,8 @@ function WorkflowUI(props) {
     sessTopicOpts.sort();
   })();
 
-  var anyFilter = !!(fSg.length || fCo.length || fSt.length || fTr.length || fTopic.length || gq);
-  function clearFilters() { setGSearch(""); setFSg([]); setFCo([]); setFSt([]); setFTr([]); setFTopic([]); setGPage(0); }
+  var anyFilter = !!(fSg.length || fCo.length || fSt.length || fTr.length || fTopic.length || fVd.length || gq);
+  function clearFilters() { setGSearch(""); setFSg([]); setFCo([]); setFSt([]); setFTr([]); setFTopic([]); setFVd([]); setGPage(0); }
   // Sessions table: the cohort/subgroup filters match the SESSION'S OWN resolved cohort (sessionCohort),
   // so the filter and the COHORT_ID column always agree - filtering "1PE1" shows only the sessions that
   // are 1PE1, not every session of an FLW who happens to also be in 1PE1. Sessions whose exact cohort
@@ -3240,12 +3277,16 @@ function WorkflowUI(props) {
                   {filterDropdown("topic", "Topic", (gView === "sessions" ? sessTopicOpts : MTOPICS).map(function (t) { return { value: t, label: t + " · " + (TOPIC_NAMES[t] || t) }; }), fTopic, setFTopic)}
                   {filterDropdown("st", "Status", STATES5.map(function (s) { return { value: s, label: STATE_LABEL[s] }; }), fSt, setFSt)}
                   {filterDropdown("tr", "FLW", [{ value: "trained", label: "Trained" }, { value: "untrained", label: "Untrained" }], fTr, setFTr)}
+                  {filterDropdown("vd", "Verdict", ["Acceptable", "Unacceptable", "Not yet reviewed", "Suspected AI"], fVd, setFVd)}
                   {anyFilter ? <button onClick={clearFilters} className="px-2 py-1.5 text-xs text-indigo-600 hover:underline">Clear</button> : null}
                   <span className="mx-1 text-gray-300">|</span>
                   <button onClick={function () { exportGranular(true); }} title="Download exactly the rows shown (all active filters + search)"
                     className="px-2 py-1.5 text-xs rounded-md border border-gray-300 hover:bg-gray-100">⬇ Export (filtered)</button>
                   <button onClick={function () { exportGranular(false); }} title="Download the full dataset for this view, ignoring filters"
                     className="px-2 py-1.5 text-xs rounded-md border border-gray-300 hover:bg-gray-100">⬇ Export all</button>
+                  <button onClick={exportVerdicts} disabled={!ocsLive.length}
+                    title="Completed interviews with review verdicts (all filters except Status)"
+                    className="px-2 py-1.5 text-xs rounded-md border border-indigo-300 text-indigo-700 disabled:opacity-40">⬇ Interview verdicts</button>
                 </div>
 
                 {gView === "sessions" && (
