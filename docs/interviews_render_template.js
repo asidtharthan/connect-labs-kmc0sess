@@ -2840,9 +2840,9 @@ function WorkflowUI(props) {
     a.href = URL.createObjectURL(blob); a.download = name; a.click();
   }
   function sessCsvRows(list) {
-    var rows = [["connect_id", "cohort_id", "interview", "status", "created", "session_link"]];
+    var rows = [["connect_id", "cohort_id", "interview", "status", "created", "session_link", "verdict", "suspected_ai"]];
     list.forEach(function (r) {
-      rows.push([r.connect_id, sessionCohort(r) || "", r.interview || "", r.completed ? "Completed" : (r.started ? "Started" : "-"), r.created_at || "", sessionUrl(r.session_id)]);
+      rows.push([r.connect_id, sessionCohort(r) || "", r.interview || "", r.completed ? "Completed" : (r.started ? "Started" : "-"), r.created_at || "", sessionUrl(r.session_id), r.vd[0], r.vd[1] ? "Yes" : "No"]);
     });
     return rows;
   }
@@ -2884,7 +2884,7 @@ function WorkflowUI(props) {
       }, verdictOf(o && o.tags));
       if (!(gq && (r.f + " " + r.c).toLowerCase().indexOf(gq) < 0) && (!fSg.length || fSg.indexOf(r.g) >= 0) && (!fCo.length || fCo.indexOf(r.c) >= 0) &&
           (!fTr.length || fTr.indexOf(r.u ? "untrained" : "trained") >= 0) && (!fTopic.length || fTopic.indexOf(c[1]) >= 0) &&
-          (!fVd.length || fVd.indexOf(v[0]) >= 0 || (v[1] && fVd.indexOf("Suspected AI") >= 0)))
+          vdOk(v))
         out.push([r.f, r.c, r.g, c[2], c[1], TOPIC_NAMES[c[1]]].concat(o ? [o.id, (o.created_at || "").slice(0, 10), v[0], v[1] ? "Yes" : "No", v[0][0] !== "N" ? "OCS evaluator tags" : ""] : ["", "", "", "", ""]));
     });
     dlCsv(out, "interview_review_verdicts_" + new Date().toISOString().slice(0, 10) + ".csv");
@@ -2921,7 +2921,9 @@ function WorkflowUI(props) {
     var s = (Array.isArray(t) ? t : t ? (t[0] === "[" ? JSON.parse(t) : t.split(",")) : [])
       .map(function (x) { return String(x).trim().toLowerCase(); });
     return [s.indexOf("unacceptable") >= 0 ? "Unacceptable" : s.indexOf("acceptable") >= 0 ? "Acceptable" : "Not yet reviewed", s.indexOf("suspected_ai") >= 0];
-  }
+  }  // The Verdict filter, shared by the Sessions table and the Interview verdicts export so the two agree.
+  function vdOk(v) { return !fVd.length || fVd.indexOf(v[0]) >= 0 || (v[1] && fVd.indexOf("Suspected AI") >= 0); }
+
   // (FLW × Topic links, item D) map "connect_id|interview" -> OCS session id, from the live pipeline.
   // Lets each matrix cell link to its session with zero embed-size cost; empty if pipeline not loaded.
   var sessByKey = {};
@@ -2939,12 +2941,13 @@ function WorkflowUI(props) {
           started: !!(iv != null && iv !== ""), completed: stt === "interview_complete",
           created_at: (r.created_at || "").slice(0, 10), session_id: r.session_id || r.id || r.matched_session_id || "",
           cohort_id: r.cohort_id || "",   // exact cohort the bot recorded in the OCS session state
+          vd: verdictOf(r.tags),          // [verdict, suspected AI] from the session's OCS tags
         };
       })
-    : DATA.granular.map(function (r) {
-        return { connect_id: r.connect_id, interview: r.topic_code, started: r.is_started,
-          completed: r.is_completed, created_at: "", session_id: r.session_id, cohort_id: r.cohort_id || "" };
-      });
+    // No live sessions -> an empty table that says so. It used to fall back to DATA.granular, a 10-row TRS
+    // sample, so every filter read "0 sessions" and the table looked broken rather than unloaded
+    // (2026-10-01, when the OCS key had expired). Removing it also paid for the verdict column.
+    : [];
   var gq = gSearch.trim().toLowerCase();
   // ---- per-(FLW × cohort) × topic matrix + a connect_id lookup for filtering both tables ----
   // flwMatrix arrives compact (payload-size trim): flwMatrixV2 = one string per unique FLW,
@@ -2952,10 +2955,9 @@ function WorkflowUI(props) {
   // cohortIdx indexes flwMatrixCohorts; stateDigits is one digit per topic; a trailing "u" is the
   // untrained flag. flwMatrixOrder[cohortIdx] is a run of fixed-width (flwMatrixOrderW) base36
   // indices into flwMatrixV2 that restores the ORIGINAL row order (the matrix table paginates and
-  // exports in array order, so order is user-visible). Falls back to the old uncompressed
-  // DATA.flwMatrix when flwMatrixV2 is absent, so this render works with old and new payloads.
+  // exports in array order, so order is user-visible). The fallback to the pre-August uncompressed
+  // DATA.flwMatrix was removed 2026-10-02 for room under the cap; every build since emits flwMatrixV2.
   var FM = (function () {
-    if (!DATA.flwMatrixV2) return DATA.flwMatrix || [];
     var CH = DATA.flwMatrixCohorts || [], V2 = DATA.flwMatrixV2;
     var ORD = DATA.flwMatrixOrder || [], W = DATA.flwMatrixOrderW || 3;
     var per = [];
@@ -2987,14 +2989,13 @@ function WorkflowUI(props) {
   //   [cohort, completed, started-not-completed, available-missed-overdue, available-not-started,
   //    not-available-yet, not-triggered]
   // in a fixed APPEND-ONLY order, because seven long state names x 220 rows cost ~30 KB. Rehydrate to
-  // the object shape the table expects. Falls back to the old object rows so this render works with
-  // either payload vintage.
+  // the object shape the table expects. (The fallback for the older object rows was removed 2026-10-02:
+  // every build since emits the array form.)
   var TSC_ORDER = ["completed", "started-not-completed", "available-missed-overdue",
     "available-not-started", "not-available-yet", "not-triggered"];
   function tscRows(code) {
     var raw = (DATA.topicStatusCohort || {})[code] || [];
     return raw.map(function (r) {
-      if (!Array.isArray(r)) return r;
       var o = { cohort: r[0], total: 0 };
       TSC_ORDER.forEach(function (k, i) { o[k] = r[i + 1] || 0; o.total += o[k]; });
       return o;
@@ -3078,7 +3079,7 @@ function WorkflowUI(props) {
     if (fTr.length && (!fi || fTr.indexOf(fi.u ? "untrained" : "trained") < 0)) return false;
     if (fTopic.length && fTopic.indexOf(String(r.interview)) < 0) return false;
     if (fSt.length) { var st = r.completed ? "completed" : (r.started ? "started-not-completed" : ""); if (fSt.indexOf(st) < 0) return false; }
-    return true;
+    return vdOk(r.vd);
   });
   // FLW × Topic matrix rows: row-level filters; status filter = FLW has >=1 topic in that state.
   var fStIdxs = fSt.map(function (s) { return STATES.indexOf(s); }).filter(function (i) { return i >= 0; });
@@ -3292,7 +3293,7 @@ function WorkflowUI(props) {
                 {gView === "sessions" && (
                   <div>
                     <div className="px-1 pb-2 text-xs text-gray-500">
-                      {sessFiltered.length} sessions{ocsLive.length ? " (live OCS)" : " (embedded sample - live pipeline not loaded)"}{anyFilter ? " matching" : ""}
+                      {sessFiltered.length} sessions{ocsLive.length ? " (live OCS)" : " - live OCS sessions not loaded"}{anyFilter ? " matching" : ""}
                     </div>
                     <div className="overflow-x-auto" style={{ maxHeight: "65vh" }}>
                       <table className="min-w-full divide-y divide-gray-200">
@@ -3302,6 +3303,7 @@ function WorkflowUI(props) {
                           {sortTh("interview", "interview")}
                           {sortTh("status", "status")}
                           {sortTh("created", "created")}
+                          <th className={th + " text-left"}>verdict</th>
                           <th className={th + " text-left"}>session</th>
                         </tr></thead>
                         <tbody className="bg-white divide-y divide-gray-100">
@@ -3315,6 +3317,7 @@ function WorkflowUI(props) {
                                 <td className={td}>{r.interview || "-"}</td>
                                 <td className={td + " " + cls}>{label}</td>
                                 <td className={td + " text-gray-500"}>{r.created_at || "-"}</td>
+                                <td className={td + (r.vd[0] > "U" ? " text-red-700" : r.vd[0] < "B" ? " text-green-700" : " text-gray-400")}>{r.vd[0]}{r.vd[1] ? " · AI" : ""}</td>
                                 <td className={td + " font-mono text-xs"}>{r.session_id ? <a href={sessionUrl(r.session_id)} target="_blank" rel="noopener noreferrer" title={r.session_id} className="text-indigo-600 hover:underline">view ↗</a> : ""}</td>
                               </tr>
                             );
