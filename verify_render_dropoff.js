@@ -1277,21 +1277,27 @@ check(
 // but not selectable. This injects a synthetic row for a cohort the matrix does not know and requires
 // it to reach the Sessions dropdown and NOT the matrix one.
 (function () {
+  // The synthetic session arrives through the LIVE sessions pipeline, the only source the Sessions
+  // table reads since the embedded DATA.granular sample was dropped (2026-10-02). Injecting it into
+  // DATA.granular, as this check used to, no longer reaches the table at all.
   const withRow = JSON.parse(data);
-  withRow.granular = (withRow.granular || []).concat([
-    {
-      connect_id: 'zzsynthetic000000001',
-      cohort_id: 'ZZRETIRED',
-      subgroup: 'ZZ',
-      interview_n: 1,
-      topic_code: '999',
-      is_triggered: true,
-      is_initiated: true,
-      is_started: true,
-      is_completed: true,
-      session_id: 'synthetic-sid',
+  const PIPES = {
+    pipelines: {
+      sessions: {
+        rows: [
+          {
+            id: 'synthetic-sid',
+            connect_id: 'zzsynthetic000000001',
+            cohort_id: 'ZZRETIRED',
+            interview: '999',
+            interview_status: 'interview_complete',
+            created_at: '2026-01-01T00:00:00Z',
+            tags: '[]',
+          },
+        ],
+      },
     },
-  ]);
+  };
   let Comp2;
   try {
     const inj = src.replace('/*__DATA__*/', JSON.stringify(withRow));
@@ -1324,7 +1330,7 @@ check(
     };
     try {
       return ReactDOMServer.renderToStaticMarkup(
-        React.createElement(Comp2, {}),
+        React.createElement(Comp2, PIPES),
       );
     } finally {
       React.useState = real;
