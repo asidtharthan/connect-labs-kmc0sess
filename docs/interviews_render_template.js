@@ -384,7 +384,7 @@ function WorkflowUI(props) {
         charts: [
           ["Connect funnel", "Invited → accepted → Learn completed → claimed → initiated. Everything before an interview exists."],
           ["Interview drop-off table", "Per interview slot: eligible, triggered, started, completed, with three percentage bases (see Indicators)."],
-          ["Retention lines", "Completion by interview number, with a Denominator toggle and a de-impact toggle."],
+          ["Retention lines", "Share who STARTED each interview number, with a Denominator toggle and a de-impact toggle."],
           ["Cohort Engagement (3 panels)", "Weekly recruitment, outcome (Finished / Dropped off / Schedule not completed / In progress) plus rhythm (Steady / Inconsistent), and status-now (New / Active / Slow / Quiet / Finished). The outcome lines follow whichever of the three readings of “dropped off” is selected; rhythm and status-now measure gaps between sessions, so no definition of drop-off changes them."],
           ["Drop-off by cohort", "One row per cohort design or per individual cohort, each scored at ITS OWN end date rather than today or a date shared across the design. Five mutually exclusive states, defined on the page itself, plus a table showing what a fixed number of days would have meant in each design. Sortable by drop-off or by name at either level."]
         ] },
@@ -394,8 +394,8 @@ function WorkflowUI(props) {
       { id: "breakdowns", name: "Breakdowns", question: "How does completion differ by who and where?",
         reads: ["granular", "topicStatusCohort", "flwMatrixV2"],
         charts: [
-          ["Granular filters", "Multi-select filters over the per-slot rows, with CSV export of the filtered set or everything."],
-          ["FLW × topic matrix", "One row per FLW, one cell per topic, coloured by the 7-state slot model."]
+          ["Sessions table", "One row per live OCS session with its verdict; filters, CSV export, and an Interview verdicts export."],
+          ["FLW × topic matrix", "One row per FLW, one cell per topic, coloured by the 7-state slot model. Columns use a fixed topic order (A-E, 1, 2...), not each FLW's schedule, so a grey cell can sit left of a green one; in schedule order, grey is where the FLW stopped."]
         ] },
       { id: "flw", name: "FLW Retention", question: "Treating each PERSON as the unit, who keeps going and who stops?",
         reads: ["flwEngagement"],
@@ -433,14 +433,14 @@ function WorkflowUI(props) {
         base: "Eligible, triggered, or the interview-1 base - the table shows all three",
         gotcha: "Always check WHICH base a percentage uses. “% of base” compares against interview 1, so it falls as the schedule progresses even when each individual step is healthy." },
       { g: "Retention", name: "Retention line - # Initiated", where: "Funnels → Retention lines",
-        how: "Completed at interview N divided by everyone who initiated the study.",
-        base: "Fixed base = initiated", gotcha: "Falls steeply for long schedules simply because later interviews have not been offered yet." },
+        how: "Started interview N divided by everyone who initiated the study.",
+        base: "Fixed base = initiated", gotcha: "Falls steeply for long schedules simply because later interviews have not been offered yet. Quote this, De-impacted, as the headline." },
       { g: "Retention", name: "Retention line - Reached previous interview", where: "Funnels → Retention lines (Denominator toggle)",
         how: "Started at N divided by started at N−1, any status.",
-        base: "Moving base = the previous step", gotcha: "Answers “of those who got here, how many continued”. NOT the same numerator as the other view: it counts FLWs who started interview N *and also* started N-1, so it is smaller than the raw Started figure shown in the drop-off table. Using raw Started would push several last slots past 100%. (Deliberately no worked example here: this tab derives every number from live data, and a hardcoded illustration goes stale within days.)" },
+        base: "Moving base = the previous step", gotcha: "Answers “of those who got here, how many continued”. Shows WHERE people drop; not the headline. NOT the same numerator as the other view: it counts FLWs who started interview N *and also* started N-1, so it is smaller than the raw Started figure shown in the drop-off table. Using raw Started would push several last slots past 100%." },
       { g: "Retention", name: "De-impact", where: "Funnels → de-impact toggle",
         how: "Removes FLWs affected by a known upstream scheduling artefact where a final interview could fire back-to-back with the one before it.",
-        base: "-", gotcha: "A correction for a bug in the interview app, not a data cleanup. Root cause is upstream; the toggle only shows what the number would be without it." },
+        base: "-", gotcha: "A correction for a bug in the interview app, not a data cleanup. Root cause is upstream; the toggle only shows what the number would be without it. Not applied to the Reached prev line." },
       { g: "Engagement", name: "Finished", where: "Funnels → Cohort Engagement; FLW Retention",
         how: "Completed EVERY interview in their cohort’s design. The finish date is the date the last one was completed.",
         base: "FLWs who started ≥ 1 interview in that subgroup",
@@ -449,7 +449,7 @@ function WorkflowUI(props) {
         how: "Both views offer the same three readings of the same workers, with the same default. (1) STOPPED AND NEVER CAME BACK - default - they let a sent interview pass its deadline AND completed nothing afterwards. (2) MISSED ANY INTERVIEW - they let any sent interview pass its deadline, even if they carried on. (3) NO CONTACT FOR 14 DAYS - not finished and no session for 14 days, the same 14 for every design. A deadline is one interview gap after it was released (that is, after the interview was sent), so 3 days in a 3-day design and 14 in a 14-day one - the same rule the FLW × Topic matrix uses to call a slot missed/overdue.",
         base: "FLWs who started ≥ 1 interview",
         gotcha: "Read MISSED ANY INTERVIEW as data coverage, not retention: a longer schedule offers more chances to slip, so it penalises long designs by construction. NO CONTACT FOR 14 DAYS is kept for continuity only - it is blind to how fast a cohort runs, it climbs on its own as time passes, and it is a reconstruction rather than a replay of the figures published before 21 Aug. Only interviews the bot ACTUALLY SENT can be missed: an FLW who completed everything sent but whose design never finished is SCHEDULE NOT COMPLETED, not dropped. Recoverable on purpose: complete a late interview and the FLW leaves the bucket." },
-      { g: "Quality", name: "OCS review verdict", where: "Funnels -> Data review",
+      { g: "Quality", name: "OCS review verdict", where: "Evaluations; Breakdowns → Sessions",
         how: "The verdict a reviewer applied to the FLW's session in Open Chat Studio, read from the session `tags` field: acceptable, unacceptable, or suspected_ai (checked first, since a session can carry both and \u201cthe FLW pasted an AI answer\u201d is the more important fact). An interview with no verdict reads NOT YET REVIEWED.",
         base: "COMPLETED interviews. A verdict on an interview nobody finished would not mean anything, and mixing the two bases is how Labs and OCS stopped agreeing.",
         gotcha: "Reviewing happens long AFTER an interview finishes, so the reviewed share climbs over time on its own and any acceptable rate is a share of what has been looked at, not of the work done. Always quote the not-yet-reviewed count beside it. This is also the whole explanation of the recurring \u201cOCS shows fewer sessions than Labs\u201d question: the OCS screen filters to tagged sessions and drops the unreviewed ones silently. `status` on an OCS session is NOT this field - nearly every session reads pending-review whatever its verdict." },
@@ -472,11 +472,11 @@ function WorkflowUI(props) {
       { g: "Engagement", name: "New / Active / Slow / Quiet", where: "Funnels → Cohort Engagement panel 3",
         how: "Status right now, in priority order: first-ever interview this week (New), last interview within ONE interview gap (Active), one to two gaps (Slow), more than two gaps (Quiet). Finished takes precedence over all four.",
         base: "FLWs who started ≥ 1 interview",
-        gotcha: "The bands are gap multiples, not fixed days, so “Active” means the same thing (on pace) in a 3-day design and a 14-day one. Until 2026-08-21 they were a flat 7 and 14 days for every design. Quiet and Dropped no longer count the same people: Quiet is about silence, Dropped is about a missed deadline." },
+        gotcha: "The bands are gap multiples, not fixed days, so “Active” means the same thing (on pace) in a 3-day design and a 14-day one. Quiet and Dropped no longer count the same people: Quiet is about silence, Dropped is about a missed deadline." },
       { g: "Engagement", name: "Active window vs Full timeline", where: "Funnels → Cohort Engagement",
         how: "Active window trims trailing weeks once fewer than the cutoff share of a cohort is newly starting or finishing, so a completed cohort does not read as a long flat drop-off. Full timeline shows every week.",
         base: "-",
-        gotcha: "For ALL COHORTS the window runs as long as ANY cohort is still active, because a percentage of the whole population is a bar a small late cohort could never reach. Where there is nothing to trim the toggle is hidden. The choice scopes the WHOLE panel: the KPI tiles read the same week the charts end on, so Active window and Full timeline give different tiles for the same cohort. Until 2026-08-26 the tiles were always as of today whatever the toggle said, which put 39% on a tile above a chart reading 9%." },
+        gotcha: "For ALL COHORTS the window runs as long as ANY cohort is still active, because a percentage of the whole population is a bar a small late cohort could never reach. Where there is nothing to trim the toggle is hidden. The choice scopes the WHOLE panel: the KPI tiles read the same week the charts end on, so Active window and Full timeline give different tiles for the same cohort." },
       { g: "Slots", name: "The 7 slot states", where: "Overview, Breakdowns matrix",
         how: "Each FLW × topic cell is exactly one of: completed, started-not-completed, available-not-started, available-missed-overdue, not-available-yet, not-triggered, not-applicable. A slot is missed/overdue one interview gap after it was sent.",
         base: "Claimed slots",
@@ -662,9 +662,9 @@ function WorkflowUI(props) {
       { symptom: "Two figures on the same screen disagree about the same thing.",
         cause: "Almost always different denominators, or one figure is current while the other is windowed.",
         fix: "Check the Indicators section for both - every one states its base. Chart tiles are current-state; a trimmed chart can legitimately end earlier, and the page says so where they differ." },
-      { symptom: "The dashboard did not refresh today.",
-        cause: "The daily job failed. Data problems abort at a gate; publishing problems abort at the upload.",
-        fix: "Read the run log. If the gates passed and the upload failed, the data was fine and a re-run usually fixes it - the upload is version-guarded and re-checks whether the write actually landed." },
+      { symptom: "The data has not changed for weeks.",
+        cause: "Expected: the nightly refresh is off since the programme finished, so the data is frozen. Hand-run rebuilds abort at a gate (data) or the upload (publishing).",
+        fix: "If a hand-run rebuild failed, read the run log. If the gates passed and the upload failed, the data was fine and a re-run usually fixes it - the upload is version-guarded and re-checks whether the write actually landed." },
       { symptom: "A brand-new cohort shows odd values - a negative average, or nothing on the line charts.",
         cause: "Too little data yet. Release status is not-available until the window opens, and an average over one interview is meaningless.",
         fix: "Nothing. These settle as interviews accrue over the following daily runs." },
@@ -675,7 +675,7 @@ function WorkflowUI(props) {
 
     // ---- honest limitations. Stated in the product so nobody discovers them by being wrong in a meeting.
     limits: [
-      ["The Connect funnel is the least live part.", "Interview data refreshes from HQ and OCS every day. The Connect leg depends on a credential that has broken before, and when it does the funnel silently falls back to the last good snapshot - invitation and claim numbers can be older than the interview numbers beside them."],
+      ["The Connect funnel is the least live part.", "Interview data is pulled from HQ and OCS on every rebuild. The Connect leg depends on a credential that has broken before, and when it does the funnel silently falls back to the last good snapshot - invitation and claim numbers can be older than the interview numbers beside them."],
       ["“Per-cohort finish - so far” understates finishing.", "It counts schedules the programme has not finished rolling out as unfinished, and does so slightly more often for multi-cohort workers. The offered-only figure beside it is the fair like-for-like rate. Read both."],
       ["The survival ladder is not a single funnel.", "Each row has its own eligible pool, so a later interview can show a higher share than an earlier one when short-schedule cohorts leave the pool. Compare each row to its own count."],
       ["The dotted-line rule is a heuristic.", "A subgroup's line is dotted while it is inside its expected rollout window, computed from the design. A late-firing interview can make a line look settled while it is still rolling out. Two subgroups whose real schedule cannot be derived have their end date pinned from the Cohort Tracker."],
@@ -1103,8 +1103,8 @@ function WorkflowUI(props) {
               <div>
                 <div className="text-xs text-gray-700 mb-1">
                   <b>Updates itself:</b> every number, the subgroup roster, the designs and the payload-key
-                  list are read from the live data each time this page loads, so a daily data refresh updates
-                  them with nobody touching anything.
+                  list are read from the live data each time this page loads, so a rebuild updates them with
+                  nobody touching anything.
                 </div>
                 <div className="text-xs text-gray-700 mb-2">
                   <b>Does not update itself:</b> the written explanations. If a chart is renamed, or a metric
@@ -3331,7 +3331,7 @@ function WorkflowUI(props) {
                 {gView === "matrix" && (
                   <div>
                     <div className="px-1 pb-1 text-xs text-gray-500">
-                      {matFiltered.length} FLW×cohort rows{anyFilter ? " matching" : ""} · one row per FLW × cohort in the matrix universe, one column per topic - hover a cell for its status.
+                      {matFiltered.length} FLW×cohort rows{anyFilter ? " matching" : ""} · one row per FLW × cohort in the matrix universe, one column per topic - hover a cell for its status. Columns: fixed topic order, not schedule order (see Documentation).
                     </div>
                     <div className="flex flex-wrap gap-x-3 gap-y-1 px-1 pb-2 text-xs text-gray-500">
                       {STATES5.map(function (s) {
@@ -3525,7 +3525,7 @@ function WorkflowUI(props) {
               <span className="text-xs font-medium text-gray-600">Denominator:</span>
               {subBtn(denomMode, "init", setDenomMode, "# Initiated")}
               {subBtn(denomMode, "prev", setDenomMode, "Reached prev interview")}
-              <span className="text-gray-400" style={{ fontSize: "10px" }} title={"# Initiated: % Started = started ÷ FLWs who initiated (constant base) - later interviews look low because many FLWs haven't reached them.\nReached prev interview: denominator = FLWs who STARTED the previous interview, so each point is 'of those who got here, how many started this one' - later interviews no longer collapse."}>ℹ</span>
+              <span className="text-gray-400" style={{ fontSize: "10px" }} title={"# Initiated: started ÷ FLWs who initiated (fixed base); later interviews look low as many FLWs haven't reached them. Quote this, with De-impacted on, as the headline.\nReached prev interview: started ÷ FLWs who STARTED the previous interview ('of those who got here, how many started this one'). Use it to see where people drop."}>ℹ</span>
               <span className="mx-1 text-gray-300">|</span>
               <span className="text-xs font-medium text-gray-600">X-axis:</span>
               {/* in prev-denominator mode the chart is forced onto the interview-# axis, so show that

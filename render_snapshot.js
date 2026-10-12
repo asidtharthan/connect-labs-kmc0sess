@@ -170,6 +170,11 @@ while ((mm = st.exec(render))) {
   const v = mm[1][0].toLowerCase() + mm[1].slice(1);
   (values[v] = values[v] || new Set()).add(mm[2]);
 }
+// ...and the Documentation sections, which are buttons built from a SEC list rather than literals
+const secList = /var SEC = (\[[\s\S]*?\]\]);/.exec(render);
+if (secList)
+  for (const m of secList[1].matchAll(/\["(\w+)",/g))
+    (values.docSec = values.docSec || new Set()).add(m[1]);
 const tabs = [];
 const tb = /activeTab === "(\w+)"/g;
 while ((mm = tb.exec(render))) if (!tabs.includes(mm[1])) tabs.push(mm[1]);
@@ -207,6 +212,11 @@ const Comp = new Function(
 const decoder = dom.window.document.createElement('textarea');
 function textLines(html) {
   const t = html
+    // hover help is part of what the page tells a reader, so keep every title="" as its own line
+    .replace(
+      /<[a-zA-Z][^>]*?\stitle="([^"]*)"[^>]*>/g,
+      (m, ti) => m + '\n[title] ' + ti + '\n',
+    )
     .replace(/<style[\s\S]*?<\/style>/g, '')
     .replace(/<script[\s\S]*?<\/script>/g, '')
     .replace(/<[^>]+>/g, '\n');
